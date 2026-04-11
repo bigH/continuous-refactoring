@@ -1,0 +1,339 @@
+from __future__ import annotations
+
+import json
+import random
+import subprocess
+import uuid
+from pathlib import Path
+
+from continuous_refactoring.targeting import (
+    Target,
+    load_targets_jsonl,
+    parse_extensions,
+    parse_globs,
+    resolve_targets,
+    select_random_files,
+    validate_target_line,
+)
+
+
+def _init_repo(path: Path) -> None:
+    path.mkdir(parents=True, exist_ok=True)
+    subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "config", "user.email", "test@example.com"],
+        cwd=path, check=True, capture_output=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Test User"],
+        cwd=path, check=True, capture_output=True,
+    )
+    (path / "README.md").write_text("seed\n", encoding="utf-8")
+    subprocess.run(["git", "add", "."], cwd=path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True,
+    )
+
+
+def _repo_with_files(path: Path) -> None:
+    """Create a git repo with known source files."""
+    _init_repo(path)
+    (path / "src").mkdir(parents=True, exist_ok=True)
+    (path / "src" / "foo.py").write_text("# foo\n")
+    (path / "src" / "bar.py").write_text("# bar\n")
+    (path / "tests").mkdir(parents=True, exist_ok=True)
+    (path / "tests" / "test_foo.py").write_text("# test\n")
+    subprocess.run(["git", "add", "."], cwd=path, check=True, capture_output=True)
+    subprocess.run(
+        ["git", "commit", "-m", "add files"],
+        cwd=path, check=True, capture_output=True,
+    )
+
+
+# ---------------------------------------------------------------------------
+# parse_extensions
+# ---------------------------------------------------------------------------
+
+def test_parse_extensions_basic() -> None:
+    assert parse_extensions(".py,.ts") == ("**/*.py", "**/*.ts")
+
+
+def test_parse_extensions_with_spaces() -> None:
+    assert parse_extensions(" .py , .ts ") == ("**/*.py", "**/*.ts")
+
+
+def test_parse_extensions_already_glob() -> None:
+    assert parse_extensions("**/*.py") == ("**/*.py",)
+
+
+# ---------------------------------------------------------------------------
+# parse_globs
+# ---------------------------------------------------------------------------
+
+def test_parse_globs_colon_separated() -> None:
+    assert parse_globs("src/**/*.py:tests/**/*.py") == (
+        "src/**/*.py",
+        "tests/**/*.py",
+    )
+
+
+# ---------------------------------------------------------------------------
+# load_targets_jsonl
+# ---------------------------------------------------------------------------
+
+def test_load_targets_jsonl_valid(tmp_path: Path) -> None:
+    jsonl = tmp_path / "targets.jsonl"
+    lines = [
+        json.dumps({"description": "Python files", "files": ["**/*.py"]}),
+        json.dumps({"description": "TS files", "files": ["**/*.ts"], "scoping": "only utils"}),
+    ]
+    jsonl.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    targets = load_targets_jsonl(jsonl)
+
+    assert len(targets) == 2
+    assert targets[0] == Target(
+        description="Python files",
+        files=("**/*.py",),
+        scoping=None,
+        model_override=None,
+        effort_override=None,
+    )
+    assert targets[1].scoping == "only utils"
+
+
+def test_load_targets_jsonl_skips_invalid(tmp_path: Path, capsys) -> None:
+    jsonl = tmp_path / "targets.jsonl"
+    lines = [
+        json.dumps({"description": "good", "files": ["*.py"]}),
+        "not valid json",
+        json.dumps({"description": "also good", "files": ["*.ts"]}),
+    ]
+    jsonl.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    targets = load_targets_jsonl(jsonl)
+
+    assert len(targets) == 2
+    captured = capsys.readouterr()
+    assert "invalid JSON" in captured.err
+
+
+def test_load_targets_jsonl_empty_description_skipped(tmp_path: Path, capsys) -> None:
+    jsonl = tmp_path / "targets.jsonl"
+    jsonl.write_text(
+        json.dumps({"description": "", "files": ["x"]}) + "\n",
+        encoding="utf-8",
+    )
+
+    targets = load_targets_jsonl(jsonl)
+
+    assert targets == []
+    captured = capsys.readouterr()
+    assert "empty description" in captured.err
+
+
+def test_load_targets_jsonl_empty_files_skipped(tmp_path: Path, capsys) -> None:
+    jsonl = tmp_path / "targets.jsonl"
+    jsonl.write_text(
+        json.dumps({"description": "x", "files": []}) + "\n",
+        encoding="utf-8",
+    )
+
+    targets = load_targets_jsonl(jsonl)
+
+    assert targets == []
+    captured = capsys.readouterr()
+    assert "empty files" in captured.err
+
+
+def test_load_targets_jsonl_extra_fields_ignored(tmp_path: Path) -> None:
+    jsonl = tmp_path / "targets.jsonl"
+    data = {"description": "test", "files": ["*.py"], "unknown_field": 42, "another": True}
+    jsonl.write_text(json.dumps(data) + "\n", encoding="utf-8")
+
+    targets = load_targets_jsonl(jsonl)
+
+    assert len(targets) == 1
+    assert targets[0].description == "test"
+
+
+def test_load_targets_jsonl_optional_fields(tmp_path: Path) -> None:
+    jsonl = tmp_path / "targets.jsonl"
+    data = {"description": "minimal", "files": ["*.py"]}
+    jsonl.write_text(json.dumps(data) + "\n", encoding="utf-8")
+
+    targets = load_targets_jsonl(jsonl)
+
+    assert len(targets) == 1
+    t = targets[0]
+    assert t.scoping is None
+    assert t.model_override is None
+    assert t.effort_override is None
+
+
+# ---------------------------------------------------------------------------
+# validate_target_line
+# ---------------------------------------------------------------------------
+
+def test_validate_target_line_all_fields() -> None:
+    data = {
+        "description": "full target",
+        "files": ["src/**/*.py", "lib/**/*.py"],
+        "scoping": "focus on error handling",
+        "model-override": "claude-opus-4-20250514",
+        "effort-override": "high",
+    }
+    target = validate_target_line(data)
+
+    assert target is not None
+    assert target.description == "full target"
+    assert target.files == ("src/**/*.py", "lib/**/*.py")
+    assert target.scoping == "focus on error handling"
+    assert target.model_override == "claude-opus-4-20250514"
+    assert target.effort_override == "high"
+
+
+# ---------------------------------------------------------------------------
+# select_random_files
+# ---------------------------------------------------------------------------
+
+def test_select_random_files_from_git(tmp_path: Path) -> None:
+    _repo_with_files(tmp_path)
+
+    selected = select_random_files(tmp_path)
+
+    all_tracked = {"README.md", "src/foo.py", "src/bar.py", "tests/test_foo.py"}
+    assert set(selected).issubset(all_tracked)
+    assert len(selected) > 0
+
+
+def test_select_random_files_respects_count(tmp_path: Path) -> None:
+    _repo_with_files(tmp_path)
+
+    selected = select_random_files(tmp_path, count=2)
+
+    assert len(selected) == 2
+
+
+# ---------------------------------------------------------------------------
+# resolve_targets
+# ---------------------------------------------------------------------------
+
+def test_resolve_targets_prefers_jsonl(tmp_path: Path) -> None:
+    _repo_with_files(tmp_path)
+    jsonl = tmp_path / "targets.jsonl"
+    jsonl.write_text(
+        json.dumps({"description": "jsonl wins", "files": ["*.jsonl"]}) + "\n",
+        encoding="utf-8",
+    )
+
+    targets = resolve_targets(
+        extensions=".py",
+        globs="src/**/*.py",
+        targets_path=jsonl,
+        paths=("src/foo.py",),
+        repo_root=tmp_path,
+    )
+
+    assert len(targets) == 1
+    assert targets[0].description == "jsonl wins"
+
+
+def test_resolve_targets_prefers_globs_over_extensions(tmp_path: Path) -> None:
+    _repo_with_files(tmp_path)
+
+    targets = resolve_targets(
+        extensions=".py",
+        globs="src/**/*.py",
+        targets_path=None,
+        paths=None,
+        repo_root=tmp_path,
+    )
+
+    assert len(targets) == 1
+    assert targets[0].description == "glob patterns"
+    assert targets[0].files == ("src/**/*.py",)
+
+
+def test_resolve_targets_falls_back_to_random(tmp_path: Path) -> None:
+    _repo_with_files(tmp_path)
+
+    targets = resolve_targets(
+        extensions=None,
+        globs=None,
+        targets_path=None,
+        paths=None,
+        repo_root=tmp_path,
+    )
+
+    assert len(targets) == 1
+    assert targets[0].description == "random files"
+    assert len(targets[0].files) > 0
+
+
+# ---------------------------------------------------------------------------
+# Property-based: JSONL roundtrip
+# ---------------------------------------------------------------------------
+
+def test_target_jsonl_roundtrip_property(tmp_path: Path) -> None:
+    rng = random.Random(42)
+    jsonl = tmp_path / "roundtrip.jsonl"
+
+    generated: list[Target] = []
+    lines: list[str] = []
+
+    for _ in range(rng.randint(5, 20)):
+        description = f"target-{uuid.uuid4()}"
+        file_count = rng.randint(1, 5)
+        files = tuple(f"src/{uuid.uuid4()}.py" for _ in range(file_count))
+        scoping = f"scope-{uuid.uuid4()}" if rng.choice([True, False]) else None
+        model_override = f"model-{uuid.uuid4()}" if rng.choice([True, False]) else None
+        effort_override = rng.choice(["low", "medium", "high", None])
+
+        target = Target(
+            description=description,
+            files=files,
+            scoping=scoping,
+            model_override=model_override,
+            effort_override=effort_override,
+        )
+        generated.append(target)
+
+        row: dict = {
+            "description": description,
+            "files": list(files),
+        }
+        if scoping is not None:
+            row["scoping"] = scoping
+        if model_override is not None:
+            row["model-override"] = model_override
+        if effort_override is not None:
+            row["effort-override"] = effort_override
+        lines.append(json.dumps(row))
+
+    jsonl.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    loaded = load_targets_jsonl(jsonl)
+
+    assert loaded == generated
+
+
+# ---------------------------------------------------------------------------
+# Hyphenated key mapping
+# ---------------------------------------------------------------------------
+
+def test_target_jsonl_hyphenated_keys(tmp_path: Path) -> None:
+    jsonl = tmp_path / "hyphen.jsonl"
+    data = {
+        "description": "hyphen test",
+        "files": ["*.py"],
+        "effort-override": "max",
+        "model-override": "claude-opus-4-20250514",
+    }
+    jsonl.write_text(json.dumps(data) + "\n", encoding="utf-8")
+
+    targets = load_targets_jsonl(jsonl)
+
+    assert len(targets) == 1
+    assert targets[0].effort_override == "max"
+    assert targets[0].model_override == "claude-opus-4-20250514"

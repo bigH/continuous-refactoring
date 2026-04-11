@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     import pytest
 
 import continuous_refactoring
+import continuous_refactoring.loop
 
 
 def _init_repo(path: Path) -> None:
@@ -147,7 +148,7 @@ def test_main_fails_at_startup_when_worktree_is_dirty(
 
     monkeypatch.setenv("TMPDIR", str(tmpdir_root))
     monkeypatch.setattr(
-        continuous_refactoring,
+        continuous_refactoring.loop,
         "parse_args",
         lambda: argparse.Namespace(
             agent="codex",
@@ -156,7 +157,7 @@ def test_main_fails_at_startup_when_worktree_is_dirty(
             refactoring_prompt=refactor_prompt,
             fix_prompt=fix_prompt,
             repo_root=repo_root,
-            test_command=f"{sys.executable} {test_script}",
+            validation_command=f"{sys.executable} {test_script}",
             max_attempts=1,
             commit_message_prefix="continuous refactor",
             push_remote="origin",
@@ -210,7 +211,7 @@ def test_main_keeps_running_after_no_change_refactor_attempt(
     monkeypatch.setenv("FAKE_CODEX_LAST_MESSAGE", "chosen_target: drop the foobizzy\n")
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setattr(
-        continuous_refactoring,
+        continuous_refactoring.loop,
         "parse_args",
         lambda: argparse.Namespace(
             agent="codex",
@@ -219,7 +220,7 @@ def test_main_keeps_running_after_no_change_refactor_attempt(
             refactoring_prompt=refactor_prompt,
             fix_prompt=fix_prompt,
             repo_root=repo_root,
-            test_command=f"{sys.executable} {test_script}",
+            validation_command=f"{sys.executable} {test_script}",
             max_attempts=2,
             commit_message_prefix="continuous refactor",
             push_remote="origin",
@@ -290,7 +291,7 @@ def test_main_runs_until_interrupted_by_user(
 
     monkeypatch.setenv("TMPDIR", str(tmpdir_root))
     monkeypatch.setattr(
-        continuous_refactoring,
+        continuous_refactoring.loop,
         "parse_args",
         lambda: argparse.Namespace(
             agent="codex",
@@ -299,7 +300,7 @@ def test_main_runs_until_interrupted_by_user(
             refactoring_prompt=refactor_prompt,
             fix_prompt=fix_prompt,
             repo_root=repo_root,
-            test_command=f"{sys.executable} {test_script}",
+            validation_command=f"{sys.executable} {test_script}",
             max_attempts=None,
             commit_message_prefix="continuous refactor",
             push_remote="origin",
@@ -325,7 +326,7 @@ def test_main_runs_until_interrupted_by_user(
         raise KeyboardInterrupt
 
     monkeypatch.setattr(
-        continuous_refactoring,
+        continuous_refactoring.loop,
         "run_refactoring_attempt",
         fake_run_refactoring_attempt,
     )
@@ -389,7 +390,7 @@ def test_main_records_committed_refactor_attempt(
     monkeypatch.setenv("FAKE_CODEX_TOUCH_CONTENT", "seed\nrefactor\n")
     monkeypatch.setenv("PATH", f"{bin_dir}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setattr(
-        continuous_refactoring,
+        continuous_refactoring.loop,
         "parse_args",
         lambda: argparse.Namespace(
             agent="codex",
@@ -398,7 +399,7 @@ def test_main_records_committed_refactor_attempt(
             refactoring_prompt=refactor_prompt,
             fix_prompt=fix_prompt,
             repo_root=repo_root,
-            test_command=f"{sys.executable} {test_script}",
+            validation_command=f"{sys.executable} {test_script}",
             max_attempts=1,
             commit_message_prefix="continuous refactor",
             push_remote="origin",

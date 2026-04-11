@@ -3,17 +3,13 @@ from __future__ import annotations
 
 import argparse
 import re
-import shlex
-import subprocess
 import sys
-import threading
 from itertools import count
 from pathlib import Path
-from shutil import which
-from typing import TYPE_CHECKING, TextIO
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable
 
 from continuous_refactoring.artifacts import (
     AttemptStats,
@@ -24,6 +20,17 @@ from continuous_refactoring.artifacts import (
     create_run_artifacts,
     default_artifacts_root,
     iso_timestamp,
+)
+from continuous_refactoring.agent import (
+    build_claude_command,
+    build_codex_command,
+    build_command,
+    maybe_run_agent,
+    run_observed_command,
+    run_tests,
+    stream_pipe,
+    summarize_output,
+    write_timestamped_line,
 )
 from continuous_refactoring.git import (
     current_branch,
@@ -154,181 +161,8 @@ def attempt_label(attempt: int, max_attempts: int | None) -> str:
     return f"{attempt}/{max_attempts}"
 
 
-def write_timestamped_line(handle: TextIO, line: str) -> None:
-    suffix = "" if line.endswith("\n") else "\n"
-    handle.write(f"[{iso_timestamp()}] {line}{suffix}")
-    handle.flush()
-
-
-def stream_pipe(
-    pipe: TextIO,
-    sink: TextIO,
-    mirror: TextIO | None,
-    chunks: list[str],
-) -> None:
-    for line in pipe:
-        chunks.append(line)
-        write_timestamped_line(sink, line)
-        if mirror is not None:
-            mirror.write(line)
-            mirror.flush()
-    pipe.close()
-
-
-def run_observed_command(
-    command: Sequence[str],
-    cwd: Path,
-    *,
-    stdout_path: Path,
-    stderr_path: Path,
-    mirror_to_terminal: bool,
-) -> CommandCapture:
-    stdout_path.parent.mkdir(parents=True, exist_ok=True)
-    stderr_path.parent.mkdir(parents=True, exist_ok=True)
-    process = subprocess.Popen(
-        command,
-        cwd=cwd,
-        text=True,
-        shell=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=1,
-    )
-    if process.stdout is None or process.stderr is None:
-        raise ContinuousRefactorError(
-            f"Failed to capture process output for command: {' '.join(command)}"
-        )
-
-    stdout_chunks: list[str] = []
-    stderr_chunks: list[str] = []
-    with (
-        stdout_path.open("w", encoding="utf-8") as stdout_handle,
-        stderr_path.open("w", encoding="utf-8") as stderr_handle,
-    ):
-        stdout_thread = threading.Thread(
-            target=stream_pipe,
-            args=(
-                process.stdout,
-                stdout_handle,
-                sys.stdout if mirror_to_terminal else None,
-                stdout_chunks,
-            ),
-        )
-        stderr_thread = threading.Thread(
-            target=stream_pipe,
-            args=(
-                process.stderr,
-                stderr_handle,
-                sys.stderr if mirror_to_terminal else None,
-                stderr_chunks,
-            ),
-        )
-        stdout_thread.start()
-        stderr_thread.start()
-        returncode = process.wait()
-        stdout_thread.join()
-        stderr_thread.join()
-        if not stdout_chunks:
-            write_timestamped_line(stdout_handle, "<no output>")
-        if not stderr_chunks:
-            write_timestamped_line(stderr_handle, "<no output>")
-
-    return CommandCapture(
-        command=tuple(command),
-        returncode=returncode,
-        stdout="".join(stdout_chunks),
-        stderr="".join(stderr_chunks),
-        stdout_path=stdout_path,
-        stderr_path=stderr_path,
-    )
-
-
-def run_tests(
-    test_command: str,
-    repo_root: Path,
-    stdout_path: Path,
-    stderr_path: Path,
-) -> CommandCapture:
-    return run_observed_command(
-        shlex.split(test_command),
-        cwd=repo_root,
-        stdout_path=stdout_path,
-        stderr_path=stderr_path,
-        mirror_to_terminal=False,
-    )
-
-
 def prompt_file_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
-
-
-def build_codex_command(
-    model: str,
-    effort: str,
-    prompt: str,
-    repo_root: Path,
-    *,
-    last_message_path: Path,
-) -> list[str]:
-    return [
-        "codex",
-        "exec",
-        "--model",
-        model,
-        "--config",
-        f"model_reasoning_effort={effort}",
-        "--dangerously-bypass-approvals-and-sandbox",
-        "--output-last-message",
-        str(last_message_path),
-        "--cd",
-        str(repo_root),
-        prompt,
-    ]
-
-
-def build_claude_command(
-    model: str,
-    effort: str,
-    prompt: str,
-    _repo_root: Path,
-) -> list[str]:
-    return [
-        "claude",
-        "--print",
-        "--model",
-        model,
-        "--effort",
-        effort,
-        "--permission-mode",
-        "bypassPermissions",
-        "--output-format",
-        "text",
-        prompt,
-    ]
-
-
-def build_command(
-    agent: str,
-    model: str,
-    effort: str,
-    prompt: str,
-    repo_root: Path,
-    *,
-    last_message_path: Path | None = None,
-) -> list[str]:
-    if agent == "codex":
-        if last_message_path is None:
-            raise ContinuousRefactorError(
-                "Codex runs require a last-message artifact path."
-            )
-        return build_codex_command(
-            model=model,
-            effort=effort,
-            prompt=prompt,
-            repo_root=repo_root,
-            last_message_path=last_message_path,
-        )
-    return build_claude_command(model, effort, prompt, repo_root)
 
 
 def compose_refactor_prompt(
@@ -377,45 +211,6 @@ def extract_chosen_target(text: str) -> str | None:
                 stripped = stripped[1:].strip()
             return normalize_target(stripped)
     return None
-
-
-def maybe_run_agent(
-    agent: str,
-    model: str,
-    effort: str,
-    prompt: str,
-    repo_root: Path,
-    *,
-    stdout_path: Path,
-    stderr_path: Path,
-    last_message_path: Path | None = None,
-) -> CommandCapture:
-    if which(agent) is None:
-        raise ContinuousRefactorError(f"Required command not found in PATH: {agent}")
-
-    command = build_command(
-        agent=agent,
-        model=model,
-        effort=effort,
-        prompt=prompt,
-        repo_root=repo_root,
-        last_message_path=last_message_path,
-    )
-    return run_observed_command(
-        command,
-        cwd=repo_root,
-        stdout_path=stdout_path,
-        stderr_path=stderr_path,
-        mirror_to_terminal=True,
-    )
-
-
-def summarize_output(result: CommandCapture | subprocess.CompletedProcess[str]) -> str:
-    stdout = result.stdout or ""
-    stderr = result.stderr or ""
-    lines = (stdout + stderr).splitlines()
-    tail = lines[-40:] if lines else []
-    return "\n".join(tail)
 
 
 def resolve_phase_target(

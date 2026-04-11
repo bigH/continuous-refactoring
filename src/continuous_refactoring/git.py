@@ -90,3 +90,64 @@ def git_commit(repo_root: Path, message: str) -> str:
 
 def git_push(repo_root: Path, remote: str, branch: str) -> None:
     run_command(["git", "push", remote, branch], cwd=repo_root)
+
+
+def create_branch(repo_root: Path, branch_name: str) -> None:
+    """Create and checkout a new branch from current HEAD."""
+    run_command(["git", "checkout", "-b", branch_name], cwd=repo_root)
+
+
+def checkout_main(repo_root: Path) -> None:
+    """Checkout main (or master) branch."""
+    main_branch = detect_main_branch(repo_root)
+    run_command(["git", "checkout", main_branch], cwd=repo_root)
+
+
+def detect_main_branch(repo_root: Path) -> str:
+    """Return 'main' or 'master' based on what exists."""
+    result = run_command(
+        ["git", "branch", "--list", "main"],
+        cwd=repo_root,
+        check=False,
+    )
+    if result.stdout.strip():
+        return "main"
+    result = run_command(
+        ["git", "branch", "--list", "master"],
+        cwd=repo_root,
+        check=False,
+    )
+    if result.stdout.strip():
+        return "master"
+    raise ContinuousRefactorError(
+        "Cannot detect main branch (neither 'main' nor 'master' found)"
+    )
+
+
+def undo_last_commit(repo_root: Path) -> None:
+    """git reset --soft HEAD~1, then discard_workspace_changes."""
+    run_command(["git", "reset", "--soft", "HEAD~1"], cwd=repo_root)
+    discard_workspace_changes(repo_root)
+
+
+def generate_run_branch_name() -> str:
+    """'refactor-{timestamp}'"""
+    from datetime import datetime
+
+    ts = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S")
+    return f"refactor-{ts}"
+
+
+def generate_run_once_branch_name() -> str:
+    """'cr/{timestamp}'"""
+    from datetime import datetime
+
+    ts = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S")
+    return f"cr/{ts}"
+
+
+def get_head_sha(repo_root: Path) -> str:
+    """Return current HEAD sha."""
+    return run_command(
+        ["git", "rev-parse", "HEAD"], cwd=repo_root
+    ).stdout.strip()

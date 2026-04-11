@@ -4,6 +4,7 @@ import shlex
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from shutil import which
 from typing import TYPE_CHECKING, TextIO
@@ -139,6 +140,18 @@ def stream_pipe(
     pipe.close()
 
 
+def _terminate_process(process: subprocess.Popen[str]) -> None:
+    """SIGTERM then SIGKILL if the process doesn't exit within 5 seconds."""
+    try:
+        process.terminate()
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            process.kill()
+    except OSError:
+        pass
+
+
 def run_observed_command(
     command: Sequence[str],
     cwd: Path,
@@ -146,6 +159,9 @@ def run_observed_command(
     stdout_path: Path,
     stderr_path: Path,
     mirror_to_terminal: bool,
+    timeout: int | None = None,
+    stuck_interval: int = 30,
+    stuck_timeout: int = 120,
 ) -> CommandCapture:
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
@@ -165,6 +181,27 @@ def run_observed_command(
 
     stdout_chunks: list[str] = []
     stderr_chunks: list[str] = []
+    stop_watchdog = threading.Event()
+    stuck_detected = threading.Event()
+
+    def watchdog() -> None:
+        last_count = 0
+        stale_since: float | None = None
+        while not stop_watchdog.wait(timeout=stuck_interval):
+            if process.poll() is not None:
+                return
+            current_count = len(stdout_chunks) + len(stderr_chunks)
+            if current_count != last_count:
+                last_count = current_count
+                stale_since = None
+            else:
+                if stale_since is None:
+                    stale_since = time.monotonic()
+                elif time.monotonic() - stale_since >= stuck_timeout:
+                    _terminate_process(process)
+                    stuck_detected.set()
+                    return
+
     with (
         stdout_path.open("w", encoding="utf-8") as stdout_handle,
         stderr_path.open("w", encoding="utf-8") as stderr_handle,
@@ -189,13 +226,37 @@ def run_observed_command(
         )
         stdout_thread.start()
         stderr_thread.start()
-        returncode = process.wait()
+
+        watchdog_thread = threading.Thread(target=watchdog, daemon=True)
+        watchdog_thread.start()
+
+        timed_out = False
+        try:
+            returncode = process.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            timed_out = True
+            _terminate_process(process)
+            returncode = process.wait()
+
         stdout_thread.join()
         stderr_thread.join()
+        stop_watchdog.set()
+        watchdog_thread.join(timeout=10)
+        was_stuck = stuck_detected.is_set()
+
         if not stdout_chunks:
             write_timestamped_line(stdout_handle, "<no output>")
         if not stderr_chunks:
             write_timestamped_line(stderr_handle, "<no output>")
+
+    if timed_out:
+        raise ContinuousRefactorError(
+            f"Command timed out after {timeout}s: {' '.join(command)}"
+        )
+    if was_stuck:
+        raise ContinuousRefactorError(
+            f"Command killed: no output for {stuck_timeout}s: {' '.join(command)}"
+        )
 
     return CommandCapture(
         command=tuple(command),

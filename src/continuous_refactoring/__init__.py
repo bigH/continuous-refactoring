@@ -32,10 +32,13 @@ from continuous_refactoring.git import (
 )
 from continuous_refactoring.prompts import (
     CHOSEN_SCOPE_PATTERN,
+    DEFAULT_FIX_AMENDMENT,
+    DEFAULT_REFACTORING_PROMPT,
     REQUIRED_PREAMBLE,
     SUMMARY_UNKNOWN,
     TARGET_HEADER_PATTERN,
     TARGET_LINE_PATTERN,
+    compose_full_prompt,
     compose_refactor_prompt,
     describe_target,
     extract_chosen_target,
@@ -51,6 +54,8 @@ from continuous_refactoring.loop import (
     normalize_max_attempts,
     run_baseline_checks,
     run_fix_attempt,
+    run_loop,
+    run_once,
     run_refactoring_attempt,
 )
 from continuous_refactoring.cli import cli_main, parse_args, parse_max_attempts

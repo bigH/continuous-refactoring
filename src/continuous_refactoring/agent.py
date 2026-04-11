@@ -98,6 +98,8 @@ def maybe_run_agent(
     stdout_path: Path,
     stderr_path: Path,
     last_message_path: Path | None = None,
+    mirror_to_terminal: bool = True,
+    timeout: int | None = None,
 ) -> CommandCapture:
     if which(agent) is None:
         raise ContinuousRefactorError(f"Required command not found in PATH: {agent}")
@@ -115,7 +117,8 @@ def maybe_run_agent(
         cwd=repo_root,
         stdout_path=stdout_path,
         stderr_path=stderr_path,
-        mirror_to_terminal=True,
+        mirror_to_terminal=mirror_to_terminal,
+        timeout=timeout,
     )
 
 
@@ -273,13 +276,15 @@ def run_tests(
     repo_root: Path,
     stdout_path: Path,
     stderr_path: Path,
+    *,
+    mirror_to_terminal: bool = False,
 ) -> CommandCapture:
     return run_observed_command(
         shlex.split(test_command),
         cwd=repo_root,
         stdout_path=stdout_path,
         stderr_path=stderr_path,
-        mirror_to_terminal=False,
+        mirror_to_terminal=mirror_to_terminal,
     )
 
 

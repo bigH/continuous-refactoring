@@ -7,6 +7,23 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from continuous_refactoring.targeting import Target
 
+__all__ = [
+    "CHOSEN_SCOPE_PATTERN",
+    "DEFAULT_FIX_AMENDMENT",
+    "DEFAULT_REFACTORING_PROMPT",
+    "REQUIRED_PREAMBLE",
+    "SUMMARY_UNKNOWN",
+    "TARGET_HEADER_PATTERN",
+    "TARGET_LINE_PATTERN",
+    "compose_full_prompt",
+    "compose_refactor_prompt",
+    "describe_target",
+    "extract_chosen_target",
+    "normalize_target",
+    "prompt_file_text",
+    "resolve_phase_target",
+]
+
 from continuous_refactoring.artifacts import CommandCapture
 
 

@@ -8,6 +8,18 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
+__all__ = [
+    "Target",
+    "load_targets_jsonl",
+    "parse_extensions",
+    "parse_globs",
+    "parse_paths",
+    "resolve_targets",
+    "select_random_files",
+    "validate_target_line",
+]
+
+
 @dataclass(frozen=True)
 class Target:
     description: str

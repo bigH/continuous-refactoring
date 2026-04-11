@@ -10,6 +10,19 @@ if TYPE_CHECKING:
     import argparse
     from collections.abc import Callable
 
+__all__ = [
+    "attempt_label",
+    "attempt_numbers",
+    "log_phase_completion",
+    "main",
+    "normalize_max_attempts",
+    "run_baseline_checks",
+    "run_fix_attempt",
+    "run_loop",
+    "run_once",
+    "run_refactoring_attempt",
+]
+
 from continuous_refactoring.artifacts import (
     CommandCapture,
     ContinuousRefactorError,

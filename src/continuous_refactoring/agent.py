@@ -12,6 +12,18 @@ from typing import TYPE_CHECKING, TextIO
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+__all__ = [
+    "build_claude_command",
+    "build_codex_command",
+    "build_command",
+    "maybe_run_agent",
+    "run_observed_command",
+    "run_tests",
+    "stream_pipe",
+    "summarize_output",
+    "write_timestamped_line",
+]
+
 from continuous_refactoring.artifacts import (
     CommandCapture,
     ContinuousRefactorError,

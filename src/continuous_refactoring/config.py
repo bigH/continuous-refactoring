@@ -9,6 +9,24 @@ from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
 
+__all__ = [
+    "ProjectEntry",
+    "ResolvedProject",
+    "app_data_dir",
+    "default_taste_text",
+    "ensure_taste_file",
+    "find_project",
+    "global_dir",
+    "load_manifest",
+    "load_taste",
+    "manifest_path",
+    "register_project",
+    "resolve_project",
+    "save_manifest",
+    "taste_file_path",
+    "xdg_data_home",
+]
+
 from continuous_refactoring.artifacts import ContinuousRefactorError
 
 _DEFAULT_TASTE = """\

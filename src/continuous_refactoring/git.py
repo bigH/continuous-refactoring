@@ -7,6 +7,25 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
+__all__ = [
+    "checkout_main",
+    "create_branch",
+    "current_branch",
+    "detect_main_branch",
+    "discard_workspace_changes",
+    "generate_run_branch_name",
+    "generate_run_once_branch_name",
+    "get_head_sha",
+    "git_commit",
+    "git_push",
+    "repo_change_count",
+    "repo_has_changes",
+    "require_clean_worktree",
+    "run_command",
+    "undo_last_commit",
+    "workspace_status_lines",
+]
+
 from continuous_refactoring.artifacts import ContinuousRefactorError
 
 

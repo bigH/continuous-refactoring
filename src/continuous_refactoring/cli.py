@@ -4,6 +4,13 @@ import argparse
 import sys
 from pathlib import Path
 
+__all__ = [
+    "build_parser",
+    "cli_main",
+    "parse_args",
+    "parse_max_attempts",
+]
+
 from continuous_refactoring.artifacts import ContinuousRefactorError
 
 

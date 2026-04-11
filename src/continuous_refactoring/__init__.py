@@ -25,6 +25,17 @@ from continuous_refactoring.artifacts import (
     default_artifacts_root,
     iso_timestamp,
 )
+from continuous_refactoring.git import (
+    current_branch,
+    discard_workspace_changes,
+    git_commit,
+    git_push,
+    repo_change_count,
+    repo_has_changes,
+    require_clean_worktree,
+    run_command,
+    workspace_status_lines,
+)
 
 
 CHOSEN_SCOPE_PATTERN = r"(?:chosen_target|chosen_scope)"
@@ -141,30 +152,6 @@ def attempt_label(attempt: int, max_attempts: int | None) -> str:
     if max_attempts is None:
         return str(attempt)
     return f"{attempt}/{max_attempts}"
-
-
-def run_command(
-    command: Sequence[str],
-    cwd: Path,
-    *,
-    check: bool = True,
-    capture_output: bool = True,
-) -> subprocess.CompletedProcess[str]:
-    proc = subprocess.run(
-        command,
-        cwd=cwd,
-        text=True,
-        shell=False,
-        check=False,
-        capture_output=capture_output,
-    )
-    if check and proc.returncode != 0:
-        raise ContinuousRefactorError(
-            f"command failed ({' '.join(command)})\n"
-            f"stdout:\n{proc.stdout}\n"
-            f"stderr:\n{proc.stderr}"
-        )
-    return proc
 
 
 def write_timestamped_line(handle: TextIO, line: str) -> None:
@@ -342,64 +329,6 @@ def build_command(
             last_message_path=last_message_path,
         )
     return build_claude_command(model, effort, prompt, repo_root)
-
-
-def workspace_status_lines(repo_root: Path) -> list[str]:
-    result = run_command(["git", "status", "--porcelain"], cwd=repo_root, check=False)
-    return [line for line in result.stdout.splitlines() if line.strip()]
-
-
-def require_clean_worktree(repo_root: Path) -> None:
-    status_lines = workspace_status_lines(repo_root)
-    if not status_lines:
-        return
-    status = "\n".join(status_lines)
-    raise ContinuousRefactorError(
-        "Aborting: working copy has local changes before continuous refactoring "
-        "starts.\n"
-        "Commit, stash, or discard these changes first:\n"
-        f"{status}"
-    )
-
-
-def discard_workspace_changes(repo_root: Path) -> None:
-    run_command(["git", "reset", "--hard", "HEAD"], cwd=repo_root)
-    run_command(["git", "clean", "-fd"], cwd=repo_root)
-
-
-def repo_change_count(repo_root: Path) -> int:
-    return len(workspace_status_lines(repo_root))
-
-
-def repo_has_changes(repo_root: Path) -> bool:
-    return repo_change_count(repo_root) > 0
-
-
-def current_branch(repo_root: Path) -> str:
-    result = run_command(
-        ["git", "branch", "--show-current"],
-        cwd=repo_root,
-        check=False,
-    )
-    branch = result.stdout.strip()
-    if not branch:
-        raise ContinuousRefactorError(
-            "Cannot determine current git branch; are you on a detached HEAD?"
-        )
-    return branch
-
-
-def git_commit(repo_root: Path, message: str) -> str:
-    run_command(["git", "add", "-A"], cwd=repo_root)
-    if not repo_has_changes(repo_root):
-        raise ContinuousRefactorError("No changes to commit.")
-    run_command(["git", "commit", "-m", message], cwd=repo_root)
-    rev = run_command(["git", "rev-parse", "HEAD"], cwd=repo_root).stdout.strip()
-    return rev
-
-
-def git_push(repo_root: Path, remote: str, branch: str) -> None:
-    run_command(["git", "push", remote, branch], cwd=repo_root)
 
 
 def compose_refactor_prompt(

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
+    import argparse
     from collections.abc import Callable
 
 from continuous_refactoring.artifacts import (
@@ -266,8 +267,9 @@ def log_phase_completion(
     )
 
 
-def main() -> int:
-    args = parse_args()
+def main(args: argparse.Namespace | None = None) -> int:
+    if args is None:
+        args = parse_args()
     repo_root = args.repo_root.resolve()
     max_attempts = normalize_max_attempts(args.max_attempts)
     refactoring_prompt = prompt_file_text(args.refactoring_prompt)

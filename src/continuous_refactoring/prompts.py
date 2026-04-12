@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import json
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -9,22 +7,13 @@ if TYPE_CHECKING:
     from continuous_refactoring.targeting import Target
 
 __all__ = [
-    "DEFAULT_FIX_AMENDMENT",
     "DEFAULT_REFACTORING_PROMPT",
     "INTERVIEW_PROMPT_TEMPLATE",
     "REQUIRED_PREAMBLE",
     "compose_full_prompt",
     "compose_interview_prompt",
-    "extract_chosen_target",
-    "extract_stream_json_text",
     "prompt_file_text",
-    "resolve_phase_target",
 ]
-
-from continuous_refactoring.artifacts import CommandCapture
-
-
-CHOSEN_SCOPE_PATTERN = r"(?:chosen_target|chosen_scope)"
 REQUIRED_PREAMBLE = (
     "All changes must keep the project in a state where all tests pass. "
     "Do not finish unless the repository is green after your refactor."
@@ -122,12 +111,6 @@ Output:
 - `next_candidate`\
 """
 
-DEFAULT_FIX_AMENDMENT = """\
-After this pass, run the repository-wide checks for this repo (default `uv run pytest`).
-If any check fails, stop and only retry from a clean git state.
-Do not commit anything until all checks are green.\
-"""
-
 INTERVIEW_PROMPT_TEMPLATE = """\
 You are helping the user author their refactoring taste file for continuous-refactoring.
 
@@ -167,95 +150,9 @@ def compose_interview_prompt(taste_path: Path, existing_taste: str | None) -> st
         existing_block=existing_block,
     )
 
-TARGET_LINE_PATTERN = re.compile(
-    rf"^\s*(?:[-*]\s*)?(?:`|\*\*)?{CHOSEN_SCOPE_PATTERN}"
-    rf"(?:`|\*\*)?\s*:\s*(.+?)\s*$",
-    re.IGNORECASE,
-)
-TARGET_HEADER_PATTERN = re.compile(
-    rf"^\s*(?:#+\s*)?(?:`|\*\*)?{CHOSEN_SCOPE_PATTERN}(?:`|\*\*)?\s*:?\s*$",
-    re.IGNORECASE,
-)
+
 def prompt_file_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
-
-
-def normalize_target(text: str) -> str:
-    return " ".join(text.strip().strip("`*").split())
-
-
-def extract_chosen_target(text: str) -> str | None:
-    lines = text.splitlines()
-    for line in lines:
-        match = TARGET_LINE_PATTERN.match(line)
-        if match:
-            return normalize_target(match.group(1))
-
-    for index, line in enumerate(lines):
-        if not TARGET_HEADER_PATTERN.match(line):
-            continue
-        for candidate in lines[index + 1 :]:
-            stripped = candidate.strip()
-            if not stripped:
-                continue
-            if stripped.startswith(("-", "*")):
-                stripped = stripped[1:].strip()
-            return normalize_target(stripped)
-    return None
-
-
-def extract_stream_json_text(stdout: str) -> str | None:
-    """Final assistant text from ``claude --print --output-format stream-json``.
-
-    Prefers the terminal ``result`` event; falls back to concatenated assistant
-    text blocks if the run ended before a result event was emitted.
-    """
-    result_text: str | None = None
-    assistant_parts: list[str] = []
-    for line in stdout.splitlines():
-        stripped = line.strip()
-        if not stripped.startswith("{"):
-            continue
-        try:
-            event = json.loads(stripped)
-        except json.JSONDecodeError:
-            continue
-        if not isinstance(event, dict):
-            continue
-        event_type = event.get("type")
-        if event_type == "result" and isinstance(event.get("result"), str):
-            result_text = event["result"]
-        elif event_type == "assistant":
-            message = event.get("message") or {}
-            for block in message.get("content") or []:
-                if not isinstance(block, dict) or block.get("type") != "text":
-                    continue
-                text = block.get("text")
-                if isinstance(text, str):
-                    assistant_parts.append(text)
-    if result_text is not None:
-        return result_text
-    if assistant_parts:
-        return "\n".join(assistant_parts)
-    return None
-
-
-def resolve_phase_target(
-    agent_result: CommandCapture,
-    last_message_path: Path | None,
-) -> str | None:
-    if last_message_path is not None and last_message_path.exists():
-        target = extract_chosen_target(last_message_path.read_text(encoding="utf-8"))
-        if target:
-            return target
-    stream_text = extract_stream_json_text(agent_result.stdout)
-    if stream_text:
-        target = extract_chosen_target(stream_text)
-        if target:
-            return target
-    return extract_chosen_target(agent_result.stdout) or extract_chosen_target(
-        agent_result.stderr
-    )
 
 
 def compose_full_prompt(

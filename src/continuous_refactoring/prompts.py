@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -21,6 +22,7 @@ __all__ = [
     "compose_refactor_prompt",
     "describe_target",
     "extract_chosen_target",
+    "extract_stream_json_text",
     "normalize_target",
     "prompt_file_text",
     "resolve_phase_target",
@@ -236,12 +238,53 @@ def extract_chosen_target(text: str) -> str | None:
     return None
 
 
+def extract_stream_json_text(stdout: str) -> str | None:
+    """Final assistant text from ``claude --print --output-format stream-json``.
+
+    Prefers the terminal ``result`` event; falls back to concatenated assistant
+    text blocks if the run ended before a result event was emitted.
+    """
+    result_text: str | None = None
+    assistant_parts: list[str] = []
+    for line in stdout.splitlines():
+        stripped = line.strip()
+        if not stripped.startswith("{"):
+            continue
+        try:
+            event = json.loads(stripped)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        event_type = event.get("type")
+        if event_type == "result" and isinstance(event.get("result"), str):
+            result_text = event["result"]
+        elif event_type == "assistant":
+            message = event.get("message") or {}
+            for block in message.get("content") or []:
+                if not isinstance(block, dict) or block.get("type") != "text":
+                    continue
+                text = block.get("text")
+                if isinstance(text, str):
+                    assistant_parts.append(text)
+    if result_text is not None:
+        return result_text
+    if assistant_parts:
+        return "\n".join(assistant_parts)
+    return None
+
+
 def resolve_phase_target(
     agent_result: CommandCapture,
     last_message_path: Path | None,
 ) -> str | None:
     if last_message_path is not None and last_message_path.exists():
         target = extract_chosen_target(last_message_path.read_text(encoding="utf-8"))
+        if target:
+            return target
+    stream_text = extract_stream_json_text(agent_result.stdout)
+    if stream_text:
+        target = extract_chosen_target(stream_text)
         if target:
             return target
     return extract_chosen_target(agent_result.stdout) or extract_chosen_target(

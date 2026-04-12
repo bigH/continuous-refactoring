@@ -74,8 +74,9 @@ def build_claude_command(
         effort,
         "--permission-mode",
         "bypassPermissions",
+        "--verbose",
         "--output-format",
-        "text",
+        "stream-json",
         prompt,
     ]
 

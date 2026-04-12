@@ -20,7 +20,6 @@ from continuous_refactoring.config import (
     register_project,
     resolve_project,
     save_manifest,
-    taste_file_path,
     xdg_data_home,
     ProjectEntry,
 )

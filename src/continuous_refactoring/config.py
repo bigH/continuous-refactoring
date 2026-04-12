@@ -23,7 +23,6 @@ __all__ = [
     "register_project",
     "resolve_project",
     "save_manifest",
-    "taste_file_path",
     "xdg_data_home",
 ]
 
@@ -111,7 +110,7 @@ def save_manifest(manifest: dict[str, ProjectEntry]) -> None:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(content)
         os.replace(tmp, str(path))
-    except BaseException:
+    except Exception:
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
@@ -189,14 +188,6 @@ def resolve_project(path: Path) -> ResolvedProject:
 
 def default_taste_text() -> str:
     return _DEFAULT_TASTE
-
-
-def taste_file_path(
-    project: ResolvedProject | None, *, global_: bool = False
-) -> Path:
-    if global_ or project is None:
-        return global_dir() / "taste.md"
-    return project.project_dir / "taste.md"
 
 
 def ensure_taste_file(path: Path) -> Path:

@@ -29,18 +29,12 @@ __all__ = [
     "run_command",
     "workspace_status_lines",
     # prompts
-    "CHOSEN_SCOPE_PATTERN",
     "DEFAULT_FIX_AMENDMENT",
     "DEFAULT_REFACTORING_PROMPT",
     "REQUIRED_PREAMBLE",
-    "SUMMARY_UNKNOWN",
-    "TARGET_HEADER_PATTERN",
-    "TARGET_LINE_PATTERN",
     "compose_full_prompt",
-    "describe_target",
     "extract_chosen_target",
     "extract_stream_json_text",
-    "normalize_target",
     "prompt_file_text",
     "resolve_phase_target",
     # loop
@@ -88,18 +82,12 @@ from continuous_refactoring.git import (
     workspace_status_lines,
 )
 from continuous_refactoring.prompts import (
-    CHOSEN_SCOPE_PATTERN,
     DEFAULT_FIX_AMENDMENT,
     DEFAULT_REFACTORING_PROMPT,
     REQUIRED_PREAMBLE,
-    SUMMARY_UNKNOWN,
-    TARGET_HEADER_PATTERN,
-    TARGET_LINE_PATTERN,
     compose_full_prompt,
-    describe_target,
     extract_chosen_target,
     extract_stream_json_text,
-    normalize_target,
     prompt_file_text,
     resolve_phase_target,
 )

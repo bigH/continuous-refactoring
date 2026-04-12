@@ -9,20 +9,14 @@ if TYPE_CHECKING:
     from continuous_refactoring.targeting import Target
 
 __all__ = [
-    "CHOSEN_SCOPE_PATTERN",
     "DEFAULT_FIX_AMENDMENT",
     "DEFAULT_REFACTORING_PROMPT",
     "INTERVIEW_PROMPT_TEMPLATE",
     "REQUIRED_PREAMBLE",
-    "SUMMARY_UNKNOWN",
-    "TARGET_HEADER_PATTERN",
-    "TARGET_LINE_PATTERN",
     "compose_full_prompt",
     "compose_interview_prompt",
-    "describe_target",
     "extract_chosen_target",
     "extract_stream_json_text",
-    "normalize_target",
     "prompt_file_text",
     "resolve_phase_target",
 ]
@@ -182,9 +176,6 @@ TARGET_HEADER_PATTERN = re.compile(
     rf"^\s*(?:#+\s*)?(?:`|\*\*)?{CHOSEN_SCOPE_PATTERN}(?:`|\*\*)?\s*:?\s*$",
     re.IGNORECASE,
 )
-SUMMARY_UNKNOWN = "scope unavailable"
-
-
 def prompt_file_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
 
@@ -265,10 +256,6 @@ def resolve_phase_target(
     return extract_chosen_target(agent_result.stdout) or extract_chosen_target(
         agent_result.stderr
     )
-
-
-def describe_target(target: str | None) -> str:
-    return target or SUMMARY_UNKNOWN
 
 
 def compose_full_prompt(

@@ -13,7 +13,6 @@ __all__ = [
     "load_targets_jsonl",
     "parse_extensions",
     "parse_globs",
-    "parse_paths",
     "resolve_targets",
     "select_random_files",
     "validate_target_line",
@@ -51,11 +50,6 @@ def parse_extensions(raw: str) -> tuple[str, ...]:
 def parse_globs(raw: str) -> tuple[str, ...]:
     """Split colon-separated glob patterns."""
     return tuple(g for g in (p.strip() for p in raw.split(":")) if g)
-
-
-def parse_paths(raw: str) -> tuple[str, ...]:
-    """Split colon-separated file paths."""
-    return tuple(p for p in (s.strip() for s in raw.split(":")) if p)
 
 
 def validate_target_line(data: dict) -> Target | None:

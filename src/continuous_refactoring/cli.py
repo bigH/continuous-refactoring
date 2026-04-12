@@ -11,6 +11,7 @@ __all__ = [
     "parse_max_attempts",
 ]
 
+from continuous_refactoring.agent import run_agent_interactive
 from continuous_refactoring.artifacts import ContinuousRefactorError
 
 
@@ -150,6 +151,33 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use global taste file instead of project-level.",
     )
+    taste_parser.add_argument(
+        "--interview",
+        action="store_true",
+        help="Interview the user with an agent and write answers to the taste file.",
+    )
+    taste_parser.add_argument(
+        "--with",
+        dest="agent",
+        choices=("codex", "claude"),
+        default=None,
+        help="Agent backend for --interview.",
+    )
+    taste_parser.add_argument(
+        "--model",
+        default=None,
+        help="Model name for --interview.",
+    )
+    taste_parser.add_argument(
+        "--effort",
+        default=None,
+        help="Effort level for --interview.",
+    )
+    taste_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Allow overwriting a taste file with custom content (backup at .bak).",
+    )
 
     run_once_parser = subparsers.add_parser(
         "run-once",
@@ -230,20 +258,17 @@ def _handle_init(args: argparse.Namespace) -> None:
     print(f"Taste file: {taste_path}")
 
 
-def _handle_taste(args: argparse.Namespace) -> None:
+def _resolve_taste_path(global_: bool) -> Path:
     from continuous_refactoring.config import (
         ContinuousRefactorError as ConfigError,
-        ensure_taste_file,
         global_dir,
         resolve_project,
     )
 
-    if args.global_:
+    if global_:
         path = global_dir() / "taste.md"
         path.parent.mkdir(parents=True, exist_ok=True)
-        ensure_taste_file(path)
-        print(str(path))
-        return
+        return path
 
     try:
         project = resolve_project(Path.cwd().resolve())
@@ -253,9 +278,89 @@ def _handle_taste(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
+    return project.project_dir / "taste.md"
 
-    path = project.project_dir / "taste.md"
+
+def _handle_taste(args: argparse.Namespace) -> None:
+    interview = getattr(args, "interview", False)
+    agent_flags_set = any(
+        getattr(args, name, None) is not None for name in ("agent", "model", "effort")
+    )
+
+    if not interview and agent_flags_set:
+        print(
+            "Error: --with/--model/--effort require --interview.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+    if interview:
+        missing = [
+            flag
+            for flag, value in (
+                ("--with", getattr(args, "agent", None)),
+                ("--model", getattr(args, "model", None)),
+                ("--effort", getattr(args, "effort", None)),
+            )
+            if not value
+        ]
+        if missing:
+            print(
+                "Error: --interview requires " + ", ".join(missing) + ".",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        return _handle_taste_interview(args)
+
+    from continuous_refactoring.config import ensure_taste_file
+
+    path = _resolve_taste_path(args.global_)
     ensure_taste_file(path)
+    print(str(path))
+
+
+def _handle_taste_interview(args: argparse.Namespace) -> None:
+    from continuous_refactoring.config import default_taste_text
+    from continuous_refactoring.prompts import compose_interview_prompt
+
+    path = _resolve_taste_path(args.global_)
+    default_text = default_taste_text()
+    existing: str | None = None
+    file_exists = path.exists()
+    if file_exists:
+        current = path.read_text(encoding="utf-8")
+        if current != default_text:
+            if not args.force:
+                print(
+                    "Error: taste file already has custom content; "
+                    "pass --force to overwrite (backup at taste.md.bak).",
+                    file=sys.stderr,
+                )
+                raise SystemExit(1)
+            backup = path.with_name(path.name + ".bak")
+            backup.write_text(current, encoding="utf-8")
+            existing = current
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    prompt = compose_interview_prompt(path, existing)
+    repo_root = Path.cwd().resolve()
+    returncode = run_agent_interactive(
+        args.agent, args.model, args.effort, prompt, repo_root,
+    )
+    if returncode != 0:
+        print(
+            f"Error: interview agent exited with code {returncode}.",
+            file=sys.stderr,
+        )
+        raise SystemExit(returncode)
+
+    if not path.exists() or path.stat().st_size == 0:
+        print(
+            f"Error: interview agent did not write to {path}.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
     print(str(path))
 
 

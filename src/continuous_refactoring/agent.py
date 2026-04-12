@@ -14,9 +14,13 @@ if TYPE_CHECKING:
 
 __all__ = [
     "build_claude_command",
+    "build_claude_interactive_command",
     "build_codex_command",
+    "build_codex_interactive_command",
     "build_command",
+    "build_interactive_command",
     "maybe_run_agent",
+    "run_agent_interactive",
     "run_observed_command",
     "run_tests",
     "stream_pipe",
@@ -98,6 +102,69 @@ def build_command(
             last_message_path=last_message_path,
         )
     return build_claude_command(model, effort, prompt, repo_root)
+
+
+def build_codex_interactive_command(
+    model: str,
+    effort: str,
+    prompt: str,
+    repo_root: Path,
+) -> list[str]:
+    return [
+        "codex",
+        "--model",
+        model,
+        "--config",
+        f"model_reasoning_effort={effort}",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--cd",
+        str(repo_root),
+        prompt,
+    ]
+
+
+def build_claude_interactive_command(
+    model: str,
+    effort: str,
+    prompt: str,
+    _repo_root: Path,
+) -> list[str]:
+    return [
+        "claude",
+        "--model",
+        model,
+        "--effort",
+        effort,
+        "--permission-mode",
+        "bypassPermissions",
+        prompt,
+    ]
+
+
+def build_interactive_command(
+    agent: str,
+    model: str,
+    effort: str,
+    prompt: str,
+    repo_root: Path,
+) -> list[str]:
+    if agent == "codex":
+        return build_codex_interactive_command(model, effort, prompt, repo_root)
+    return build_claude_interactive_command(model, effort, prompt, repo_root)
+
+
+def run_agent_interactive(
+    agent: str,
+    model: str,
+    effort: str,
+    prompt: str,
+    repo_root: Path,
+) -> int:
+    """Exec the agent attached to the user's terminal. Returns exit code."""
+    if which(agent) is None:
+        raise ContinuousRefactorError(f"Required command not found in PATH: {agent}")
+    command = build_interactive_command(agent, model, effort, prompt, repo_root)
+    return subprocess.call(command, cwd=repo_root)
 
 
 def maybe_run_agent(

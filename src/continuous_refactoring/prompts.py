@@ -11,11 +11,13 @@ __all__ = [
     "CHOSEN_SCOPE_PATTERN",
     "DEFAULT_FIX_AMENDMENT",
     "DEFAULT_REFACTORING_PROMPT",
+    "INTERVIEW_PROMPT_TEMPLATE",
     "REQUIRED_PREAMBLE",
     "SUMMARY_UNKNOWN",
     "TARGET_HEADER_PATTERN",
     "TARGET_LINE_PATTERN",
     "compose_full_prompt",
+    "compose_interview_prompt",
     "compose_refactor_prompt",
     "describe_target",
     "extract_chosen_target",
@@ -130,6 +132,45 @@ After this pass, run the repository-wide checks for this repo (default `uv run p
 If any check fails, stop and only retry from a clean git state.
 Do not commit anything until all checks are green.\
 """
+
+INTERVIEW_PROMPT_TEMPLATE = """\
+You are helping the user author their refactoring taste file for continuous-refactoring.
+
+Taste file target: {taste_path}
+{existing_block}
+Your job: interview the user with 6-8 focused questions. Probe concrete preferences on:
+- error handling (translate, bubble, swallow)
+- comments (when, when not)
+- abstraction (wrappers, helpers, single-call abstractions)
+- deletion vs preservation (compat code, fallbacks, legacy shims)
+- naming (truthful names, rollout-shaped names)
+- module boundaries (when to split, when to merge)
+- tests (mocks, property vs example)
+- anything else the user brings up
+
+Rules:
+- One question at a time. Wait for the answer before the next.
+- Probe vague answers with follow-ups.
+- Synthesize into 5-10 concise bullet points in the style: "- Do/Prefer X. Avoid Y when Z."
+- Show the draft. Ask for corrections. Iterate until the user approves.
+- Write the final bullet list to {taste_path}. Overwrite any existing content.
+- Do not add a header -- the file is consumed verbatim.
+- Exit cleanly after writing.\
+"""
+
+
+def compose_interview_prompt(taste_path: Path, existing_taste: str | None) -> str:
+    if existing_taste:
+        existing_block = (
+            "Existing taste content (treat as a starting draft, not a constraint):\n\n"
+            f"{existing_taste}\n"
+        )
+    else:
+        existing_block = ""
+    return INTERVIEW_PROMPT_TEMPLATE.format(
+        taste_path=str(taste_path),
+        existing_block=existing_block,
+    )
 
 TARGET_LINE_PATTERN = re.compile(
     rf"^\s*(?:[-*]\s*)?(?:`|\*\*)?{CHOSEN_SCOPE_PATTERN}"

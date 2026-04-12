@@ -130,6 +130,7 @@ def test_build_claude_command_streams_json_so_watchdog_sees_progress() -> None:
 
     assert command[:2] == ["claude", "--print"]
     assert "--verbose" in command
+    assert "--include-partial-messages" in command
     fmt_index = command.index("--output-format")
     assert command[fmt_index + 1] == "stream-json"
 

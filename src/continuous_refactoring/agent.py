@@ -77,6 +77,7 @@ def build_claude_command(
         "--verbose",
         "--output-format",
         "stream-json",
+        "--include-partial-messages",
         prompt,
     ]
 
@@ -244,7 +245,7 @@ def run_observed_command(
     mirror_to_terminal: bool,
     timeout: int | None = None,
     stuck_interval: int = 30,
-    stuck_timeout: int = 120,
+    stuck_timeout: int = 300,
 ) -> CommandCapture:
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     stderr_path.parent.mkdir(parents=True, exist_ok=True)

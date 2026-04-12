@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import random
 import sys
-from itertools import count
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -10,9 +9,6 @@ if TYPE_CHECKING:
     import argparse
 
 __all__ = [
-    "attempt_label",
-    "attempt_numbers",
-    "normalize_max_attempts",
     "run_baseline_checks",
     "run_loop",
     "run_once",
@@ -20,7 +16,6 @@ __all__ = [
 
 from continuous_refactoring.artifacts import (
     ContinuousRefactorError,
-    RunArtifacts,
     create_run_artifacts,
 )
 from continuous_refactoring.agent import (
@@ -45,30 +40,11 @@ from continuous_refactoring.git import (
     undo_last_commit,
 )
 from continuous_refactoring.prompts import (
-    DEFAULT_FIX_AMENDMENT,
     DEFAULT_REFACTORING_PROMPT,
     compose_full_prompt,
     prompt_file_text,
 )
 from continuous_refactoring.targeting import Target, resolve_targets
-
-
-def normalize_max_attempts(max_attempts: int | None) -> int | None:
-    if max_attempts in (None, 0):
-        return None
-    return max_attempts
-
-
-def attempt_numbers(max_attempts: int | None) -> range | count[int]:
-    if max_attempts is None:
-        return count(1)
-    return range(1, max_attempts + 1)
-
-
-def attempt_label(attempt: int, max_attempts: int | None) -> str:
-    if max_attempts is None:
-        return str(attempt)
-    return f"{attempt}/{max_attempts}"
 
 
 def run_baseline_checks(
@@ -260,11 +236,6 @@ def run_loop(args: argparse.Namespace) -> int:
         targets = [_build_target_fallback(args.scope_instruction)]
 
     base_prompt = _resolve_base_prompt(args)
-    fix_prompt_text = (
-        prompt_file_text(args.fix_prompt)
-        if args.fix_prompt
-        else DEFAULT_FIX_AMENDMENT
-    )
 
     artifacts = create_run_artifacts(
         repo_root,

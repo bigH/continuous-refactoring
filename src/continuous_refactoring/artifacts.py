@@ -12,7 +12,6 @@ __all__ = [
     "AttemptStats",
     "CommandCapture",
     "ContinuousRefactorError",
-    "PhaseAttemptResult",
     "RunArtifacts",
     "create_run_artifacts",
     "default_artifacts_root",
@@ -32,15 +31,6 @@ class CommandCapture:
     stderr: str
     stdout_path: Path
     stderr_path: Path
-
-
-@dataclass(frozen=True)
-class PhaseAttemptResult:
-    passed: bool
-    failure_context: str
-    target: str | None
-    agent_returncode: int
-    test_returncode: int | None
 
 
 @dataclass
@@ -127,33 +117,6 @@ class RunArtifacts:
         self.ensure_attempt(attempt)
         self.write_summary()
 
-    def record_phase(
-        self,
-        *,
-        attempt: int,
-        phase: str,
-        outcome: str,
-        target: str | None,
-        agent_returncode: int,
-        test_returncode: int | None,
-        change_count: int | None,
-    ) -> None:
-        stats = self.ensure_attempt(attempt)
-        if phase == "refactor":
-            stats.refactor_target = target
-            stats.refactor_outcome = outcome
-            stats.refactor_agent_returncode = agent_returncode
-            stats.refactor_test_returncode = test_returncode
-            stats.refactor_change_count = change_count
-        else:
-            stats.fix_target = target
-            stats.fix_outcome = outcome
-            stats.fix_agent_returncode = agent_returncode
-            stats.fix_test_returncode = test_returncode
-            stats.fix_change_count = change_count
-        self.counts[f"{phase}_{outcome}"] += 1
-        self.write_summary()
-
     def record_commit(self, attempt: int, phase: str, commit_sha: str) -> None:
         stats = self.ensure_attempt(attempt)
         stats.commit_sha = commit_sha
@@ -165,10 +128,6 @@ class RunArtifacts:
         stats = self.ensure_attempt(attempt)
         stats.pushed = True
         self.counts["pushes_completed"] += 1
-        self.write_summary()
-
-    def record_baseline_failure(self) -> None:
-        self.counts["baseline_failures"] += 1
         self.write_summary()
 
     def finish(self, status: str, error_message: str | None = None) -> None:

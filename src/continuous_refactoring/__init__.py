@@ -3,7 +3,6 @@ __all__ = [
     "AttemptStats",
     "CommandCapture",
     "ContinuousRefactorError",
-    "PhaseAttemptResult",
     "RunArtifacts",
     "create_run_artifacts",
     "default_artifacts_root",
@@ -38,9 +37,6 @@ __all__ = [
     "prompt_file_text",
     "resolve_phase_target",
     # loop
-    "attempt_label",
-    "attempt_numbers",
-    "normalize_max_attempts",
     "run_baseline_checks",
     "run_loop",
     "run_once",
@@ -53,7 +49,6 @@ from continuous_refactoring.artifacts import (
     AttemptStats,
     CommandCapture,
     ContinuousRefactorError,
-    PhaseAttemptResult,
     RunArtifacts,
     create_run_artifacts,
     default_artifacts_root,
@@ -92,9 +87,6 @@ from continuous_refactoring.prompts import (
     resolve_phase_target,
 )
 from continuous_refactoring.loop import (
-    attempt_label,
-    attempt_numbers,
-    normalize_max_attempts,
     run_baseline_checks,
     run_loop,
     run_once,

@@ -19,7 +19,6 @@ __all__ = [
     "TARGET_LINE_PATTERN",
     "compose_full_prompt",
     "compose_interview_prompt",
-    "compose_refactor_prompt",
     "describe_target",
     "extract_chosen_target",
     "extract_stream_json_text",
@@ -188,30 +187,6 @@ SUMMARY_UNKNOWN = "scope unavailable"
 
 def prompt_file_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
-
-
-def compose_refactor_prompt(
-    base_prompt: str,
-    attempt: int,
-    previous_failure: str | None = None,
-) -> str:
-    sections = [
-        f"Attempt {attempt}",
-        base_prompt,
-        REQUIRED_PREAMBLE,
-    ]
-    if previous_failure:
-        sections.append("Previous attempt failed tests with this output:\n")
-        sections.append(previous_failure)
-        sections.append(
-            "Use this as context only if it helps; do not copy test output into code."
-        )
-        sections.append(
-            "Only fix failures introduced by this refactoring pass. "
-            "If a failure is not a direct consequence of your edits, "
-            "do not rewrite unrelated code."
-        )
-    return "\n\n".join(sections)
 
 
 def normalize_target(text: str) -> str:

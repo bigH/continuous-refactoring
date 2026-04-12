@@ -37,7 +37,6 @@ __all__ = [
     "TARGET_HEADER_PATTERN",
     "TARGET_LINE_PATTERN",
     "compose_full_prompt",
-    "compose_refactor_prompt",
     "describe_target",
     "extract_chosen_target",
     "extract_stream_json_text",
@@ -47,17 +46,12 @@ __all__ = [
     # loop
     "attempt_label",
     "attempt_numbers",
-    "log_phase_completion",
-    "main",
     "normalize_max_attempts",
     "run_baseline_checks",
-    "run_fix_attempt",
     "run_loop",
     "run_once",
-    "run_refactoring_attempt",
     # cli
     "cli_main",
-    "parse_args",
     "parse_max_attempts",
 ]
 
@@ -102,7 +96,6 @@ from continuous_refactoring.prompts import (
     TARGET_HEADER_PATTERN,
     TARGET_LINE_PATTERN,
     compose_full_prompt,
-    compose_refactor_prompt,
     describe_target,
     extract_chosen_target,
     extract_stream_json_text,
@@ -113,13 +106,9 @@ from continuous_refactoring.prompts import (
 from continuous_refactoring.loop import (
     attempt_label,
     attempt_numbers,
-    log_phase_completion,
-    main,
     normalize_max_attempts,
     run_baseline_checks,
-    run_fix_attempt,
     run_loop,
     run_once,
-    run_refactoring_attempt,
 )
-from continuous_refactoring.cli import cli_main, parse_args, parse_max_attempts
+from continuous_refactoring.cli import cli_main, parse_max_attempts

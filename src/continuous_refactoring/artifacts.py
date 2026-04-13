@@ -63,7 +63,6 @@ class RunArtifacts:
     events_path: Path
     summary_path: Path
     log_path: Path
-    metadata_path: Path
     started_at: str
     finished_at: str | None = None
     final_status: str = "running"
@@ -139,22 +138,6 @@ class RunArtifacts:
         self.error_message = error_message
         self.write_summary()
 
-    def write_metadata(self) -> None:
-        metadata = {
-            "run_id": self.run_id,
-            "artifact_root": str(self.root),
-            "repo_root": str(self.repo_root),
-            "agent": self.agent,
-            "model": self.model,
-            "effort": self.effort,
-            "test_command": self.test_command,
-            "started_at": self.started_at,
-        }
-        self.metadata_path.write_text(
-            json.dumps(metadata, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-
     def write_summary(self) -> None:
         summary = {
             "run_id": self.run_id,
@@ -211,9 +194,7 @@ def create_run_artifacts(
         events_path=root / "events.jsonl",
         summary_path=root / "summary.json",
         log_path=root / "run.log",
-        metadata_path=root / "metadata.json",
         started_at=started_at,
     )
-    artifacts.write_metadata()
     artifacts.write_summary()
     return artifacts

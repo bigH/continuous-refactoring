@@ -16,19 +16,7 @@ import continuous_refactoring.loop
 from continuous_refactoring.artifacts import CommandCapture, ContinuousRefactorError
 from continuous_refactoring.targeting import Target
 
-
-def _init_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    continuous_refactoring.run_command(["git", "init", "-b", "main"], cwd=path)
-    continuous_refactoring.run_command(
-        ["git", "config", "user.email", "test@example.com"], cwd=path,
-    )
-    continuous_refactoring.run_command(
-        ["git", "config", "user.name", "Test User"], cwd=path,
-    )
-    (path / "README.md").write_text("seed\n", encoding="utf-8")
-    continuous_refactoring.run_command(["git", "add", "README.md"], cwd=path)
-    continuous_refactoring.run_command(["git", "commit", "-m", "init"], cwd=path)
+from conftest import failing_tests, init_repo, noop_agent, noop_tests
 
 
 def _make_run_args(
@@ -83,25 +71,6 @@ def _make_run_args(
     )
 
 
-def _noop_agent(**kwargs: object) -> CommandCapture:
-    stdout_path = kwargs.get("stdout_path")
-    stderr_path = kwargs.get("stderr_path")
-    if stdout_path:
-        Path(stdout_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(stdout_path).write_text("noop\n", encoding="utf-8")
-    if stderr_path:
-        Path(stderr_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(stderr_path).write_text("", encoding="utf-8")
-    return CommandCapture(
-        command=("fake",),
-        returncode=0,
-        stdout="noop\n",
-        stderr="",
-        stdout_path=Path(stdout_path) if stdout_path else Path("/dev/null"),
-        stderr_path=Path(stderr_path) if stderr_path else Path("/dev/null"),
-    )
-
-
 def _failing_agent(**kwargs: object) -> CommandCapture:
     stdout_path = kwargs.get("stdout_path")
     stderr_path = kwargs.get("stderr_path")
@@ -121,54 +90,12 @@ def _failing_agent(**kwargs: object) -> CommandCapture:
     )
 
 
-def _noop_tests(
-    test_command: str,
-    repo_root: Path,
-    stdout_path: Path,
-    stderr_path: Path,
-    **kwargs: object,
-) -> CommandCapture:
-    stdout_path.parent.mkdir(parents=True, exist_ok=True)
-    stderr_path.parent.mkdir(parents=True, exist_ok=True)
-    stdout_path.write_text("ok\n", encoding="utf-8")
-    stderr_path.write_text("", encoding="utf-8")
-    return CommandCapture(
-        command=("pytest",),
-        returncode=0,
-        stdout="ok\n",
-        stderr="",
-        stdout_path=stdout_path,
-        stderr_path=stderr_path,
-    )
-
-
-def _failing_tests(
-    test_command: str,
-    repo_root: Path,
-    stdout_path: Path,
-    stderr_path: Path,
-    **kwargs: object,
-) -> CommandCapture:
-    stdout_path.parent.mkdir(parents=True, exist_ok=True)
-    stderr_path.parent.mkdir(parents=True, exist_ok=True)
-    stdout_path.write_text("FAILED\n", encoding="utf-8")
-    stderr_path.write_text("", encoding="utf-8")
-    return CommandCapture(
-        command=("pytest",),
-        returncode=1,
-        stdout="FAILED\n",
-        stderr="",
-        stdout_path=stdout_path,
-        stderr_path=stderr_path,
-    )
-
-
 def test_run_creates_branch(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -176,8 +103,8 @@ def test_run_creates_branch(
 
     monkeypatch.setenv("TMPDIR", str(tmpdir_root))
     monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", _noop_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     args = _make_run_args(repo_root, max_refactors=1)
     exit_code = continuous_refactoring.run_loop(args)
@@ -192,7 +119,7 @@ def test_run_pushes_after_commit(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -206,13 +133,13 @@ def test_run_pushes_after_commit(
     def touching_agent(**kwargs: object) -> CommandCapture:
         rr = Path(str(kwargs.get("repo_root", "")))
         (rr / "touched.txt").write_text("touched\n", encoding="utf-8")
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     def tracking_push(repo_root: Path, remote: str, branch: str) -> None:
         push_calls.append((remote, branch))
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
     monkeypatch.setattr("continuous_refactoring.loop.git_push", tracking_push)
 
     args = _make_run_args(repo_root, max_refactors=1, no_push=False)
@@ -228,7 +155,7 @@ def test_run_no_push_flag(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -242,13 +169,13 @@ def test_run_no_push_flag(
     def touching_agent(**kwargs: object) -> CommandCapture:
         rr = Path(str(kwargs.get("repo_root", "")))
         (rr / "touched.txt").write_text("touched\n", encoding="utf-8")
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     def tracking_push(repo_root: Path, remote: str, branch: str) -> None:
         push_calls.append((remote, branch))
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
     monkeypatch.setattr("continuous_refactoring.loop.git_push", tracking_push)
 
     args = _make_run_args(repo_root, max_refactors=1, no_push=True)
@@ -267,7 +194,7 @@ def test_run_stops_after_max_consecutive_failures(
     import pytest
 
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -276,7 +203,7 @@ def test_run_stops_after_max_consecutive_failures(
     monkeypatch.setenv("TMPDIR", str(tmpdir_root))
     monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", _failing_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     # Write a JSONL with 5 targets so we have enough attempts
     targets_file = tmp_path / "targets.jsonl"
@@ -307,7 +234,7 @@ def test_run_resets_consecutive_counter_on_success(
     import pytest
 
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -327,10 +254,10 @@ def test_run_resets_consecutive_counter_on_success(
         # Success: touch a file so there's a change
         rr = Path(str(kwargs.get("repo_root", "")))
         (rr / f"change{call_count}.txt").write_text("x\n", encoding="utf-8")
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", alternating_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     targets_file = tmp_path / "targets.jsonl"
     lines = []
@@ -359,7 +286,7 @@ def test_run_target_overrides(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -372,10 +299,10 @@ def test_run_target_overrides(
 
     def model_capturing_agent(**kwargs: object) -> CommandCapture:
         captured_models.append(str(kwargs.get("model", "")))
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", model_capturing_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     targets_file = tmp_path / "targets.jsonl"
     targets_file.write_text(
@@ -406,7 +333,7 @@ def test_run_undo_commit_on_validation_failure(
     # Relies on default max_attempts=None -> 1 attempt per target so the single
     # validation failure bubbles up as a consecutive failure immediately.
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -422,7 +349,7 @@ def test_run_undo_commit_on_validation_failure(
         continuous_refactoring.run_command(
             ["git", "commit", "-m", "agent commit"], cwd=rr,
         )
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     # Baseline passes, but validation after agent fails
     test_call_count = 0
@@ -438,8 +365,8 @@ def test_run_undo_commit_on_validation_failure(
         test_call_count += 1
         # First call is the baseline check - pass it
         if test_call_count == 1:
-            return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
-        return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
+            return noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        return failing_tests(test_command, repo_root, stdout_path, stderr_path)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", committing_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", baseline_passes_then_fails)
@@ -457,7 +384,7 @@ def test_run_undo_commit_on_validation_failure(
 
 def _repo_with_py_files(repo_root: Path) -> list[str]:
     """Seed a git repo with three tracked ``.py`` files; return the paths."""
-    _init_repo(repo_root)
+    init_repo(repo_root)
     (repo_root / "src").mkdir(parents=True, exist_ok=True)
     (repo_root / "tests").mkdir(parents=True, exist_ok=True)
     (repo_root / "src" / "foo.py").write_text("# foo\n", encoding="utf-8")
@@ -488,10 +415,10 @@ def test_run_extensions_targeting(
 
     def capture_agent(**kwargs: object) -> CommandCapture:
         captured_prompts.append(str(kwargs.get("prompt", "")))
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     args = _make_run_args(repo_root, extensions=".py", max_refactors=1)
     continuous_refactoring.run_loop(args)
@@ -521,10 +448,10 @@ def test_run_extensions_expands_to_multiple_targets(
 
     def capture_agent(**kwargs: object) -> CommandCapture:
         captured_prompts.append(str(kwargs.get("prompt", "")))
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     args = _make_run_args(repo_root, extensions=".py", max_refactors=99)
     continuous_refactoring.run_loop(args)
@@ -552,10 +479,10 @@ def test_run_globs_targeting(
 
     def capture_agent(**kwargs: object) -> CommandCapture:
         captured_prompts.append(str(kwargs.get("prompt", "")))
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     args = _make_run_args(repo_root, globs="src/**/*.py", max_refactors=1)
     continuous_refactoring.run_loop(args)
@@ -572,7 +499,7 @@ def test_run_max_refactors_samples_from_extensions(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     (repo_root / "src").mkdir(parents=True, exist_ok=True)
     for name in ("a.py", "b.py", "c.py", "d.py", "e.py"):
         (repo_root / "src" / name).write_text(f"# {name}\n", encoding="utf-8")
@@ -594,10 +521,10 @@ def test_run_max_refactors_samples_from_extensions(
     def counting_agent(**kwargs: object) -> CommandCapture:
         nonlocal agent_calls
         agent_calls += 1
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", counting_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     args = _make_run_args(repo_root, extensions=".py", max_refactors=3)
     continuous_refactoring.run_loop(args)
@@ -612,7 +539,7 @@ def test_cli_does_not_cap_max_refactors(
     import pytest
 
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
 
     args = argparse.Namespace(
         agent="codex",
@@ -661,7 +588,7 @@ def test_run_random_fallback_targeting(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     # Add a Python file so there's something to find
     (repo_root / "hello.py").write_text("print('hi')\n", encoding="utf-8")
     continuous_refactoring.run_command(["git", "add", "hello.py"], cwd=repo_root)
@@ -681,10 +608,10 @@ def test_run_random_fallback_targeting(
 
     def capture_agent(**kwargs: object) -> CommandCapture:
         captured_prompts.append(str(kwargs.get("prompt", "")))
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     args = _make_run_args(repo_root, max_refactors=1, scope_instruction=None)
     # With no targeting args and no scope_instruction, resolve_targets falls back to
@@ -702,7 +629,7 @@ def test_run_ctrl_c_discards_and_summarizes(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -715,7 +642,7 @@ def test_run_ctrl_c_discards_and_summarizes(
         raise KeyboardInterrupt
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", interrupting_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     args = _make_run_args(repo_root, max_refactors=1)
     exit_code = continuous_refactoring.run_loop(args)
@@ -732,7 +659,7 @@ def test_cli_errors_when_no_targets_and_no_scope_instruction(
     import pytest
 
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -771,7 +698,7 @@ def test_run_samples_targets_when_max_refactors_lt_total(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -785,10 +712,10 @@ def test_run_samples_targets_when_max_refactors_lt_total(
     def counting_agent(**kwargs: object) -> CommandCapture:
         nonlocal agent_calls
         agent_calls += 1
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", counting_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     targets_file = tmp_path / "targets.jsonl"
     lines = []
@@ -821,7 +748,7 @@ def test_run_retries_on_validation_failure_and_succeeds(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -838,7 +765,7 @@ def test_run_retries_on_validation_failure_and_succeeds(
         agent_calls += 1
         rr = Path(str(kwargs.get("repo_root", "")))
         (rr / f"touched-{agent_calls}.txt").write_text("x\n", encoding="utf-8")
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     def tests_fail_then_pass(
         test_command: str,
@@ -849,11 +776,11 @@ def test_run_retries_on_validation_failure_and_succeeds(
     ) -> CommandCapture:
         nonlocal validation_calls
         if not _count_validation_calls(stdout_path):
-            return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+            return noop_tests(test_command, repo_root, stdout_path, stderr_path)
         validation_calls += 1
         if validation_calls == 1:
-            return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
-        return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+            return failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return noop_tests(test_command, repo_root, stdout_path, stderr_path)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", tests_fail_then_pass)
@@ -878,7 +805,7 @@ def test_run_exhausts_max_attempts_on_persistent_validation_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -894,7 +821,7 @@ def test_run_exhausts_max_attempts_on_persistent_validation_failure(
         agent_calls += 1
         rr = Path(str(kwargs.get("repo_root", "")))
         (rr / f"t-{agent_calls}.txt").write_text("x\n", encoding="utf-8")
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     def baseline_pass_validation_fail(
         test_command: str,
@@ -904,8 +831,8 @@ def test_run_exhausts_max_attempts_on_persistent_validation_failure(
         **kwargs: object,
     ) -> CommandCapture:
         if not _count_validation_calls(stdout_path):
-            return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
-        return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
+            return noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        return failing_tests(test_command, repo_root, stdout_path, stderr_path)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
     monkeypatch.setattr(
@@ -935,7 +862,7 @@ def test_run_exhausts_max_attempts_on_persistent_agent_failure(
     import pytest
 
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -962,7 +889,7 @@ def test_run_exhausts_max_attempts_on_persistent_agent_failure(
         nonlocal validation_calls
         if _count_validation_calls(stdout_path):
             validation_calls += 1
-        return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        return noop_tests(test_command, repo_root, stdout_path, stderr_path)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", failing_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", counting_tests)
@@ -989,7 +916,7 @@ def test_run_retry_prompt_includes_previous_failure(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -1004,7 +931,7 @@ def test_run_retry_prompt_includes_previous_failure(
         captured_prompts.append(str(kwargs.get("prompt", "")))
         rr = Path(str(kwargs.get("repo_root", "")))
         (rr / f"touched-{len(captured_prompts)}.txt").write_text("x\n", encoding="utf-8")
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     def failing_tests_with_marker(
         test_command: str,
@@ -1037,13 +964,13 @@ def test_run_retry_prompt_includes_previous_failure(
     ) -> CommandCapture:
         nonlocal validation_call
         if not _count_validation_calls(stdout_path):
-            return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+            return noop_tests(test_command, repo_root, stdout_path, stderr_path)
         validation_call += 1
         if validation_call == 1:
             return failing_tests_with_marker(
                 test_command, repo_root, stdout_path, stderr_path,
             )
-        return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        return noop_tests(test_command, repo_root, stdout_path, stderr_path)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", tests_fail_then_pass)
@@ -1062,7 +989,7 @@ def test_run_retry_prompt_includes_fix_amendment(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -1077,7 +1004,7 @@ def test_run_retry_prompt_includes_fix_amendment(
         captured_prompts.append(str(kwargs.get("prompt", "")))
         rr = Path(str(kwargs.get("repo_root", "")))
         (rr / f"touched-{len(captured_prompts)}.txt").write_text("x\n", encoding="utf-8")
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     def tests_fail_then_pass(
         test_command: str,
@@ -1087,12 +1014,12 @@ def test_run_retry_prompt_includes_fix_amendment(
         **kwargs: object,
     ) -> CommandCapture:
         if not _count_validation_calls(stdout_path):
-            return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+            return noop_tests(test_command, repo_root, stdout_path, stderr_path)
         # fail on the first per-attempt validation, pass after
         if not hasattr(tests_fail_then_pass, "called"):
             tests_fail_then_pass.called = True  # type: ignore[attr-defined]
-            return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
-        return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+            return failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return noop_tests(test_command, repo_root, stdout_path, stderr_path)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", tests_fail_then_pass)
@@ -1111,7 +1038,7 @@ def test_run_max_attempts_zero_is_unlimited_until_success(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -1130,7 +1057,7 @@ def test_run_max_attempts_zero_is_unlimited_until_success(
             raise RuntimeError("runaway retry loop")
         rr = Path(str(kwargs.get("repo_root", "")))
         (rr / f"t-{agent_calls}.txt").write_text("x\n", encoding="utf-8")
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     validation_calls = 0
 
@@ -1143,11 +1070,11 @@ def test_run_max_attempts_zero_is_unlimited_until_success(
     ) -> CommandCapture:
         nonlocal validation_calls
         if not _count_validation_calls(stdout_path):
-            return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+            return noop_tests(test_command, repo_root, stdout_path, stderr_path)
         validation_calls += 1
         if validation_calls <= 5:
-            return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
-        return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+            return failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return noop_tests(test_command, repo_root, stdout_path, stderr_path)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", fail_five_then_pass)
@@ -1171,7 +1098,7 @@ def test_run_custom_fix_prompt_file(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -1189,7 +1116,7 @@ def test_run_custom_fix_prompt_file(
         captured_prompts.append(str(kwargs.get("prompt", "")))
         rr = Path(str(kwargs.get("repo_root", "")))
         (rr / f"touched-{len(captured_prompts)}.txt").write_text("x\n", encoding="utf-8")
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     def tests_fail_then_pass(
         test_command: str,
@@ -1199,11 +1126,11 @@ def test_run_custom_fix_prompt_file(
         **kwargs: object,
     ) -> CommandCapture:
         if not _count_validation_calls(stdout_path):
-            return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+            return noop_tests(test_command, repo_root, stdout_path, stderr_path)
         if not hasattr(tests_fail_then_pass, "called"):
             tests_fail_then_pass.called = True  # type: ignore[attr-defined]
-            return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
-        return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+            return failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return noop_tests(test_command, repo_root, stdout_path, stderr_path)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", tests_fail_then_pass)
@@ -1228,7 +1155,7 @@ def test_run_undo_commit_between_retries(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -1251,7 +1178,7 @@ def test_run_undo_commit_between_retries(
             )
         else:
             (rr / "good_change.txt").write_text("good\n", encoding="utf-8")
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     validation_calls = 0
 
@@ -1264,11 +1191,11 @@ def test_run_undo_commit_between_retries(
     ) -> CommandCapture:
         nonlocal validation_calls
         if not _count_validation_calls(stdout_path):
-            return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+            return noop_tests(test_command, repo_root, stdout_path, stderr_path)
         validation_calls += 1
         if validation_calls == 1:
-            return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
-        return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+            return failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return noop_tests(test_command, repo_root, stdout_path, stderr_path)
 
     monkeypatch.setattr(
         "continuous_refactoring.loop.maybe_run_agent", committing_then_clean_agent,
@@ -1295,7 +1222,7 @@ def test_run_agent_failure_undoes_commit_before_retry(
 ) -> None:
     """Agent that commits then exits non-zero must not leak the commit into retry 2."""
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -1333,12 +1260,12 @@ def test_run_agent_failure_undoes_commit_before_retry(
                 ).stdout.strip()
             )
             (rr / "good_change.txt").write_text("good\n", encoding="utf-8")
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     monkeypatch.setattr(
         "continuous_refactoring.loop.maybe_run_agent", commit_then_fail_then_clean,
     )
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     args = _make_run_args(repo_root, max_refactors=1, max_attempts=3)
     exit_code = continuous_refactoring.run_loop(args)
@@ -1362,7 +1289,7 @@ def test_run_use_branch_creates_when_absent(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -1370,8 +1297,8 @@ def test_run_use_branch_creates_when_absent(
 
     monkeypatch.setenv("TMPDIR", str(tmpdir_root))
     monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", _noop_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     args = _make_run_args(repo_root, max_refactors=1, use_branch="long-lived-refactor")
     exit_code = continuous_refactoring.run_loop(args)
@@ -1385,7 +1312,7 @@ def test_run_use_branch_reuses_existing(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -1408,10 +1335,10 @@ def test_run_use_branch_reuses_existing(
     def touching_agent(**kwargs: object) -> CommandCapture:
         rr = Path(str(kwargs.get("repo_root", "")))
         (rr / "agent_change.txt").write_text("x\n", encoding="utf-8")
-        return _noop_agent(**kwargs)
+        return noop_agent(**kwargs)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     args = _make_run_args(
         repo_root, max_refactors=1, use_branch="long-lived-refactor",

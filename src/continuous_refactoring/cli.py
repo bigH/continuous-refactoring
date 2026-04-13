@@ -128,7 +128,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--max-attempts",
         type=parse_max_attempts,
         default=None,
-        help="Retry attempts per target (0=unlimited).",
+        help="Total attempts per target (1=no retry, 0=unlimited).",
     )
     run_parser.add_argument(
         "--max-refactors",

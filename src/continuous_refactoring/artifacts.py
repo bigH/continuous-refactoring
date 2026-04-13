@@ -86,8 +86,11 @@ class RunArtifacts:
         }
     )
 
-    def attempt_dir(self, attempt: int) -> Path:
-        path = self.root / f"attempt-{attempt:03d}"
+    def attempt_dir(self, attempt: int, retry: int = 1) -> Path:
+        if retry < 1:
+            raise ValueError(f"retry must be >= 1, got {retry}")
+        base = self.root / f"attempt-{attempt:03d}"
+        path = base if retry == 1 else base / f"retry-{retry:02d}"
         path.mkdir(parents=True, exist_ok=True)
         return path
 

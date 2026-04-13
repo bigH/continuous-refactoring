@@ -28,6 +28,7 @@ __all__ = [
     "run_command",
     "workspace_status_lines",
     # prompts
+    "DEFAULT_FIX_AMENDMENT",
     "DEFAULT_REFACTORING_PROMPT",
     "REQUIRED_PREAMBLE",
     "compose_full_prompt",
@@ -73,6 +74,7 @@ from continuous_refactoring.git import (
     workspace_status_lines,
 )
 from continuous_refactoring.prompts import (
+    DEFAULT_FIX_AMENDMENT,
     DEFAULT_REFACTORING_PROMPT,
     REQUIRED_PREAMBLE,
     compose_full_prompt,

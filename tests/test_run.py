@@ -260,6 +260,8 @@ def test_run_stops_after_max_consecutive_failures(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Relies on default max_attempts=None -> 1 attempt per target; one agent failure
+    # per target increments consecutive_failures exactly once.
     import pytest
 
     repo_root = tmp_path / "repo"
@@ -298,6 +300,8 @@ def test_run_resets_consecutive_counter_on_success(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Relies on default max_attempts=None -> 1 attempt per target; counter semantics
+    # would shift if retries were wired here.
     import pytest
 
     repo_root = tmp_path / "repo"
@@ -397,6 +401,8 @@ def test_run_undo_commit_on_validation_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    # Relies on default max_attempts=None -> 1 attempt per target so the single
+    # validation failure bubbles up as a consecutive failure immediately.
     repo_root = tmp_path / "repo"
     _init_repo(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
@@ -800,3 +806,549 @@ def test_run_samples_targets_when_max_refactors_lt_total(
 
     assert exit_code == 0
     assert agent_calls == 3
+
+
+def _count_validation_calls(stdout_path: object) -> bool:
+    """True when the stdout_path points at a per-attempt validation log."""
+    return "attempt-" in str(stdout_path)
+
+
+def test_run_retries_on_validation_failure_and_succeeds(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    agent_calls = 0
+    validation_calls = 0
+
+    def touching_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / f"touched-{agent_calls}.txt").write_text("x\n", encoding="utf-8")
+        return _noop_agent(**kwargs)
+
+    def tests_fail_then_pass(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        nonlocal validation_calls
+        if not _count_validation_calls(stdout_path):
+            return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        validation_calls += 1
+        if validation_calls == 1:
+            return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", tests_fail_then_pass)
+
+    args = _make_run_args(repo_root, max_refactors=1, max_attempts=3)
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert agent_calls == 2
+    assert validation_calls == 2
+    log = continuous_refactoring.run_command(
+        ["git", "log", "--oneline"], cwd=repo_root,
+    )
+    refactor_commits = [
+        line for line in log.stdout.splitlines() if "continuous refactor" in line
+    ]
+    assert len(refactor_commits) == 1
+
+
+def test_run_exhausts_max_attempts_on_persistent_validation_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    agent_calls = 0
+
+    def touching_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / f"t-{agent_calls}.txt").write_text("x\n", encoding="utf-8")
+        return _noop_agent(**kwargs)
+
+    def baseline_pass_validation_fail(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        if not _count_validation_calls(stdout_path):
+            return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop.run_tests", baseline_pass_validation_fail,
+    )
+
+    args = _make_run_args(
+        repo_root,
+        max_refactors=1,
+        max_attempts=3,
+        max_consecutive_failures=5,
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert agent_calls == 3
+    log = continuous_refactoring.run_command(
+        ["git", "log", "--oneline"], cwd=repo_root,
+    )
+    assert "continuous refactor" not in log.stdout
+
+
+def test_run_exhausts_max_attempts_on_persistent_agent_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pytest
+
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    agent_calls = 0
+    validation_calls = 0
+
+    def failing_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        return _failing_agent(**kwargs)
+
+    def counting_tests(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        nonlocal validation_calls
+        if _count_validation_calls(stdout_path):
+            validation_calls += 1
+        return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", failing_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", counting_tests)
+
+    args = _make_run_args(
+        repo_root,
+        max_refactors=1,
+        max_attempts=3,
+        max_consecutive_failures=1,
+    )
+    with pytest.raises(ContinuousRefactorError, match="1 consecutive failures"):
+        continuous_refactoring.run_loop(args)
+
+    assert agent_calls == 3
+    assert validation_calls == 0
+    log = continuous_refactoring.run_command(
+        ["git", "log", "--oneline"], cwd=repo_root,
+    )
+    assert "continuous refactor" not in log.stdout
+
+
+def test_run_retry_prompt_includes_previous_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    captured_prompts: list[str] = []
+
+    def capture_agent(**kwargs: object) -> CommandCapture:
+        captured_prompts.append(str(kwargs.get("prompt", "")))
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / f"touched-{len(captured_prompts)}.txt").write_text("x\n", encoding="utf-8")
+        return _noop_agent(**kwargs)
+
+    def failing_tests_with_marker(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stderr_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text("FOOBAR-MARKER failed\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return CommandCapture(
+            command=("pytest",),
+            returncode=1,
+            stdout="FOOBAR-MARKER failed\n",
+            stderr="",
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+
+    validation_call = 0
+
+    def tests_fail_then_pass(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        nonlocal validation_call
+        if not _count_validation_calls(stdout_path):
+            return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        validation_call += 1
+        if validation_call == 1:
+            return failing_tests_with_marker(
+                test_command, repo_root, stdout_path, stderr_path,
+            )
+        return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", tests_fail_then_pass)
+
+    args = _make_run_args(repo_root, max_refactors=1, max_attempts=3)
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert len(captured_prompts) == 2
+    assert "FOOBAR-MARKER" not in captured_prompts[0]
+    assert "FOOBAR-MARKER" in captured_prompts[1]
+
+
+def test_run_retry_prompt_includes_fix_amendment(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    captured_prompts: list[str] = []
+
+    def capture_agent(**kwargs: object) -> CommandCapture:
+        captured_prompts.append(str(kwargs.get("prompt", "")))
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / f"touched-{len(captured_prompts)}.txt").write_text("x\n", encoding="utf-8")
+        return _noop_agent(**kwargs)
+
+    def tests_fail_then_pass(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        if not _count_validation_calls(stdout_path):
+            return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        # fail on the first per-attempt validation, pass after
+        if not hasattr(tests_fail_then_pass, "called"):
+            tests_fail_then_pass.called = True  # type: ignore[attr-defined]
+            return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", tests_fail_then_pass)
+
+    args = _make_run_args(repo_root, max_refactors=1, max_attempts=3)
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert len(captured_prompts) == 2
+    assert "Do not commit anything until all checks are green" not in captured_prompts[0]
+    assert "Do not commit anything until all checks are green" in captured_prompts[1]
+
+
+def test_run_max_attempts_zero_is_unlimited_until_success(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    agent_calls = 0
+
+    def touching_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        # Safety cap — catches a runaway unlimited loop.
+        if agent_calls > 20:
+            raise RuntimeError("runaway retry loop")
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / f"t-{agent_calls}.txt").write_text("x\n", encoding="utf-8")
+        return _noop_agent(**kwargs)
+
+    validation_calls = 0
+
+    def fail_five_then_pass(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        nonlocal validation_calls
+        if not _count_validation_calls(stdout_path):
+            return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        validation_calls += 1
+        if validation_calls <= 5:
+            return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", fail_five_then_pass)
+
+    args = _make_run_args(repo_root, max_refactors=1, max_attempts=0)
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert agent_calls == 6
+    log = continuous_refactoring.run_command(
+        ["git", "log", "--oneline"], cwd=repo_root,
+    )
+    refactor_commits = [
+        line for line in log.stdout.splitlines() if "continuous refactor" in line
+    ]
+    assert len(refactor_commits) == 1
+
+
+def test_run_custom_fix_prompt_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    fix_prompt = tmp_path / "fix.md"
+    fix_prompt.write_text("CUSTOM-FIX-BANNER: be very careful\n", encoding="utf-8")
+
+    captured_prompts: list[str] = []
+
+    def capture_agent(**kwargs: object) -> CommandCapture:
+        captured_prompts.append(str(kwargs.get("prompt", "")))
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / f"touched-{len(captured_prompts)}.txt").write_text("x\n", encoding="utf-8")
+        return _noop_agent(**kwargs)
+
+    def tests_fail_then_pass(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        if not _count_validation_calls(stdout_path):
+            return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        if not hasattr(tests_fail_then_pass, "called"):
+            tests_fail_then_pass.called = True  # type: ignore[attr-defined]
+            return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", tests_fail_then_pass)
+
+    args = _make_run_args(
+        repo_root,
+        max_refactors=1,
+        max_attempts=3,
+        fix_prompt=fix_prompt,
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert len(captured_prompts) == 2
+    assert "CUSTOM-FIX-BANNER" not in captured_prompts[0]
+    assert "CUSTOM-FIX-BANNER" in captured_prompts[1]
+    assert "Do not commit anything until all checks are green" not in captured_prompts[1]
+
+
+def test_run_undo_commit_between_retries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    agent_calls = 0
+
+    def committing_then_clean_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        rr = Path(str(kwargs.get("repo_root", "")))
+        if agent_calls == 1:
+            (rr / "bad_change.txt").write_text("bad\n", encoding="utf-8")
+            continuous_refactoring.run_command(["git", "add", "-A"], cwd=rr)
+            continuous_refactoring.run_command(
+                ["git", "commit", "-m", "agent bad commit"], cwd=rr,
+            )
+        else:
+            (rr / "good_change.txt").write_text("good\n", encoding="utf-8")
+        return _noop_agent(**kwargs)
+
+    validation_calls = 0
+
+    def fail_then_pass(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        nonlocal validation_calls
+        if not _count_validation_calls(stdout_path):
+            return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        validation_calls += 1
+        if validation_calls == 1:
+            return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return _noop_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr(
+        "continuous_refactoring.loop.maybe_run_agent", committing_then_clean_agent,
+    )
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", fail_then_pass)
+
+    args = _make_run_args(repo_root, max_refactors=1, max_attempts=3)
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    log = continuous_refactoring.run_command(
+        ["git", "log", "--oneline"], cwd=repo_root,
+    )
+    assert "agent bad commit" not in log.stdout
+    refactor_commits = [
+        line for line in log.stdout.splitlines() if "continuous refactor" in line
+    ]
+    assert len(refactor_commits) == 1
+
+
+def test_run_agent_failure_undoes_commit_before_retry(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Agent that commits then exits non-zero must not leak the commit into retry 2."""
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    base_sha = continuous_refactoring.run_command(
+        ["git", "rev-parse", "HEAD"], cwd=repo_root,
+    ).stdout.strip()
+
+    agent_calls = 0
+    retry2_head_before: list[str] = []
+
+    def commit_then_fail_then_clean(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        rr = Path(str(kwargs.get("repo_root", "")))
+        if agent_calls == 1:
+            # Agent commits a bad change, then exits non-zero (mirrors timeout
+            # or OOM after a commit).
+            (rr / "bad_change.txt").write_text("bad\n", encoding="utf-8")
+            continuous_refactoring.run_command(["git", "add", "-A"], cwd=rr)
+            continuous_refactoring.run_command(
+                ["git", "commit", "-m", "agent bad commit before crash"], cwd=rr,
+            )
+            return _failing_agent(**kwargs)
+        if agent_calls == 2:
+            # Capture HEAD at the start of retry 2 — must be the pre-retry-1 HEAD
+            # (the bad commit must have been undone before retry 2 began).
+            retry2_head_before.append(
+                continuous_refactoring.run_command(
+                    ["git", "rev-parse", "HEAD"], cwd=rr,
+                ).stdout.strip()
+            )
+            (rr / "good_change.txt").write_text("good\n", encoding="utf-8")
+        return _noop_agent(**kwargs)
+
+    monkeypatch.setattr(
+        "continuous_refactoring.loop.maybe_run_agent", commit_then_fail_then_clean,
+    )
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+
+    args = _make_run_args(repo_root, max_refactors=1, max_attempts=3)
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert agent_calls == 2
+    # Retry 2 must have started from the original base — not from the bad commit.
+    assert retry2_head_before == [base_sha]
+    log = continuous_refactoring.run_command(
+        ["git", "log", "--oneline"], cwd=repo_root,
+    )
+    assert "agent bad commit before crash" not in log.stdout
+    refactor_commits = [
+        line for line in log.stdout.splitlines() if "continuous refactor" in line
+    ]
+    assert len(refactor_commits) == 1

@@ -40,6 +40,7 @@ from continuous_refactoring.git import (
     undo_last_commit,
 )
 from continuous_refactoring.prompts import (
+    DEFAULT_FIX_AMENDMENT,
     DEFAULT_REFACTORING_PROMPT,
     compose_full_prompt,
     prompt_file_text,
@@ -87,6 +88,21 @@ def _build_target_fallback(scope_instruction: str | None) -> Target:
         model_override=None,
         effort_override=None,
     )
+
+
+def _effective_max_attempts(raw: int | None) -> int | None:
+    """Normalize --max-attempts: None -> 1, 0 -> None (unlimited), N -> N."""
+    if raw is None:
+        return 1
+    if raw == 0:
+        return None
+    return raw
+
+
+def _resolve_fix_amendment_text(args: argparse.Namespace) -> str:
+    if args.fix_prompt:
+        return prompt_file_text(args.fix_prompt)
+    return DEFAULT_FIX_AMENDMENT
 
 
 def run_once(args: argparse.Namespace) -> int:
@@ -215,6 +231,9 @@ def run_loop(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
     timeout = args.timeout or 1800
     max_consecutive = args.max_consecutive_failures
+    max_attempts_effective = _effective_max_attempts(
+        getattr(args, "max_attempts", None)
+    )
     taste = _load_taste_safe(repo_root)
 
     paths = tuple(args.paths.split(":")) if args.paths else None
@@ -238,6 +257,7 @@ def run_loop(args: argparse.Namespace) -> int:
         fell_back_to_scope = bool(args.extensions or args.globs or args.paths)
 
     base_prompt = _resolve_base_prompt(args)
+    fix_amendment_text = _resolve_fix_amendment_text(args)
 
     artifacts = create_run_artifacts(
         repo_root,
@@ -247,6 +267,12 @@ def run_loop(args: argparse.Namespace) -> int:
         test_command=args.validation_command,
     )
     artifacts.log("INFO", f"run artifacts: {artifacts.root}", event="artifacts_ready")
+    if max_attempts_effective is None:
+        artifacts.log(
+            "WARN",
+            "max_attempts=0: unlimited retries; permanently-broken targets will not exit",
+            event="max_attempts_unlimited",
+        )
     if fell_back_to_scope:
         artifacts.log(
             "INFO",
@@ -277,101 +303,144 @@ def run_loop(args: argparse.Namespace) -> int:
                 f"Baseline validation failed\n{baseline_context}"
             )
 
-        attempt = 0
+        target_index = 0
         for target in targets:
-            attempt += 1
-            artifacts.mark_attempt_started(attempt)
+            target_index += 1
+            artifacts.mark_attempt_started(target_index)
 
             model = target.model_override or args.model
             effort = target.effort_override or args.effort
+            previous_failure: str | None = None
+            target_succeeded = False
+            retry = 0
 
-            prompt = compose_full_prompt(
-                base_prompt=base_prompt,
-                taste=taste,
-                target=target,
-                scope_instruction=args.scope_instruction,
-                validation_command=args.validation_command,
-                attempt=attempt,
-            )
-
-            head_before = get_head_sha(repo_root)
-            discard_workspace_changes(repo_root)
-
-            print(f"\nAttempt {attempt}: refactoring {target.description}")
-
-            attempt_dir = artifacts.attempt_dir(attempt) / "refactor"
-            last_message_path = (
-                attempt_dir / "agent-last-message.md"
-                if args.agent == "codex"
-                else None
-            )
-
-            agent_result = maybe_run_agent(
-                agent=args.agent,
-                model=model,
-                effort=effort,
-                prompt=prompt,
-                repo_root=repo_root,
-                stdout_path=attempt_dir / "agent.stdout.log",
-                stderr_path=attempt_dir / "agent.stderr.log",
-                last_message_path=last_message_path,
-                mirror_to_terminal=args.show_agent_logs,
-                timeout=timeout,
-            )
-
-            if agent_result.returncode != 0:
-                consecutive_failures += 1
-                artifacts.log(
-                    "WARN",
-                    f"Agent failed: {target.description}",
-                    attempt=attempt,
+            while True:
+                retry += 1
+                prompt = compose_full_prompt(
+                    base_prompt=base_prompt,
+                    taste=taste,
+                    target=target,
+                    scope_instruction=args.scope_instruction,
+                    validation_command=args.validation_command,
+                    attempt=retry,
+                    previous_failure=previous_failure,
+                    fix_amendment=fix_amendment_text if retry > 1 else None,
                 )
-                if consecutive_failures >= max_consecutive:
-                    final_status = "max_consecutive_failures"
-                    raise ContinuousRefactorError(
-                        f"Stopping: {max_consecutive} consecutive failures"
-                    )
-                continue
 
-            validation_result = run_tests(
-                args.validation_command,
-                repo_root,
-                stdout_path=attempt_dir / "tests.stdout.log",
-                stderr_path=attempt_dir / "tests.stderr.log",
-                mirror_to_terminal=args.show_command_logs,
-            )
+                discard_workspace_changes(repo_root)
+                head_before = get_head_sha(repo_root)
 
-            if validation_result.returncode != 0:
-                head_after = get_head_sha(repo_root)
-                if head_after != head_before:
-                    undo_last_commit(repo_root)
-                else:
-                    discard_workspace_changes(repo_root)
-                consecutive_failures += 1
-                artifacts.log(
-                    "WARN",
-                    f"Validation failed: {target.description}",
-                    attempt=attempt,
+                print(
+                    f"\nTarget {target_index} attempt {retry}: {target.description}"
                 )
-                if consecutive_failures >= max_consecutive:
-                    final_status = "max_consecutive_failures"
-                    raise ContinuousRefactorError(
-                        f"Stopping: {max_consecutive} consecutive failures"
-                    )
-                continue
 
-            consecutive_failures = 0
-            change_count = repo_change_count(repo_root)
-            if change_count:
-                commit = git_commit(
+                attempt_dir = artifacts.attempt_dir(target_index, retry=retry) / "refactor"
+                last_message_path = (
+                    attempt_dir / "agent-last-message.md"
+                    if args.agent == "codex"
+                    else None
+                )
+
+                agent_result = maybe_run_agent(
+                    agent=args.agent,
+                    model=model,
+                    effort=effort,
+                    prompt=prompt,
+                    repo_root=repo_root,
+                    stdout_path=attempt_dir / "agent.stdout.log",
+                    stderr_path=attempt_dir / "agent.stderr.log",
+                    last_message_path=last_message_path,
+                    mirror_to_terminal=args.show_agent_logs,
+                    timeout=timeout,
+                )
+
+                if agent_result.returncode != 0:
+                    head_after = get_head_sha(repo_root)
+                    if head_after != head_before:
+                        undo_last_commit(repo_root)
+                    else:
+                        discard_workspace_changes(repo_root)
+                    artifacts.log(
+                        "WARN",
+                        f"Agent failed: {target.description}",
+                        attempt=target_index,
+                        retry=retry,
+                    )
+                    if (
+                        max_attempts_effective is not None
+                        and retry >= max_attempts_effective
+                    ):
+                        artifacts.log(
+                            "WARN",
+                            f"Exhausted {max_attempts_effective} attempts: "
+                            f"{target.description}",
+                            event="max_attempts_exhausted",
+                            attempt=target_index,
+                            retry=retry,
+                        )
+                        break
+                    previous_failure = summarize_output(agent_result)
+                    continue
+
+                validation_result = run_tests(
+                    args.validation_command,
                     repo_root,
-                    f"{args.commit_message_prefix}: {target.description}",
+                    stdout_path=attempt_dir / "tests.stdout.log",
+                    stderr_path=attempt_dir / "tests.stderr.log",
+                    mirror_to_terminal=args.show_command_logs,
                 )
-                artifacts.record_commit(attempt, "refactor", commit)
-                print(f"Committed: {commit}")
-                if not args.no_push:
-                    git_push(repo_root, args.push_remote, branch_name)
-                    artifacts.record_push(attempt)
+
+                if validation_result.returncode != 0:
+                    head_after = get_head_sha(repo_root)
+                    if head_after != head_before:
+                        undo_last_commit(repo_root)
+                    else:
+                        discard_workspace_changes(repo_root)
+                    artifacts.log(
+                        "WARN",
+                        f"Validation failed: {target.description}",
+                        attempt=target_index,
+                        retry=retry,
+                    )
+                    if (
+                        max_attempts_effective is not None
+                        and retry >= max_attempts_effective
+                    ):
+                        artifacts.log(
+                            "WARN",
+                            f"Exhausted {max_attempts_effective} attempts: "
+                            f"{target.description}",
+                            event="max_attempts_exhausted",
+                            attempt=target_index,
+                            retry=retry,
+                        )
+                        break
+                    previous_failure = summarize_output(validation_result)
+                    continue
+
+                change_count = repo_change_count(repo_root)
+                if change_count:
+                    commit = git_commit(
+                        repo_root,
+                        f"{args.commit_message_prefix}: {target.description}",
+                    )
+                    artifacts.record_commit(target_index, "refactor", commit)
+                    print(f"Committed: {commit}")
+                    if not args.no_push:
+                        git_push(repo_root, args.push_remote, branch_name)
+                        artifacts.record_push(target_index)
+                target_succeeded = True
+                break
+
+            if target_succeeded:
+                consecutive_failures = 0
+            else:
+                consecutive_failures += 1
+                if consecutive_failures >= max_consecutive:
+                    final_status = "max_consecutive_failures"
+                    raise ContinuousRefactorError(
+                        f"Stopping: {max_consecutive} consecutive failures"
+                    )
 
         final_status = "completed"
         return 0

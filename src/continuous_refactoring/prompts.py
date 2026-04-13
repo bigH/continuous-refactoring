@@ -7,6 +7,7 @@ if TYPE_CHECKING:
     from continuous_refactoring.targeting import Target
 
 __all__ = [
+    "DEFAULT_FIX_AMENDMENT",
     "DEFAULT_REFACTORING_PROMPT",
     "INTERVIEW_PROMPT_TEMPLATE",
     "REQUIRED_PREAMBLE",
@@ -111,6 +112,12 @@ Output:
 - `next_candidate`\
 """
 
+DEFAULT_FIX_AMENDMENT = """\
+After this pass, run the repository-wide checks for this repo (default `uv run pytest`).
+If any check fails, stop and only retry from a clean git state.
+Do not commit anything until all checks are green.\
+"""
+
 INTERVIEW_PROMPT_TEMPLATE = """\
 You are helping the user author their refactoring taste file for continuous-refactoring.
 
@@ -164,6 +171,7 @@ def compose_full_prompt(
     validation_command: str,
     attempt: int,
     previous_failure: str | None = None,
+    fix_amendment: str | None = None,
 ) -> str:
     sections = [f"Attempt {attempt}", base_prompt, REQUIRED_PREAMBLE]
     sections.append(f"## Refactoring Taste\n{taste}")
@@ -175,6 +183,8 @@ def compose_full_prompt(
         sections.append(f"## Scope\n{scope}")
     sections.append(f"## Validation\nRun: `{validation_command}`")
     if previous_failure:
+        # previous_failure is summarize_output's tail (40 lines of validation command
+        # or agent stdout+stderr). Verbatim input; trusted but not sanitized.
         sections.append("Previous attempt failed tests with this output:\n")
         sections.append(previous_failure)
         sections.append(
@@ -183,4 +193,6 @@ def compose_full_prompt(
         sections.append(
             "Only fix failures introduced by this refactoring pass."
         )
+    if fix_amendment:
+        sections.append(fix_amendment)
     return "\n\n".join(sections)

@@ -8,15 +8,11 @@ __all__ = [
     "default_artifacts_root",
     "iso_timestamp",
     # agent
-    "build_claude_command",
-    "build_codex_command",
     "build_command",
     "maybe_run_agent",
     "run_observed_command",
     "run_tests",
-    "stream_pipe",
     "summarize_output",
-    "write_timestamped_line",
     # git
     "current_branch",
     "discard_workspace_changes",
@@ -52,15 +48,11 @@ from continuous_refactoring.artifacts import (
     iso_timestamp,
 )
 from continuous_refactoring.agent import (
-    build_claude_command,
-    build_codex_command,
     build_command,
     maybe_run_agent,
     run_observed_command,
     run_tests,
-    stream_pipe,
     summarize_output,
-    write_timestamped_line,
 )
 from continuous_refactoring.git import (
     current_branch,

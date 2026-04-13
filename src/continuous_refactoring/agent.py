@@ -13,16 +13,12 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 __all__ = [
-    "build_claude_command",
-    "build_codex_command",
     "build_command",
     "maybe_run_agent",
     "run_agent_interactive",
     "run_observed_command",
     "run_tests",
-    "stream_pipe",
     "summarize_output",
-    "write_timestamped_line",
 ]
 
 from continuous_refactoring.artifacts import (
@@ -32,7 +28,7 @@ from continuous_refactoring.artifacts import (
 )
 
 
-def build_codex_command(
+def _build_codex_command(
     model: str,
     effort: str,
     prompt: str,
@@ -56,7 +52,7 @@ def build_codex_command(
     ]
 
 
-def build_claude_command(
+def _build_claude_command(
     model: str,
     effort: str,
     prompt: str,
@@ -93,14 +89,14 @@ def build_command(
             raise ContinuousRefactorError(
                 "Codex runs require a last-message artifact path."
             )
-        return build_codex_command(
+        return _build_codex_command(
             model=model,
             effort=effort,
             prompt=prompt,
             repo_root=repo_root,
             last_message_path=last_message_path,
         )
-    return build_claude_command(model, effort, prompt, repo_root)
+    return _build_claude_command(model, effort, prompt, repo_root)
 
 
 def _build_codex_interactive_command(
@@ -200,13 +196,13 @@ def maybe_run_agent(
     )
 
 
-def write_timestamped_line(handle: TextIO, line: str) -> None:
+def _write_timestamped_line(handle: TextIO, line: str) -> None:
     suffix = "" if line.endswith("\n") else "\n"
     handle.write(f"[{iso_timestamp()}] {line}{suffix}")
     handle.flush()
 
 
-def stream_pipe(
+def _stream_pipe(
     pipe: TextIO,
     sink: TextIO,
     mirror: TextIO | None,
@@ -214,7 +210,7 @@ def stream_pipe(
 ) -> None:
     for line in pipe:
         chunks.append(line)
-        write_timestamped_line(sink, line)
+        _write_timestamped_line(sink, line)
         if mirror is not None:
             mirror.write(line)
             mirror.flush()
@@ -288,7 +284,7 @@ def run_observed_command(
         stderr_path.open("w", encoding="utf-8") as stderr_handle,
     ):
         stdout_thread = threading.Thread(
-            target=stream_pipe,
+            target=_stream_pipe,
             args=(
                 process.stdout,
                 stdout_handle,
@@ -297,7 +293,7 @@ def run_observed_command(
             ),
         )
         stderr_thread = threading.Thread(
-            target=stream_pipe,
+            target=_stream_pipe,
             args=(
                 process.stderr,
                 stderr_handle,
@@ -326,9 +322,9 @@ def run_observed_command(
         was_stuck = stuck_detected.is_set()
 
         if not stdout_chunks:
-            write_timestamped_line(stdout_handle, "<no output>")
+            _write_timestamped_line(stdout_handle, "<no output>")
         if not stderr_chunks:
-            write_timestamped_line(stderr_handle, "<no output>")
+            _write_timestamped_line(stderr_handle, "<no output>")
 
     if timed_out:
         raise ContinuousRefactorError(
@@ -367,8 +363,5 @@ def run_tests(
 
 
 def summarize_output(result: CommandCapture) -> str:
-    stdout = result.stdout or ""
-    stderr = result.stderr or ""
-    lines = (stdout + stderr).splitlines()
-    tail = lines[-40:] if lines else []
-    return "\n".join(tail)
+    lines = (result.stdout + result.stderr).splitlines()
+    return "\n".join(lines[-40:])

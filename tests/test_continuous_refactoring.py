@@ -31,9 +31,9 @@ def test_run_observed_command_writes_timestamped_logs(tmp_path: Path) -> None:
     assert "<no output>" in stderr_path.read_text(encoding="utf-8")
 
 
-def test_build_claude_command_streams_json_so_watchdog_sees_progress() -> None:
-    command = continuous_refactoring.build_claude_command(
-        "opus", "medium", "do the thing", Path("/repo"),
+def test_build_command_claude_streams_json_so_watchdog_sees_progress() -> None:
+    command = continuous_refactoring.build_command(
+        "claude", "opus", "medium", "do the thing", Path("/repo"),
     )
 
     assert command[:2] == ["claude", "--print"]

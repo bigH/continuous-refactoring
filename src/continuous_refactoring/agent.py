@@ -14,11 +14,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "build_claude_command",
-    "build_claude_interactive_command",
     "build_codex_command",
-    "build_codex_interactive_command",
     "build_command",
-    "build_interactive_command",
     "maybe_run_agent",
     "run_agent_interactive",
     "run_observed_command",
@@ -106,7 +103,7 @@ def build_command(
     return build_claude_command(model, effort, prompt, repo_root)
 
 
-def build_codex_interactive_command(
+def _build_codex_interactive_command(
     model: str,
     effort: str,
     prompt: str,
@@ -125,7 +122,7 @@ def build_codex_interactive_command(
     ]
 
 
-def build_claude_interactive_command(
+def _build_claude_interactive_command(
     model: str,
     effort: str,
     prompt: str,
@@ -143,7 +140,7 @@ def build_claude_interactive_command(
     ]
 
 
-def build_interactive_command(
+def _build_interactive_command(
     agent: str,
     model: str,
     effort: str,
@@ -151,8 +148,8 @@ def build_interactive_command(
     repo_root: Path,
 ) -> list[str]:
     if agent == "codex":
-        return build_codex_interactive_command(model, effort, prompt, repo_root)
-    return build_claude_interactive_command(model, effort, prompt, repo_root)
+        return _build_codex_interactive_command(model, effort, prompt, repo_root)
+    return _build_claude_interactive_command(model, effort, prompt, repo_root)
 
 
 def run_agent_interactive(
@@ -165,7 +162,7 @@ def run_agent_interactive(
     """Exec the agent attached to the user's terminal. Returns exit code."""
     if which(agent) is None:
         raise ContinuousRefactorError(f"Required command not found in PATH: {agent}")
-    command = build_interactive_command(agent, model, effort, prompt, repo_root)
+    command = _build_interactive_command(agent, model, effort, prompt, repo_root)
     return subprocess.call(command, cwd=repo_root)
 
 
@@ -369,7 +366,7 @@ def run_tests(
     )
 
 
-def summarize_output(result: CommandCapture | subprocess.CompletedProcess[str]) -> str:
+def summarize_output(result: CommandCapture) -> str:
     stdout = result.stdout or ""
     stderr = result.stderr or ""
     lines = (stdout + stderr).splitlines()

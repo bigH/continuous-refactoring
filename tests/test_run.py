@@ -447,12 +447,27 @@ def test_run_undo_commit_on_validation_failure(
     assert "agent commit" not in log.stdout
 
 
+def _repo_with_py_files(repo_root: Path) -> list[str]:
+    """Seed a git repo with three tracked ``.py`` files; return the paths."""
+    _init_repo(repo_root)
+    (repo_root / "src").mkdir(parents=True, exist_ok=True)
+    (repo_root / "tests").mkdir(parents=True, exist_ok=True)
+    (repo_root / "src" / "foo.py").write_text("# foo\n", encoding="utf-8")
+    (repo_root / "src" / "bar.py").write_text("# bar\n", encoding="utf-8")
+    (repo_root / "tests" / "test_foo.py").write_text("# test\n", encoding="utf-8")
+    continuous_refactoring.run_command(["git", "add", "."], cwd=repo_root)
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "add py files"], cwd=repo_root,
+    )
+    return ["src/bar.py", "src/foo.py", "tests/test_foo.py"]
+
+
 def test_run_extensions_targeting(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    _repo_with_py_files(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -474,15 +489,18 @@ def test_run_extensions_targeting(
     continuous_refactoring.run_loop(args)
 
     assert len(captured_prompts) == 1
-    assert "**/*.py" in captured_prompts[0]
+    prompt = captured_prompts[0]
+    # Per-file Target: prompt should contain exactly one concrete .py path.
+    matched = [f for f in ("src/foo.py", "src/bar.py", "tests/test_foo.py") if f in prompt]
+    assert len(matched) == 1, matched
 
 
-def test_run_globs_targeting(
+def test_run_extensions_expands_to_multiple_targets(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
+    tracked = _repo_with_py_files(repo_root)
     tmpdir_root = tmp_path / "tmpdir"
     tmpdir_root.mkdir()
     xdg_root = tmp_path / "xdg"
@@ -500,11 +518,133 @@ def test_run_globs_targeting(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
 
-    args = _make_run_args(repo_root, globs="src/**", max_refactors=1)
+    args = _make_run_args(repo_root, extensions=".py", max_refactors=99)
+    continuous_refactoring.run_loop(args)
+
+    assert len(captured_prompts) == len(tracked)
+    hit = {f for f in tracked if any(f in p for p in captured_prompts)}
+    assert hit == set(tracked)
+
+
+def test_run_globs_targeting(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _repo_with_py_files(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    captured_prompts: list[str] = []
+
+    def capture_agent(**kwargs: object) -> CommandCapture:
+        captured_prompts.append(str(kwargs.get("prompt", "")))
+        return _noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+
+    args = _make_run_args(repo_root, globs="src/**/*.py", max_refactors=1)
     continuous_refactoring.run_loop(args)
 
     assert len(captured_prompts) == 1
-    assert "src/**" in captured_prompts[0]
+    prompt = captured_prompts[0]
+    matched = [f for f in ("src/foo.py", "src/bar.py") if f in prompt]
+    assert len(matched) == 1, matched
+    assert "tests/test_foo.py" not in prompt
+
+
+def test_run_max_refactors_samples_from_extensions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+    (repo_root / "src").mkdir(parents=True, exist_ok=True)
+    for name in ("a.py", "b.py", "c.py", "d.py", "e.py"):
+        (repo_root / "src" / name).write_text(f"# {name}\n", encoding="utf-8")
+    continuous_refactoring.run_command(["git", "add", "."], cwd=repo_root)
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "five py"], cwd=repo_root,
+    )
+
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    agent_calls = 0
+
+    def counting_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        return _noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", counting_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+
+    args = _make_run_args(repo_root, extensions=".py", max_refactors=3)
+    continuous_refactoring.run_loop(args)
+
+    assert agent_calls == 3
+
+
+def test_cli_does_not_cap_max_refactors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pytest
+
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+
+    args = argparse.Namespace(
+        agent="codex",
+        model="m",
+        effort="xhigh",
+        validation_command="true",
+        extensions=".py",
+        globs=None,
+        targets=None,
+        paths=None,
+        scope_instruction=None,
+        timeout=None,
+        refactoring_prompt=None,
+        fix_prompt=None,
+        show_agent_logs=False,
+        show_command_logs=False,
+        repo_root=repo_root,
+        max_attempts=None,
+        max_refactors=20,
+        no_push=True,
+        push_remote="origin",
+        commit_message_prefix="continuous refactor",
+        max_consecutive_failures=3,
+    )
+
+    calls: list[argparse.Namespace] = []
+
+    def fake_run_loop(passed: argparse.Namespace) -> int:
+        calls.append(passed)
+        return 0
+
+    monkeypatch.setattr("continuous_refactoring.cli.run_loop", fake_run_loop)
+
+    from continuous_refactoring.cli import _handle_run
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_run(args)
+    assert exc_info.value.code == 0
+    assert len(calls) == 1
+    assert calls[0].max_refactors == 20
 
 
 def test_run_random_fallback_targeting(

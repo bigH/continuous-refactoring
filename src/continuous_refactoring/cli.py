@@ -12,6 +12,7 @@ __all__ = [
 
 from continuous_refactoring.agent import run_agent_interactive
 from continuous_refactoring.artifacts import ContinuousRefactorError
+from continuous_refactoring.loop import run_loop, run_once
 
 
 def parse_max_attempts(value: str) -> int:
@@ -291,8 +292,6 @@ def _handle_taste_interview(args: argparse.Namespace) -> None:
 
 def _handle_run_once(args: argparse.Namespace) -> None:
     _validate_targeting(args)
-    from continuous_refactoring.loop import run_once
-
     try:
         raise SystemExit(run_once(args))
     except ContinuousRefactorError as error:
@@ -308,10 +307,6 @@ def _handle_run(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         raise SystemExit(2)
-    if args.max_refactors is not None and args.max_refactors > 10 and not args.targets:
-        args.max_refactors = 10
-    from continuous_refactoring.loop import run_loop
-
     try:
         raise SystemExit(run_loop(args))
     except ContinuousRefactorError as error:

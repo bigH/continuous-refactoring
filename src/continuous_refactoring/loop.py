@@ -232,8 +232,10 @@ def run_loop(args: argparse.Namespace) -> int:
     if max_refactors and len(targets) > max_refactors:
         targets = random.sample(targets, max_refactors)
 
+    fell_back_to_scope = False
     if not targets:
         targets = [_build_target_fallback(args.scope_instruction)]
+        fell_back_to_scope = bool(args.extensions or args.globs or args.paths)
 
     base_prompt = _resolve_base_prompt(args)
 
@@ -245,6 +247,12 @@ def run_loop(args: argparse.Namespace) -> int:
         test_command=args.validation_command,
     )
     artifacts.log("INFO", f"run artifacts: {artifacts.root}", event="artifacts_ready")
+    if fell_back_to_scope:
+        artifacts.log(
+            "INFO",
+            "Targeting patterns matched no tracked files; falling back to scope-instruction.",
+            event="targeting_fallback",
+        )
 
     final_status = "running"
     error_message: str | None = None

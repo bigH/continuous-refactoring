@@ -2,14 +2,18 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from continuous_refactoring.artifacts import ContinuousRefactorError
+
 
 __all__ = [
     "Target",
+    "expand_patterns_to_files",
     "load_targets_jsonl",
     "parse_extensions",
     "parse_globs",
@@ -95,19 +99,93 @@ def load_targets_jsonl(path: Path) -> list[Target]:
     return targets
 
 
-def select_random_files(repo_root: Path, count: int = 5) -> tuple[str, ...]:
-    """Select random tracked files from a git repository."""
+def _list_tracked_files(repo_root: Path) -> list[str]:
+    """Return tracked paths via ``git ls-files -z``.
+
+    Null-delimited output preserves non-ASCII/special-char paths verbatim
+    (plain ``git ls-files`` C-quotes them, e.g. ``"caf\\303\\251.py"``, which
+    then fails to match any downstream pattern).
+    """
     result = subprocess.run(
-        ["git", "ls-files"],
+        ["git", "ls-files", "-z"],
         cwd=repo_root,
         capture_output=True,
-        text=True,
-        check=True,
+        check=False,
     )
-    files = [f for f in result.stdout.splitlines() if f.strip()]
+    if result.returncode != 0:
+        raise ContinuousRefactorError(
+            f"git ls-files failed: {result.stderr.decode('utf-8', 'replace').strip()}"
+        )
+    return [p.decode("utf-8") for p in result.stdout.split(b"\0") if p]
+
+
+def select_random_files(repo_root: Path, count: int = 5) -> tuple[str, ...]:
+    """Select random tracked files from a git repository."""
+    files = _list_tracked_files(repo_root)
     if not files:
         return ()
     return tuple(random.sample(files, min(count, len(files))))
+
+
+def _compile_glob(pattern: str) -> re.Pattern[str]:
+    """Compile a POSIX-style glob; ``*`` matches within a segment, ``**`` crosses segments.
+
+    ``**/`` at the start and ``/**/`` between segments optionally match zero
+    segments, so ``**/*.py`` matches ``root.py`` and ``src/**/*.py`` matches
+    ``src/foo.py``.
+    """
+    parts: list[str] = []
+    i = 0
+    while i < len(pattern):
+        if pattern.startswith("**/", i) and (i == 0 or pattern[i - 1] == "/"):
+            parts.append("(?:.*/)?")
+            i += 3
+        elif pattern.startswith("**", i):
+            parts.append(".*")
+            i += 2
+        elif pattern[i] == "*":
+            parts.append("[^/]*")
+            i += 1
+        elif pattern[i] == "?":
+            parts.append("[^/]")
+            i += 1
+        else:
+            parts.append(re.escape(pattern[i]))
+            i += 1
+    return re.compile("".join(parts) + r"\Z")
+
+
+def expand_patterns_to_files(
+    patterns: tuple[str, ...],
+    repo_root: Path,
+) -> tuple[str, ...]:
+    """Return tracked files (relative to ``repo_root``) matching any pattern.
+
+    Uses ``git ls-files -z`` so behavior mirrors :func:`select_random_files`:
+    tracked files only, ``.gitignore`` respected, non-ASCII paths preserved.
+    Returns a sorted, deduplicated tuple for determinism; sampling happens
+    downstream.
+    """
+    tracked = _list_tracked_files(repo_root)
+    if not tracked or not patterns:
+        return ()
+
+    compiled = [_compile_glob(p) for p in patterns]
+    matched = {f for f in tracked if any(regex.match(f) for regex in compiled)}
+    return tuple(sorted(matched))
+
+
+def _targets_per_file(files: tuple[str, ...]) -> list[Target]:
+    return [
+        Target(
+            description=f,
+            files=(f,),
+            scoping=None,
+            model_override=None,
+            effort_override=None,
+        )
+        for f in files
+    ]
 
 
 def resolve_targets(
@@ -127,22 +205,12 @@ def resolve_targets(
         return load_targets_jsonl(targets_path)
 
     if globs is not None:
-        return [Target(
-            description="glob patterns",
-            files=parse_globs(globs),
-            scoping=None,
-            model_override=None,
-            effort_override=None,
-        )]
+        patterns = parse_globs(globs)
+        return _targets_per_file(expand_patterns_to_files(patterns, repo_root))
 
     if extensions is not None:
-        return [Target(
-            description="file extensions",
-            files=parse_extensions(extensions),
-            scoping=None,
-            model_override=None,
-            effort_override=None,
-        )]
+        patterns = parse_extensions(extensions)
+        return _targets_per_file(expand_patterns_to_files(patterns, repo_root))
 
     if paths:
         return [Target(

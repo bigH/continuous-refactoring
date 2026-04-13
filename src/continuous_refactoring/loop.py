@@ -35,8 +35,8 @@ from continuous_refactoring.git import (
     prepare_run_branch,
     repo_change_count,
     require_clean_worktree,
+    revert_to,
     run_command,
-    undo_last_commit,
 )
 from continuous_refactoring.prompts import (
     DEFAULT_FIX_AMENDMENT,
@@ -191,11 +191,7 @@ def run_once(args: argparse.Namespace) -> int:
         )
 
         if validation_result.returncode != 0:
-            head_after = get_head_sha(repo_root)
-            if head_after != head_before:
-                undo_last_commit(repo_root)
-            else:
-                discard_workspace_changes(repo_root)
+            revert_to(repo_root, head_before)
             final_status = "validation_failed"
             raise ContinuousRefactorError("Validation failed after agent run")
 
@@ -358,11 +354,7 @@ def run_loop(args: argparse.Namespace) -> int:
                 )
 
                 if agent_result.returncode != 0:
-                    head_after = get_head_sha(repo_root)
-                    if head_after != head_before:
-                        undo_last_commit(repo_root)
-                    else:
-                        discard_workspace_changes(repo_root)
+                    revert_to(repo_root, head_before)
                     artifacts.log(
                         "WARN",
                         f"Agent failed: {target.description}",
@@ -394,11 +386,7 @@ def run_loop(args: argparse.Namespace) -> int:
                 )
 
                 if validation_result.returncode != 0:
-                    head_after = get_head_sha(repo_root)
-                    if head_after != head_before:
-                        undo_last_commit(repo_root)
-                    else:
-                        discard_workspace_changes(repo_root)
+                    revert_to(repo_root, head_before)
                     artifacts.log(
                         "WARN",
                         f"Validation failed: {target.description}",

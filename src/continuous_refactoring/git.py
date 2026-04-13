@@ -24,6 +24,7 @@ __all__ = [
     "repo_change_count",
     "repo_has_changes",
     "require_clean_worktree",
+    "revert_to",
     "run_command",
     "undo_last_commit",
     "workspace_status_lines",
@@ -172,6 +173,13 @@ def detect_main_branch(repo_root: Path) -> str:
 def undo_last_commit(repo_root: Path) -> None:
     run_command(["git", "reset", "--soft", "HEAD~1"], cwd=repo_root)
     discard_workspace_changes(repo_root)
+
+
+def revert_to(repo_root: Path, expected_head: str) -> None:
+    if get_head_sha(repo_root) != expected_head:
+        undo_last_commit(repo_root)
+    else:
+        discard_workspace_changes(repo_root)
 
 
 def generate_run_branch_name() -> str:

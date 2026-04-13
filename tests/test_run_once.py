@@ -1,14 +1,11 @@
 from __future__ import annotations
 
 import argparse
-import os
 import re
 import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
 import continuous_refactoring
 import continuous_refactoring.loop
@@ -190,139 +187,85 @@ def _failing_tests(
     )
 
 
-def test_run_once_creates_branch(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+@pytest.fixture
+def run_once_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     repo_root = tmp_path / "repo"
     _init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
+    (tmp_path / "tmpdir").mkdir()
+    (tmp_path / "xdg").mkdir()
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    return repo_root
 
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+@pytest.fixture
+def prompt_capture(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    prompts: list[str] = []
+
+    def capture_agent(**kwargs: object) -> CommandCapture:
+        prompts.append(str(kwargs.get("prompt", "")))
+        return _noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+    return prompts
+
+
+def test_run_once_creates_branch(
+    run_once_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", _noop_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
 
-    args = _make_run_once_args(repo_root)
+    args = _make_run_once_args(run_once_env)
     exit_code = continuous_refactoring.run_once(args)
 
     assert exit_code == 0
-    branch = continuous_refactoring.current_branch(repo_root)
+    branch = continuous_refactoring.current_branch(run_once_env)
     assert re.match(r"^cr/\d{8}T\d{6}$", branch)
 
 
 def test_run_once_composes_prompt_with_taste(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path,
+    prompt_capture: list[str],
 ) -> None:
-    repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
-
-    captured_prompts: list[str] = []
-
-    def capture_agent(**kwargs: object) -> CommandCapture:
-        captured_prompts.append(str(kwargs.get("prompt", "")))
-        return _noop_agent(**kwargs)
-
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
-
-    args = _make_run_once_args(repo_root)
+    args = _make_run_once_args(run_once_env)
     continuous_refactoring.run_once(args)
 
-    assert len(captured_prompts) == 1
-    assert "## Refactoring Taste" in captured_prompts[0]
+    assert len(prompt_capture) == 1
+    assert "## Refactoring Taste" in prompt_capture[0]
 
 
 def test_run_once_composes_prompt_with_target(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path,
+    prompt_capture: list[str],
 ) -> None:
-    repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
-
-    captured_prompts: list[str] = []
-
-    def capture_agent(**kwargs: object) -> CommandCapture:
-        captured_prompts.append(str(kwargs.get("prompt", "")))
-        return _noop_agent(**kwargs)
-
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
-
-    args = _make_run_once_args(repo_root, paths="src/foo.py:src/bar.py")
+    args = _make_run_once_args(run_once_env, paths="src/foo.py:src/bar.py")
     continuous_refactoring.run_once(args)
 
-    assert len(captured_prompts) == 1
-    assert "## Target Files" in captured_prompts[0]
-    assert "src/foo.py" in captured_prompts[0]
-    assert "src/bar.py" in captured_prompts[0]
+    assert len(prompt_capture) == 1
+    assert "## Target Files" in prompt_capture[0]
+    assert "src/foo.py" in prompt_capture[0]
+    assert "src/bar.py" in prompt_capture[0]
 
 
 def test_run_once_composes_prompt_with_scope(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path,
+    prompt_capture: list[str],
 ) -> None:
-    repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
-
-    captured_prompts: list[str] = []
-
-    def capture_agent(**kwargs: object) -> CommandCapture:
-        captured_prompts.append(str(kwargs.get("prompt", "")))
-        return _noop_agent(**kwargs)
-
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
-
-    args = _make_run_once_args(repo_root, scope_instruction="focus on error handling")
+    args = _make_run_once_args(run_once_env, scope_instruction="focus on error handling")
     continuous_refactoring.run_once(args)
 
-    assert len(captured_prompts) == 1
-    assert "## Scope" in captured_prompts[0]
-    assert "focus on error handling" in captured_prompts[0]
+    assert len(prompt_capture) == 1
+    assert "## Scope" in prompt_capture[0]
+    assert "focus on error handling" in prompt_capture[0]
 
 
 def test_run_once_validation_gate(
-    tmp_path: Path,
+    run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import pytest
-
-    repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
-
     def committing_agent(**kwargs: object) -> CommandCapture:
         rr = Path(str(kwargs.get("repo_root", "")))
         (rr / "new_file.txt").write_text("agent wrote this\n", encoding="utf-8")
@@ -335,33 +278,20 @@ def test_run_once_validation_gate(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", committing_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", _failing_tests)
 
-    args = _make_run_once_args(repo_root)
+    args = _make_run_once_args(run_once_env)
     with pytest.raises(ContinuousRefactorError, match="Validation failed"):
         continuous_refactoring.run_once(args)
 
-    # Commit should have been undone
     log = continuous_refactoring.run_command(
-        ["git", "log", "--oneline"], cwd=repo_root,
+        ["git", "log", "--oneline"], cwd=run_once_env,
     )
     assert "agent commit" not in log.stdout
 
 
 def test_run_once_no_fix_retry(
-    tmp_path: Path,
+    run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import pytest
-
-    repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
-
     agent_call_count = 0
 
     def counting_agent(**kwargs: object) -> CommandCapture:
@@ -372,7 +302,7 @@ def test_run_once_no_fix_retry(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", counting_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", _failing_tests)
 
-    args = _make_run_once_args(repo_root)
+    args = _make_run_once_args(run_once_env)
     with pytest.raises(ContinuousRefactorError, match="Validation failed"):
         continuous_refactoring.run_once(args)
 
@@ -380,23 +310,14 @@ def test_run_once_no_fix_retry(
 
 
 def test_run_once_prints_branch_and_diff(
-    tmp_path: Path,
+    run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", _noop_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
 
-    args = _make_run_once_args(repo_root)
+    args = _make_run_once_args(run_once_env)
     exit_code = continuous_refactoring.run_once(args)
 
     assert exit_code == 0
@@ -405,82 +326,41 @@ def test_run_once_prints_branch_and_diff(
 
 
 def test_run_once_timeout(
-    tmp_path: Path,
+    run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import pytest
-
-    repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
-
     def timeout_agent(**kwargs: object) -> CommandCapture:
         raise ContinuousRefactorError("Command timed out after 1s: fake")
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", timeout_agent)
 
-    args = _make_run_once_args(repo_root, timeout=1)
+    args = _make_run_once_args(run_once_env, timeout=1)
     with pytest.raises(ContinuousRefactorError, match="timed out"):
         continuous_refactoring.run_once(args)
 
 
 def test_run_once_uses_default_prompt(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path,
+    prompt_capture: list[str],
 ) -> None:
-    repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
-
-    captured_prompts: list[str] = []
-
-    def capture_agent(**kwargs: object) -> CommandCapture:
-        captured_prompts.append(str(kwargs.get("prompt", "")))
-        return _noop_agent(**kwargs)
-
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
-
-    args = _make_run_once_args(repo_root)
+    args = _make_run_once_args(run_once_env)
     continuous_refactoring.run_once(args)
 
-    assert len(captured_prompts) == 1
-    assert "You are a continuous refactoring agent" in captured_prompts[0]
+    assert len(prompt_capture) == 1
+    assert "You are a continuous refactoring agent" in prompt_capture[0]
 
 
 def test_ctrl_c_prints_file_paths(
-    tmp_path: Path,
+    run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
-
     def interrupting_agent(**kwargs: object) -> CommandCapture:
         raise KeyboardInterrupt
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", interrupting_agent)
 
-    args = _make_run_once_args(repo_root)
+    args = _make_run_once_args(run_once_env)
     exit_code = continuous_refactoring.run_once(args)
 
     assert exit_code == 130
@@ -489,71 +369,49 @@ def test_ctrl_c_prints_file_paths(
 
 
 def test_run_once_use_branch_creates_when_absent(
-    tmp_path: Path,
+    run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", _noop_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
 
-    args = _make_run_once_args(repo_root, use_branch="my-cleanup")
+    args = _make_run_once_args(run_once_env, use_branch="my-cleanup")
     exit_code = continuous_refactoring.run_once(args)
 
     assert exit_code == 0
-    assert continuous_refactoring.current_branch(repo_root) == "my-cleanup"
+    assert continuous_refactoring.current_branch(run_once_env) == "my-cleanup"
 
 
 def test_run_once_use_branch_reuses_existing(
-    tmp_path: Path,
+    run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    _init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
-
-    # Pre-create the branch with a distinct commit so we can assert reuse.
     continuous_refactoring.run_command(
-        ["git", "checkout", "-b", "my-cleanup"], cwd=repo_root,
+        ["git", "checkout", "-b", "my-cleanup"], cwd=run_once_env,
     )
-    (repo_root / "marker.txt").write_text("marker\n", encoding="utf-8")
-    continuous_refactoring.run_command(["git", "add", "marker.txt"], cwd=repo_root)
+    (run_once_env / "marker.txt").write_text("marker\n", encoding="utf-8")
+    continuous_refactoring.run_command(["git", "add", "marker.txt"], cwd=run_once_env)
     continuous_refactoring.run_command(
-        ["git", "commit", "-m", "marker commit"], cwd=repo_root,
+        ["git", "commit", "-m", "marker commit"], cwd=run_once_env,
     )
     expected_head = continuous_refactoring.run_command(
-        ["git", "rev-parse", "HEAD"], cwd=repo_root,
+        ["git", "rev-parse", "HEAD"], cwd=run_once_env,
     ).stdout.strip()
-    continuous_refactoring.run_command(["git", "checkout", "main"], cwd=repo_root)
+    continuous_refactoring.run_command(["git", "checkout", "main"], cwd=run_once_env)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", _noop_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
 
-    args = _make_run_once_args(repo_root, use_branch="my-cleanup")
+    args = _make_run_once_args(run_once_env, use_branch="my-cleanup")
     exit_code = continuous_refactoring.run_once(args)
 
     assert exit_code == 0
-    assert continuous_refactoring.current_branch(repo_root) == "my-cleanup"
-    # Branch wasn't recreated from main: its history still contains marker commit.
+    assert continuous_refactoring.current_branch(run_once_env) == "my-cleanup"
     log = continuous_refactoring.run_command(
-        ["git", "log", "--oneline"], cwd=repo_root,
+        ["git", "log", "--oneline"], cwd=run_once_env,
     ).stdout
     assert "marker commit" in log
-    # HEAD is still the marker commit (no agent changes to commit).
     current_head = continuous_refactoring.run_command(
-        ["git", "rev-parse", "HEAD"], cwd=repo_root,
+        ["git", "rev-parse", "HEAD"], cwd=run_once_env,
     ).stdout.strip()
     assert current_head == expected_head

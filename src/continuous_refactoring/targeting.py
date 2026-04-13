@@ -27,9 +27,9 @@ __all__ = [
 class Target:
     description: str
     files: tuple[str, ...]
-    scoping: str | None
-    model_override: str | None
-    effort_override: str | None
+    scoping: str | None = None
+    model_override: str | None = None
+    effort_override: str | None = None
 
 
 def parse_extensions(raw: str) -> tuple[str, ...]:
@@ -176,16 +176,7 @@ def expand_patterns_to_files(
 
 
 def _targets_per_file(files: tuple[str, ...]) -> list[Target]:
-    return [
-        Target(
-            description=f,
-            files=(f,),
-            scoping=None,
-            model_override=None,
-            effort_override=None,
-        )
-        for f in files
-    ]
+    return [Target(description=f, files=(f,)) for f in files]
 
 
 def resolve_targets(
@@ -213,21 +204,9 @@ def resolve_targets(
         return _targets_per_file(expand_patterns_to_files(patterns, repo_root))
 
     if paths:
-        return [Target(
-            description="specified paths",
-            files=paths,
-            scoping=None,
-            model_override=None,
-            effort_override=None,
-        )]
+        return [Target(description="specified paths", files=paths)]
 
     random_files = select_random_files(repo_root)
     if not random_files:
         return []
-    return [Target(
-        description="random files",
-        files=random_files,
-        scoping=None,
-        model_override=None,
-        effort_override=None,
-    )]
+    return [Target(description="random files", files=random_files)]

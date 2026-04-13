@@ -104,6 +104,7 @@ def _make_run_once_args(
     globs: str | None = None,
     targets: Path | None = None,
     paths: str | None = None,
+    use_branch: str | None = None,
 ) -> argparse.Namespace:
     test_script = repo_root.parent / "check_tests.py"
     if not test_script.exists():
@@ -124,6 +125,7 @@ def _make_run_once_args(
         show_agent_logs=False,
         show_command_logs=False,
         repo_root=repo_root,
+        use_branch=use_branch,
     )
 
 
@@ -484,3 +486,74 @@ def test_ctrl_c_prints_file_paths(
     assert exit_code == 130
     captured = capsys.readouterr()
     assert "Artifact logs:" in captured.err
+
+
+def test_run_once_use_branch_creates_when_absent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", _noop_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+
+    args = _make_run_once_args(repo_root, use_branch="my-cleanup")
+    exit_code = continuous_refactoring.run_once(args)
+
+    assert exit_code == 0
+    assert continuous_refactoring.current_branch(repo_root) == "my-cleanup"
+
+
+def test_run_once_use_branch_reuses_existing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    # Pre-create the branch with a distinct commit so we can assert reuse.
+    continuous_refactoring.run_command(
+        ["git", "checkout", "-b", "my-cleanup"], cwd=repo_root,
+    )
+    (repo_root / "marker.txt").write_text("marker\n", encoding="utf-8")
+    continuous_refactoring.run_command(["git", "add", "marker.txt"], cwd=repo_root)
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "marker commit"], cwd=repo_root,
+    )
+    expected_head = continuous_refactoring.run_command(
+        ["git", "rev-parse", "HEAD"], cwd=repo_root,
+    ).stdout.strip()
+    continuous_refactoring.run_command(["git", "checkout", "main"], cwd=repo_root)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", _noop_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+
+    args = _make_run_once_args(repo_root, use_branch="my-cleanup")
+    exit_code = continuous_refactoring.run_once(args)
+
+    assert exit_code == 0
+    assert continuous_refactoring.current_branch(repo_root) == "my-cleanup"
+    # Branch wasn't recreated from main: its history still contains marker commit.
+    log = continuous_refactoring.run_command(
+        ["git", "log", "--oneline"], cwd=repo_root,
+    ).stdout
+    assert "marker commit" in log
+    # HEAD is still the marker commit (no agent changes to commit).
+    current_head = continuous_refactoring.run_command(
+        ["git", "rev-parse", "HEAD"], cwd=repo_root,
+    ).stdout.strip()
+    assert current_head == expected_head

@@ -173,6 +173,7 @@ def _make_run_once_args(
         show_agent_logs=False,
         show_command_logs=False,
         repo_root=repo_root,
+        use_branch=None,
     )
 
 
@@ -319,6 +320,7 @@ def test_e2e_init_then_run_with_failures(
         push_remote="origin",
         commit_message_prefix="continuous refactor",
         max_consecutive_failures=5,
+        use_branch=None,
     )
     exit_code = continuous_refactoring.run_loop(args)
 

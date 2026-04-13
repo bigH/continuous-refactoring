@@ -8,6 +8,8 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 __all__ = [
+    "branch_exists",
+    "checkout_branch",
     "checkout_main",
     "create_branch",
     "current_branch",
@@ -18,6 +20,7 @@ __all__ = [
     "get_head_sha",
     "git_commit",
     "git_push",
+    "prepare_run_branch",
     "repo_change_count",
     "repo_has_changes",
     "require_clean_worktree",
@@ -112,6 +115,33 @@ def git_push(repo_root: Path, remote: str, branch: str) -> None:
 
 def create_branch(repo_root: Path, branch_name: str) -> None:
     run_command(["git", "checkout", "-b", branch_name], cwd=repo_root)
+
+
+def checkout_branch(repo_root: Path, branch_name: str) -> None:
+    run_command(["git", "checkout", branch_name], cwd=repo_root)
+
+
+def branch_exists(repo_root: Path, branch_name: str) -> bool:
+    result = run_command(
+        ["git", "branch", "--list", branch_name],
+        cwd=repo_root,
+        check=False,
+    )
+    return bool(result.stdout.strip())
+
+
+def prepare_run_branch(
+    repo_root: Path,
+    use_branch: str | None,
+    default_name: str,
+) -> str:
+    if use_branch and branch_exists(repo_root, use_branch):
+        checkout_branch(repo_root, use_branch)
+        return use_branch
+    checkout_main(repo_root)
+    branch_name = use_branch or default_name
+    create_branch(repo_root, branch_name)
+    return branch_name
 
 
 def checkout_main(repo_root: Path) -> None:

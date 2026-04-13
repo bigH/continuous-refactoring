@@ -52,6 +52,7 @@ def _make_run_args(
     push_remote: str = "origin",
     commit_message_prefix: str = "continuous refactor",
     max_consecutive_failures: int = 3,
+    use_branch: str | None = None,
 ) -> argparse.Namespace:
     test_script = repo_root.parent / "check_tests.py"
     if not test_script.exists():
@@ -78,6 +79,7 @@ def _make_run_args(
         push_remote=push_remote,
         commit_message_prefix=commit_message_prefix,
         max_consecutive_failures=max_consecutive_failures,
+        use_branch=use_branch,
     )
 
 
@@ -634,6 +636,7 @@ def test_cli_does_not_cap_max_refactors(
         push_remote="origin",
         commit_message_prefix="continuous refactor",
         max_consecutive_failures=3,
+        use_branch=None,
     )
 
     calls: list[argparse.Namespace] = []
@@ -1352,3 +1355,74 @@ def test_run_agent_failure_undoes_commit_before_retry(
         line for line in log.stdout.splitlines() if "continuous refactor" in line
     ]
     assert len(refactor_commits) == 1
+
+
+def test_run_use_branch_creates_when_absent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", _noop_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+
+    args = _make_run_args(repo_root, max_refactors=1, use_branch="long-lived-refactor")
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert continuous_refactoring.current_branch(repo_root) == "long-lived-refactor"
+
+
+def test_run_use_branch_reuses_existing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    _init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    # Pre-create the branch with a distinct commit so we can verify reuse.
+    continuous_refactoring.run_command(
+        ["git", "checkout", "-b", "long-lived-refactor"], cwd=repo_root,
+    )
+    (repo_root / "marker.txt").write_text("marker\n", encoding="utf-8")
+    continuous_refactoring.run_command(["git", "add", "marker.txt"], cwd=repo_root)
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "marker commit"], cwd=repo_root,
+    )
+    continuous_refactoring.run_command(["git", "checkout", "main"], cwd=repo_root)
+
+    def touching_agent(**kwargs: object) -> CommandCapture:
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / "agent_change.txt").write_text("x\n", encoding="utf-8")
+        return _noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", _noop_tests)
+
+    args = _make_run_args(
+        repo_root, max_refactors=1, use_branch="long-lived-refactor",
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert continuous_refactoring.current_branch(repo_root) == "long-lived-refactor"
+    # Branch history retains the pre-existing marker commit and gains the new one.
+    log = continuous_refactoring.run_command(
+        ["git", "log", "--oneline"], cwd=repo_root,
+    ).stdout
+    assert "marker commit" in log
+    assert "continuous refactor" in log

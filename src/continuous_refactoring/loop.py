@@ -25,8 +25,6 @@ from continuous_refactoring.agent import (
 )
 from continuous_refactoring.config import load_taste, resolve_project
 from continuous_refactoring.git import (
-    checkout_main,
-    create_branch,
     detect_main_branch,
     discard_workspace_changes,
     generate_run_branch_name,
@@ -34,6 +32,7 @@ from continuous_refactoring.git import (
     get_head_sha,
     git_commit,
     git_push,
+    prepare_run_branch,
     repo_change_count,
     require_clean_worktree,
     run_command,
@@ -142,9 +141,11 @@ def run_once(args: argparse.Namespace) -> int:
     try:
         require_clean_worktree(repo_root)
 
-        checkout_main(repo_root)
-        branch_name = generate_run_once_branch_name()
-        create_branch(repo_root, branch_name)
+        branch_name = prepare_run_branch(
+            repo_root,
+            args.use_branch,
+            generate_run_once_branch_name(),
+        )
 
         prompt = compose_full_prompt(
             base_prompt=base_prompt,
@@ -287,9 +288,11 @@ def run_loop(args: argparse.Namespace) -> int:
     try:
         require_clean_worktree(repo_root)
 
-        checkout_main(repo_root)
-        branch_name = generate_run_branch_name()
-        create_branch(repo_root, branch_name)
+        branch_name = prepare_run_branch(
+            repo_root,
+            args.use_branch,
+            generate_run_branch_name(),
+        )
 
         baseline_ok, baseline_context = run_baseline_checks(
             args.validation_command,

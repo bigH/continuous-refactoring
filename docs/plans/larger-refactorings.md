@@ -264,7 +264,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": ["T1.1", "T1.2"],
-  "done": false,
+  "done": true,
   "id": "T3.1",
   "review_criteria": [
     "prompts.py gains named constants CLASSIFIER_PROMPT, PLANNING_APPROACHES_PROMPT, PLANNING_PICK_BEST_PROMPT, PLANNING_EXPAND_PROMPT, PLANNING_REVIEW_PROMPT, PLANNING_FINAL_REVIEW_PROMPT, PHASE_READY_CHECK_PROMPT, PHASE_EXECUTION_PROMPT",

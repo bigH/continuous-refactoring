@@ -1,0 +1,298 @@
+from __future__ import annotations
+
+import pytest
+
+from continuous_refactoring.migrations import MigrationManifest, PhaseSpec
+from continuous_refactoring.prompts import (
+    CLASSIFIER_PROMPT,
+    PHASE_EXECUTION_PROMPT,
+    PHASE_READY_CHECK_PROMPT,
+    PLANNING_APPROACHES_PROMPT,
+    PLANNING_EXPAND_PROMPT,
+    PLANNING_FINAL_REVIEW_PROMPT,
+    PLANNING_PICK_BEST_PROMPT,
+    PLANNING_REVIEW_PROMPT,
+    compose_classifier_prompt,
+    compose_phase_execution_prompt,
+    compose_phase_ready_prompt,
+    compose_planning_prompt,
+)
+from continuous_refactoring.targeting import Target
+
+
+_TASTE = "- Prefer deletion over wrapping.\n- Fail fast at boundaries."
+
+
+def _target() -> Target:
+    return Target(
+        description="Clean up auth module",
+        files=("src/auth.py", "src/auth_test.py"),
+        scoping="Focus on dead code removal",
+    )
+
+
+def _manifest() -> MigrationManifest:
+    return MigrationManifest(
+        name="auth-cleanup",
+        created_at="2025-01-01T00:00:00.000+00:00",
+        last_touch="2025-01-02T00:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="in-progress",
+        current_phase=1,
+        phases=(
+            PhaseSpec(name="prep", file="phase-0-prep.md", done=True, ready_when="always"),
+            PhaseSpec(
+                name="migrate", file="phase-1-migrate.md",
+                done=False, ready_when="prep complete",
+            ),
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Output contracts on prompt constants
+# ---------------------------------------------------------------------------
+
+def test_classifier_output_contract() -> None:
+    assert "decision: cohesive-cleanup" in CLASSIFIER_PROMPT
+    assert "decision: needs-plan" in CLASSIFIER_PROMPT
+
+
+def test_final_review_output_contract() -> None:
+    assert "final-decision: approve-auto" in PLANNING_FINAL_REVIEW_PROMPT
+    assert "final-decision: approve-needs-human" in PLANNING_FINAL_REVIEW_PROMPT
+    assert "final-decision: reject" in PLANNING_FINAL_REVIEW_PROMPT
+
+
+def test_ready_check_output_contract() -> None:
+    assert "ready: yes" in PHASE_READY_CHECK_PROMPT
+    assert "ready: no" in PHASE_READY_CHECK_PROMPT
+    assert "ready: unverifiable" in PHASE_READY_CHECK_PROMPT
+
+
+# ---------------------------------------------------------------------------
+# Taste injection mentions
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("prompt", [
+    CLASSIFIER_PROMPT,
+    PLANNING_APPROACHES_PROMPT,
+    PLANNING_PICK_BEST_PROMPT,
+    PLANNING_EXPAND_PROMPT,
+    PLANNING_REVIEW_PROMPT,
+    PLANNING_FINAL_REVIEW_PROMPT,
+    PHASE_READY_CHECK_PROMPT,
+    PHASE_EXECUTION_PROMPT,
+])
+def test_prompts_mention_taste_injection(prompt: str) -> None:
+    lower = prompt.lower()
+    assert "taste" in lower
+    assert "injected by the caller" in lower
+
+
+# ---------------------------------------------------------------------------
+# Artifact locations in planning prompts
+# ---------------------------------------------------------------------------
+
+_PLANNING_PROMPTS = [
+    PLANNING_APPROACHES_PROMPT,
+    PLANNING_PICK_BEST_PROMPT,
+    PLANNING_EXPAND_PROMPT,
+    PLANNING_REVIEW_PROMPT,
+    PLANNING_FINAL_REVIEW_PROMPT,
+]
+
+
+def test_approaches_prompt_mentions_approaches_dir() -> None:
+    assert "approaches/<idea>.md" in PLANNING_APPROACHES_PROMPT
+
+
+@pytest.mark.parametrize("prompt", [
+    PLANNING_PICK_BEST_PROMPT,
+    PLANNING_EXPAND_PROMPT,
+    PLANNING_REVIEW_PROMPT,
+    PLANNING_FINAL_REVIEW_PROMPT,
+])
+def test_planning_prompts_mention_plan_md(prompt: str) -> None:
+    assert "plan.md" in prompt
+
+
+@pytest.mark.parametrize("prompt", [
+    PLANNING_PICK_BEST_PROMPT,
+    PLANNING_EXPAND_PROMPT,
+    PLANNING_REVIEW_PROMPT,
+    PLANNING_FINAL_REVIEW_PROMPT,
+])
+def test_planning_prompts_mention_phase_files(prompt: str) -> None:
+    assert "phase-<n>-<name>.md" in prompt
+
+
+@pytest.mark.parametrize("prompt", [
+    PLANNING_EXPAND_PROMPT,
+    PLANNING_REVIEW_PROMPT,
+    PLANNING_FINAL_REVIEW_PROMPT,
+])
+def test_planning_prompts_mention_approaches(prompt: str) -> None:
+    assert "approaches/" in prompt
+
+
+# ---------------------------------------------------------------------------
+# compose_classifier_prompt
+# ---------------------------------------------------------------------------
+
+def test_classifier_contains_base_prompt() -> None:
+    result = compose_classifier_prompt(_target(), _TASTE)
+    assert CLASSIFIER_PROMPT in result
+
+
+def test_classifier_contains_target_description() -> None:
+    target = _target()
+    result = compose_classifier_prompt(target, _TASTE)
+    assert target.description in result
+
+
+def test_classifier_contains_target_files() -> None:
+    target = _target()
+    result = compose_classifier_prompt(target, _TASTE)
+    for f in target.files:
+        assert f in result
+
+
+def test_classifier_contains_taste() -> None:
+    result = compose_classifier_prompt(_target(), _TASTE)
+    assert _TASTE in result
+
+
+def test_classifier_contains_scope() -> None:
+    target = _target()
+    result = compose_classifier_prompt(target, _TASTE)
+    assert target.scoping is not None
+    assert target.scoping in result
+
+
+def test_classifier_omits_scope_when_absent() -> None:
+    target = Target(description="test", files=())
+    result = compose_classifier_prompt(target, _TASTE)
+    assert "## Scope" not in result
+
+
+# ---------------------------------------------------------------------------
+# compose_planning_prompt
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("stage", [
+    "approaches", "pick-best", "expand", "review", "final-review",
+])
+def test_planning_contains_migration_name(stage: str) -> None:
+    result = compose_planning_prompt(stage, "auth-cleanup", _TASTE, "some context")
+    assert "auth-cleanup" in result
+
+
+@pytest.mark.parametrize("stage", [
+    "approaches", "pick-best", "expand", "review", "final-review",
+])
+def test_planning_contains_taste(stage: str) -> None:
+    result = compose_planning_prompt(stage, "mig", _TASTE, "ctx")
+    assert _TASTE in result
+
+
+@pytest.mark.parametrize("stage", [
+    "approaches", "pick-best", "expand", "review", "final-review",
+])
+def test_planning_contains_context(stage: str) -> None:
+    result = compose_planning_prompt(stage, "mig", _TASTE, "important context here")
+    assert "important context here" in result
+
+
+def test_planning_final_review_has_output_contract() -> None:
+    result = compose_planning_prompt("final-review", "mig", _TASTE, "ctx")
+    assert "final-decision: approve-auto" in result
+    assert "final-decision: approve-needs-human" in result
+    assert "final-decision: reject" in result
+
+
+def test_planning_approaches_mentions_artifacts() -> None:
+    result = compose_planning_prompt("approaches", "mig", _TASTE, "ctx")
+    assert "approaches/" in result
+
+
+# ---------------------------------------------------------------------------
+# compose_phase_ready_prompt
+# ---------------------------------------------------------------------------
+
+def test_phase_ready_contains_base_prompt() -> None:
+    manifest = _manifest()
+    result = compose_phase_ready_prompt(manifest.phases[1], manifest)
+    assert PHASE_READY_CHECK_PROMPT in result
+
+
+def test_phase_ready_contains_phase_name() -> None:
+    manifest = _manifest()
+    phase = manifest.phases[1]
+    result = compose_phase_ready_prompt(phase, manifest)
+    assert phase.name in result
+
+
+def test_phase_ready_contains_phase_file() -> None:
+    manifest = _manifest()
+    phase = manifest.phases[1]
+    result = compose_phase_ready_prompt(phase, manifest)
+    assert phase.file in result
+
+
+def test_phase_ready_contains_ready_when() -> None:
+    manifest = _manifest()
+    phase = manifest.phases[1]
+    result = compose_phase_ready_prompt(phase, manifest)
+    assert phase.ready_when in result
+
+
+def test_phase_ready_contains_manifest_name() -> None:
+    manifest = _manifest()
+    result = compose_phase_ready_prompt(manifest.phases[1], manifest)
+    assert manifest.name in result
+
+
+def test_phase_ready_contains_output_contract() -> None:
+    manifest = _manifest()
+    result = compose_phase_ready_prompt(manifest.phases[1], manifest)
+    assert "ready: yes" in result
+    assert "ready: no" in result
+    assert "ready: unverifiable" in result
+
+
+# ---------------------------------------------------------------------------
+# compose_phase_execution_prompt
+# ---------------------------------------------------------------------------
+
+def test_phase_execution_contains_base_prompt() -> None:
+    manifest = _manifest()
+    result = compose_phase_execution_prompt(manifest.phases[1], manifest, _TASTE)
+    assert PHASE_EXECUTION_PROMPT in result
+
+
+def test_phase_execution_contains_phase_name() -> None:
+    manifest = _manifest()
+    phase = manifest.phases[1]
+    result = compose_phase_execution_prompt(phase, manifest, _TASTE)
+    assert phase.name in result
+
+
+def test_phase_execution_contains_phase_file() -> None:
+    manifest = _manifest()
+    phase = manifest.phases[1]
+    result = compose_phase_execution_prompt(phase, manifest, _TASTE)
+    assert phase.file in result
+
+
+def test_phase_execution_contains_manifest_name() -> None:
+    manifest = _manifest()
+    result = compose_phase_execution_prompt(manifest.phases[1], manifest, _TASTE)
+    assert manifest.name in result
+
+
+def test_phase_execution_contains_taste() -> None:
+    manifest = _manifest()
+    result = compose_phase_execution_prompt(manifest.phases[1], manifest, _TASTE)
+    assert _TASTE in result

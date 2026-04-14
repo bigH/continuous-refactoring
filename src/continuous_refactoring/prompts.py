@@ -1,19 +1,33 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    from continuous_refactoring.migrations import MigrationManifest, PhaseSpec
     from continuous_refactoring.targeting import Target
 
 __all__ = [
+    "CLASSIFIER_PROMPT",
     "DEFAULT_FIX_AMENDMENT",
     "DEFAULT_REFACTORING_PROMPT",
     "INTERVIEW_PROMPT_TEMPLATE",
+    "PHASE_EXECUTION_PROMPT",
+    "PHASE_READY_CHECK_PROMPT",
+    "PLANNING_APPROACHES_PROMPT",
+    "PLANNING_EXPAND_PROMPT",
+    "PLANNING_FINAL_REVIEW_PROMPT",
+    "PLANNING_PICK_BEST_PROMPT",
+    "PLANNING_REVIEW_PROMPT",
+    "PlanningStage",
     "REQUIRED_PREAMBLE",
     "TASTE_UPGRADE_PROMPT_TEMPLATE",
+    "compose_classifier_prompt",
     "compose_full_prompt",
     "compose_interview_prompt",
+    "compose_phase_execution_prompt",
+    "compose_phase_ready_prompt",
+    "compose_planning_prompt",
     "compose_taste_upgrade_prompt",
     "prompt_file_text",
 ]
@@ -257,4 +271,204 @@ def compose_full_prompt(
         )
     if fix_amendment:
         sections.append(fix_amendment)
+    return "\n\n".join(sections)
+
+
+PlanningStage = Literal[
+    "approaches", "pick-best", "expand", "review", "final-review"
+]
+
+CLASSIFIER_PROMPT = """\
+You are a refactoring classifier. Analyze the target and decide whether it can be
+handled as a single cohesive cleanup batch or requires a multi-phase migration plan.
+
+Decide needs-plan when:
+- The change spans multiple module clusters with distinct rationales.
+- Coordinated modifications cannot be validated atomically.
+- Blast radius is large enough that incremental rollout reduces risk.
+
+Decide cohesive-cleanup when:
+- The change fits in one session with one rationale and one validation path.
+- All modifications share the same module cluster and can be validated together.
+
+Refactoring taste is injected by the caller. Respect it when evaluating scope
+and risk thresholds.
+
+## Output Contract
+Your final line MUST be exactly one of:
+  decision: cohesive-cleanup \u2014 <short reason>
+  decision: needs-plan \u2014 <short reason>\
+"""
+
+PLANNING_APPROACHES_PROMPT = """\
+You are a planning agent generating candidate approaches for a refactoring migration.
+
+Analyze the codebase and produce 2\u20134 distinct approach files. Each approach should
+outline a strategy, its tradeoffs, estimated phases, and risk profile.
+
+Write each approach to approaches/<idea>.md where <idea> is a short descriptive slug.
+
+Refactoring taste is injected by the caller. Respect it when designing approaches
+and evaluating tradeoffs.\
+"""
+
+PLANNING_PICK_BEST_PROMPT = """\
+You are a planning agent selecting the best approach for a refactoring migration.
+
+Review the candidate approaches in approaches/<idea>.md. Select the approach with
+the best balance of risk, clarity, and incremental verifiability.
+
+State your choice and rationale. The chosen approach will be expanded into plan.md
+and phase-<n>-<name>.md files.
+
+Refactoring taste is injected by the caller. Use it to break ties between
+comparable approaches.\
+"""
+
+PLANNING_EXPAND_PROMPT = """\
+You are a planning agent expanding the chosen approach into a detailed migration plan.
+
+Read the chosen approach from approaches/<idea>.md and produce:
+1. plan.md \u2014 the full migration plan with numbered phases, dependencies, and
+   validation strategy.
+2. phase-<n>-<name>.md for each phase \u2014 detailed instructions, scope, ready_when
+   conditions, and validation steps.
+
+Each phase must be independently verifiable. Order phases so earlier ones reduce
+risk for later ones. Every phase must leave the repository shippable.
+
+Refactoring taste is injected by the caller. Respect it when scoping phases
+and defining quality bars.\
+"""
+
+PLANNING_REVIEW_PROMPT = """\
+You are a planning reviewer examining a refactoring migration plan.
+
+Review plan.md, each phase-<n>-<name>.md file, and the approaches in
+approaches/<idea>.md for context. Check:
+- Each phase is independently verifiable and leaves the repo shippable.
+- Phase ordering minimizes risk and respects dependencies.
+- No phase requires product or architecture judgment beyond the taste.
+- Ready-when conditions are concrete and mechanically checkable.
+- The plan does not modify source files outside the migration scope.
+
+List findings as numbered items. If no findings, state "no findings."
+
+Refactoring taste is injected by the caller. Verify the plan respects it.\
+"""
+
+PLANNING_FINAL_REVIEW_PROMPT = """\
+You are performing the final gate review of a refactoring migration plan.
+
+The plan has been through at least one review-revise cycle. Assess:
+- Is the plan safe to execute automatically without human judgment?
+- Does it require human review at any decision point?
+- Is it fundamentally flawed and should be rejected?
+
+Review plan.md, phase-<n>-<name>.md files, and approaches/<idea>.md.
+
+Refactoring taste is injected by the caller. Use it as the quality bar.
+
+## Output Contract
+Your final line MUST be exactly one of:
+  final-decision: approve-auto \u2014 <short reason>
+  final-decision: approve-needs-human \u2014 <short reason>
+  final-decision: reject \u2014 <short reason>\
+"""
+
+PHASE_READY_CHECK_PROMPT = """\
+You are checking whether a migration phase is ready to execute.
+
+Assess:
+- Is the ready_when condition for this phase currently met?
+- Are prerequisites from earlier phases actually complete?
+- Is the working tree in a state where this phase can safely execute?
+
+Refactoring taste is injected by the caller. Respect it when assessing readiness.
+
+## Output Contract
+Your final line MUST be exactly one of:
+  ready: yes
+  ready: no \u2014 <reason>
+  ready: unverifiable \u2014 <reason>\
+"""
+
+PHASE_EXECUTION_PROMPT = """\
+You are executing a single phase of a refactoring migration.
+
+Execute the work described in the phase file. Follow the plan exactly.
+All changes must keep the project in a state where all tests pass.
+Do not modify files outside the scope defined in the phase plan.
+
+Refactoring taste is injected by the caller. Respect it in all code changes.\
+"""
+
+_PLANNING_STAGE_PROMPTS: dict[str, str] = {
+    "approaches": PLANNING_APPROACHES_PROMPT,
+    "pick-best": PLANNING_PICK_BEST_PROMPT,
+    "expand": PLANNING_EXPAND_PROMPT,
+    "review": PLANNING_REVIEW_PROMPT,
+    "final-review": PLANNING_FINAL_REVIEW_PROMPT,
+}
+
+
+def _format_manifest_summary(manifest: MigrationManifest) -> str:
+    phases = "\n".join(
+        f"  {i}. {p.name} ({'done' if p.done else 'pending'}) \u2014 {p.ready_when}"
+        for i, p in enumerate(manifest.phases)
+    )
+    return (
+        f"Name: {manifest.name}\n"
+        f"Status: {manifest.status}\n"
+        f"Current phase: {manifest.current_phase}\n"
+        f"Phases:\n{phases}"
+    )
+
+
+def compose_classifier_prompt(target: Target, taste: str) -> str:
+    sections: list[str] = [CLASSIFIER_PROMPT]
+    sections.append(f"## Target\n{target.description}")
+    if target.files:
+        files_text = "\n".join(f"- {f}" for f in target.files)
+        sections.append(f"## Target Files\n{files_text}")
+    if target.scoping:
+        sections.append(f"## Scope\n{target.scoping}")
+    sections.append(f"## Taste\n{taste}")
+    return "\n\n".join(sections)
+
+
+def compose_planning_prompt(
+    stage: PlanningStage,
+    migration_name: str,
+    taste: str,
+    context: str,
+) -> str:
+    base = _PLANNING_STAGE_PROMPTS[stage]
+    sections: list[str] = [base, f"## Migration\n{migration_name}"]
+    if context:
+        sections.append(f"## Context\n{context}")
+    sections.append(f"## Taste\n{taste}")
+    return "\n\n".join(sections)
+
+
+def compose_phase_ready_prompt(
+    phase: PhaseSpec, manifest: MigrationManifest,
+) -> str:
+    sections = [
+        PHASE_READY_CHECK_PROMPT,
+        f"## Phase\nName: {phase.name}\nFile: {phase.file}\nReady when: {phase.ready_when}",
+        f"## Manifest\n{_format_manifest_summary(manifest)}",
+    ]
+    return "\n\n".join(sections)
+
+
+def compose_phase_execution_prompt(
+    phase: PhaseSpec, manifest: MigrationManifest, taste: str,
+) -> str:
+    sections = [
+        PHASE_EXECUTION_PROMPT,
+        f"## Phase\nName: {phase.name}\nFile: {phase.file}",
+        f"## Manifest\n{_format_manifest_summary(manifest)}",
+        f"## Taste\n{taste}",
+    ]
     return "\n\n".join(sections)

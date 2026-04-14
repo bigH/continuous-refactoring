@@ -358,7 +358,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": ["T3.4"],
-  "done": false,
+  "done": true,
   "id": "T3.5",
   "review_criteria": [
     "tests/test_run_once_regression.py exists and contains at least three cases, all using the existing prompt_capture/noop_tests fixtures",

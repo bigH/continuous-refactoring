@@ -23,6 +23,15 @@ __all__ = [
     "require_clean_worktree",
     "run_command",
     "workspace_status_lines",
+    # migrations
+    "MigrationManifest",
+    "PhaseSpec",
+    "approaches_dir",
+    "intentional_skips_dir",
+    "load_manifest",
+    "migration_root",
+    "phase_path",
+    "save_manifest",
     # prompts
     "DEFAULT_FIX_AMENDMENT",
     "DEFAULT_REFACTORING_PROMPT",
@@ -64,6 +73,16 @@ from continuous_refactoring.git import (
     require_clean_worktree,
     run_command,
     workspace_status_lines,
+)
+from continuous_refactoring.migrations import (
+    MigrationManifest,
+    PhaseSpec,
+    approaches_dir,
+    intentional_skips_dir,
+    load_manifest,
+    migration_root,
+    phase_path,
+    save_manifest,
 )
 from continuous_refactoring.prompts import (
     DEFAULT_FIX_AMENDMENT,

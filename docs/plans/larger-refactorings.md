@@ -96,7 +96,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": [],
-  "done": false,
+  "done": true,
   "id": "T1.1",
   "review_criteria": [
     "file src/continuous_refactoring/migrations.py exists and exports MigrationManifest, PhaseSpec, load_manifest, save_manifest, migration_root, phase_path, approaches_dir, intentional_skips_dir via __all__",

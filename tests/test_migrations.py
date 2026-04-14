@@ -1,0 +1,184 @@
+from __future__ import annotations
+
+import json
+import random
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
+
+from continuous_refactoring.artifacts import ContinuousRefactorError
+from continuous_refactoring.migrations import (
+    MigrationManifest,
+    PhaseSpec,
+    approaches_dir,
+    intentional_skips_dir,
+    load_manifest,
+    migration_root,
+    phase_path,
+    save_manifest,
+)
+
+if TYPE_CHECKING:
+    pass
+
+_VALID_STATUSES = ("planning", "ready", "in-progress", "skipped", "done")
+
+
+def _random_phase(rng: random.Random, index: int) -> PhaseSpec:
+    name = "".join(rng.choices("abcdefghijklmnop", k=rng.randint(3, 10)))
+    return PhaseSpec(
+        name=name,
+        file=f"phase-{index}-{name}.md",
+        done=rng.choice([True, False]),
+        ready_when="".join(rng.choices("abcdefghijklmnop ", k=rng.randint(5, 30))),
+    )
+
+
+def _random_manifest(rng: random.Random) -> MigrationManifest:
+    num_phases = rng.randint(1, 8)
+    phases = tuple(_random_phase(rng, i) for i in range(num_phases))
+    return MigrationManifest(
+        name="".join(rng.choices("abcdef-", k=rng.randint(5, 15))),
+        created_at=f"2025-{rng.randint(1,12):02d}-{rng.randint(1,28):02d}T00:00:00.000+00:00",
+        last_touch=f"2025-{rng.randint(1,12):02d}-{rng.randint(1,28):02d}T12:00:00.000+00:00",
+        wake_up_on=rng.choice([None, "2025-06-01T00:00:00.000+00:00"]),
+        awaiting_human_review=rng.choice([True, False]),
+        status=rng.choice(_VALID_STATUSES),
+        current_phase=rng.randint(0, num_phases - 1),
+        phases=phases,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Roundtrip (property-style)
+# ---------------------------------------------------------------------------
+
+def test_manifest_roundtrip_property(tmp_path: Path) -> None:
+    rng = random.Random(42)
+    for _ in range(20):
+        manifest = _random_manifest(rng)
+        path = tmp_path / manifest.name / "manifest.json"
+        save_manifest(manifest, path)
+        loaded = load_manifest(path)
+        assert loaded == manifest
+
+
+# ---------------------------------------------------------------------------
+# Atomic write — no .tmp files left behind
+# ---------------------------------------------------------------------------
+
+def test_save_manifest_no_tmp_files(tmp_path: Path) -> None:
+    manifest = MigrationManifest(
+        name="atomic-test",
+        created_at="2025-01-01T00:00:00.000+00:00",
+        last_touch="2025-01-01T00:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="planning",
+        current_phase=0,
+        phases=(
+            PhaseSpec(name="setup", file="phase-0-setup.md", done=False, ready_when="always"),
+        ),
+    )
+    out_dir = tmp_path / "atomic"
+    path = out_dir / "manifest.json"
+    save_manifest(manifest, path)
+
+    tmp_files = list(out_dir.glob("*.tmp"))
+    assert tmp_files == []
+    assert path.exists()
+
+
+# ---------------------------------------------------------------------------
+# Unknown status rejection
+# ---------------------------------------------------------------------------
+
+def test_load_manifest_rejects_unknown_status(tmp_path: Path) -> None:
+    path = tmp_path / "bad" / "manifest.json"
+    path.parent.mkdir(parents=True)
+    payload = {
+        "name": "bad-migration",
+        "created_at": "2025-01-01T00:00:00.000+00:00",
+        "last_touch": "2025-01-01T00:00:00.000+00:00",
+        "status": "exploded",
+        "current_phase": 0,
+        "phases": [],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ContinuousRefactorError, match="Unknown migration status"):
+        load_manifest(path)
+
+
+# ---------------------------------------------------------------------------
+# Default values for optional fields
+# ---------------------------------------------------------------------------
+
+def test_load_manifest_defaults_optional_fields(tmp_path: Path) -> None:
+    path = tmp_path / "defaults" / "manifest.json"
+    path.parent.mkdir(parents=True)
+    payload = {
+        "name": "minimal",
+        "created_at": "2025-01-01T00:00:00.000+00:00",
+        "last_touch": "2025-01-01T00:00:00.000+00:00",
+        "status": "planning",
+        "current_phase": 0,
+        "phases": [
+            {"name": "init", "file": "phase-0-init.md", "done": False, "ready_when": "always"},
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    loaded = load_manifest(path)
+
+    assert loaded.wake_up_on is None
+    assert loaded.awaiting_human_review is False
+
+
+# ---------------------------------------------------------------------------
+# Path helpers
+# ---------------------------------------------------------------------------
+
+def test_migration_root() -> None:
+    root = migration_root(Path("/live"), "my-migration")
+    assert root == Path("/live/my-migration")
+
+
+def test_phase_path_returns_expected() -> None:
+    phase = PhaseSpec(name="setup", file="phase-0-setup.md", done=False, ready_when="always")
+    result = phase_path(Path("/live"), "mig", phase)
+    assert result == Path("/live/mig/phase-0-setup.md")
+
+
+def test_approaches_dir_returns_expected() -> None:
+    result = approaches_dir(Path("/live"), "mig")
+    assert result == Path("/live/mig/approaches")
+
+
+def test_intentional_skips_dir_returns_expected() -> None:
+    result = intentional_skips_dir(Path("/live"))
+    assert result == Path("/live/__intentional_skips__")
+
+
+# ---------------------------------------------------------------------------
+# JSON output format
+# ---------------------------------------------------------------------------
+
+def test_save_manifest_uses_indent_and_sorted_keys(tmp_path: Path) -> None:
+    manifest = MigrationManifest(
+        name="format-check",
+        created_at="2025-01-01T00:00:00.000+00:00",
+        last_touch="2025-01-01T00:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="ready",
+        current_phase=0,
+        phases=(),
+    )
+    path = tmp_path / "fmt" / "manifest.json"
+    save_manifest(manifest, path)
+
+    raw = path.read_text(encoding="utf-8")
+    parsed = json.loads(raw)
+    expected = json.dumps(parsed, indent=2, sort_keys=True) + "\n"
+    assert raw == expected

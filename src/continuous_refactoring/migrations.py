@@ -4,9 +4,9 @@ import json
 import os
 import tempfile
 from dataclasses import asdict, dataclass, replace
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal
+from typing import Literal, cast
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
 
@@ -74,11 +74,18 @@ def intentional_skips_dir(live_dir: Path) -> Path:
 # Manifest I/O
 # ---------------------------------------------------------------------------
 
+
+def _coerce_status(raw_status: object) -> MigrationStatus:
+    if not isinstance(raw_status, str):
+        raise ContinuousRefactorError(f"Migration status must be a string: {raw_status!r}")
+    if raw_status not in _VALID_STATUSES:
+        raise ContinuousRefactorError(f"Unknown migration status: {raw_status!r}")
+    return cast(MigrationStatus, raw_status)
+
+
 def load_manifest(path: Path) -> MigrationManifest:
     raw = json.loads(path.read_text(encoding="utf-8"))
-    status = raw["status"]
-    if status not in _VALID_STATUSES:
-        raise ContinuousRefactorError(f"Unknown migration status: {status!r}")
+    status = _coerce_status(raw["status"])
     phases = tuple(
         PhaseSpec(
             name=p["name"],

@@ -12,6 +12,7 @@ from pathlib import Path
 __all__ = [
     "ProjectEntry",
     "ResolvedProject",
+    "TASTE_CURRENT_VERSION",
     "app_data_dir",
     "default_taste_text",
     "ensure_taste_file",
@@ -20,22 +21,38 @@ __all__ = [
     "load_manifest",
     "load_taste",
     "manifest_path",
+    "parse_taste_version",
     "register_project",
     "resolve_live_migrations_dir",
     "resolve_project",
     "save_manifest",
     "set_live_migrations_dir",
+    "taste_is_stale",
     "xdg_data_home",
 ]
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
 
+TASTE_CURRENT_VERSION = 1
+
 _DEFAULT_TASTE = """\
+taste-scoping-version: 1
+
 - Validate at the edges and stay lean in the middle.
 - Keep exception translation only at real boundaries and preserve causes when translating.
 - Keep comments only when they explain a real boundary contract or a genuinely deferred design issue that code alone cannot make obvious.
 - Remove fallback, compat, adapter, migrated, legacy, or normalize-shaped code when evidence shows it is no longer needed.
 - Merge modules when splits hurt locality more than they help. Split modules when one file hides unrelated responsibilities.
+
+## large-scope decisions
+- When to split a module vs. unify related modules.
+- When to introduce or remove an interface or abstraction boundary.
+- When a cross-cutting concern warrants a shared library vs. inline duplication.
+
+## rollout style
+- Caution level for changes with wide blast radius.
+- Feature-flag user-visible behavior changes before full rollout.
+- Prefer incremental, reviewable steps over large-bang rewrites.
 """
 
 
@@ -208,6 +225,22 @@ def set_live_migrations_dir(project_uuid: str, relative_dir: str) -> None:
 # ---------------------------------------------------------------------------
 # Taste
 # ---------------------------------------------------------------------------
+
+def parse_taste_version(text: str) -> int | None:
+    first_line = text.split("\n", 1)[0].strip()
+    prefix = "taste-scoping-version:"
+    if not first_line.startswith(prefix):
+        return None
+    raw = first_line[len(prefix):].strip()
+    try:
+        return int(raw)
+    except ValueError:
+        return None
+
+
+def taste_is_stale(text: str) -> bool:
+    return parse_taste_version(text) != TASTE_CURRENT_VERSION
+
 
 def default_taste_text() -> str:
     return _DEFAULT_TASTE

@@ -170,7 +170,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": [],
-  "done": false,
+  "done": true,
   "id": "T2.1",
   "review_criteria": [
     "_DEFAULT_TASTE in src/continuous_refactoring/config.py begins with a frontmatter line 'taste-scoping-version: 1' followed by a blank line, then the existing bullets, then two new sections with bullet stubs: 'large-scope decisions' (when to split/unify/introduce interfaces) and 'rollout style' (caution level; feature-flag user-visible changes; etc.)",

@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
 from continuous_refactoring.config import (
+    TASTE_CURRENT_VERSION,
     app_data_dir,
     default_taste_text,
     ensure_taste_file,
@@ -18,10 +19,12 @@ from continuous_refactoring.config import (
     global_dir,
     load_manifest,
     load_taste,
+    parse_taste_version,
     register_project,
     resolve_live_migrations_dir,
     resolve_project,
     save_manifest,
+    taste_is_stale,
     xdg_data_home,
     ProjectEntry,
     ResolvedProject,
@@ -422,3 +425,72 @@ def test_resolve_live_migrations_dir_rejects_escape(
     import pytest as _pytest
     with _pytest.raises(ContinuousRefactorError, match="escapes repo"):
         resolve_live_migrations_dir(project)
+
+
+# ---------------------------------------------------------------------------
+# Taste versioning
+# ---------------------------------------------------------------------------
+
+def test_parse_taste_version_present() -> None:
+    text = "taste-scoping-version: 1\n\n- Some bullet.\n"
+    assert parse_taste_version(text) == 1
+
+
+def test_parse_taste_version_higher() -> None:
+    text = "taste-scoping-version: 42\n\n- Bullet.\n"
+    assert parse_taste_version(text) == 42
+
+
+def test_parse_taste_version_missing() -> None:
+    text = "- Just bullets, no header.\n- Another bullet.\n"
+    assert parse_taste_version(text) is None
+
+
+def test_parse_taste_version_malformed_non_integer() -> None:
+    text = "taste-scoping-version: abc\n\n- Bullet.\n"
+    assert parse_taste_version(text) is None
+
+
+def test_parse_taste_version_malformed_empty_value() -> None:
+    text = "taste-scoping-version:\n\n- Bullet.\n"
+    assert parse_taste_version(text) is None
+
+
+def test_parse_taste_version_empty_string() -> None:
+    assert parse_taste_version("") is None
+
+
+def test_taste_is_stale_legacy_no_header() -> None:
+    legacy = "- Old taste without version header.\n"
+    assert taste_is_stale(legacy) is True
+
+
+def test_taste_is_stale_false_for_current() -> None:
+    text = f"taste-scoping-version: {TASTE_CURRENT_VERSION}\n\n- Bullet.\n"
+    assert taste_is_stale(text) is False
+
+
+def test_taste_is_stale_true_for_wrong_version() -> None:
+    text = "taste-scoping-version: 999\n\n- Bullet.\n"
+    assert taste_is_stale(text) is True
+
+
+def test_default_taste_has_version_header() -> None:
+    text = default_taste_text()
+    assert text.startswith("taste-scoping-version: 1\n")
+    assert parse_taste_version(text) == TASTE_CURRENT_VERSION
+    assert not taste_is_stale(text)
+
+
+def test_default_taste_has_large_scope_section() -> None:
+    text = default_taste_text()
+    assert "## large-scope decisions" in text
+    assert "split" in text.lower()
+    assert "interface" in text.lower() or "abstraction" in text.lower()
+
+
+def test_default_taste_has_rollout_style_section() -> None:
+    text = default_taste_text()
+    assert "## rollout style" in text
+    assert "caution" in text.lower()
+    assert "feature-flag" in text.lower()

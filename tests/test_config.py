@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     import pytest
 
+from continuous_refactoring.artifacts import ContinuousRefactorError
 from continuous_refactoring.config import (
     app_data_dir,
     default_taste_text,
@@ -18,10 +19,12 @@ from continuous_refactoring.config import (
     load_manifest,
     load_taste,
     register_project,
+    resolve_live_migrations_dir,
     resolve_project,
     save_manifest,
     xdg_data_home,
     ProjectEntry,
+    ResolvedProject,
 )
 
 
@@ -310,3 +313,112 @@ def test_manifest_roundtrip_property(
     save_manifest(entries)
     loaded = load_manifest()
     assert loaded == entries
+
+
+# ---------------------------------------------------------------------------
+# live_migrations_dir
+# ---------------------------------------------------------------------------
+
+def test_entry_roundtrip_with_live_migrations_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+
+    entry = ProjectEntry(
+        uuid=str(uuid.uuid4()),
+        path="/tmp/proj",
+        git_remote=None,
+        created_at="2025-01-01T00:00:00.000+00:00",
+        live_migrations_dir=".migrations",
+    )
+    save_manifest({entry.uuid: entry})
+    loaded = load_manifest()
+    assert loaded[entry.uuid] == entry
+    assert loaded[entry.uuid].live_migrations_dir == ".migrations"
+
+
+def test_entry_roundtrip_without_live_migrations_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+
+    entry = ProjectEntry(
+        uuid=str(uuid.uuid4()),
+        path="/tmp/proj",
+        git_remote=None,
+        created_at="2025-01-01T00:00:00.000+00:00",
+    )
+    save_manifest({entry.uuid: entry})
+    loaded = load_manifest()
+    assert loaded[entry.uuid] == entry
+    assert loaded[entry.uuid].live_migrations_dir is None
+
+
+def test_legacy_manifest_without_live_migrations_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    import json
+
+    mpath = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
+    mpath.parent.mkdir(parents=True, exist_ok=True)
+    uid = str(uuid.uuid4())
+    legacy_data = {
+        "projects": {
+            uid: {
+                "uuid": uid,
+                "path": "/tmp/legacy",
+                "git_remote": None,
+                "created_at": "2024-01-01T00:00:00.000+00:00",
+            }
+        }
+    }
+    mpath.write_text(json.dumps(legacy_data), encoding="utf-8")
+
+    loaded = load_manifest()
+    assert uid in loaded
+    assert loaded[uid].live_migrations_dir is None
+
+
+def test_resolve_live_migrations_dir_none_when_unset(
+    tmp_path: Path,
+) -> None:
+    entry = ProjectEntry(
+        uuid="abc",
+        path=str(tmp_path),
+        git_remote=None,
+        created_at="2025-01-01T00:00:00.000+00:00",
+    )
+    project = ResolvedProject(entry=entry, project_dir=tmp_path / "data")
+    assert resolve_live_migrations_dir(project) is None
+
+
+def test_resolve_live_migrations_dir_valid(
+    tmp_path: Path,
+) -> None:
+    entry = ProjectEntry(
+        uuid="abc",
+        path=str(tmp_path),
+        git_remote=None,
+        created_at="2025-01-01T00:00:00.000+00:00",
+        live_migrations_dir=".migrations",
+    )
+    project = ResolvedProject(entry=entry, project_dir=tmp_path / "data")
+    result = resolve_live_migrations_dir(project)
+    assert result == tmp_path / ".migrations"
+
+
+def test_resolve_live_migrations_dir_rejects_escape(
+    tmp_path: Path,
+) -> None:
+    entry = ProjectEntry(
+        uuid="abc",
+        path=str(tmp_path),
+        git_remote=None,
+        created_at="2025-01-01T00:00:00.000+00:00",
+        live_migrations_dir="../elsewhere",
+    )
+    project = ResolvedProject(entry=entry, project_dir=tmp_path / "data")
+    import pytest as _pytest
+    with _pytest.raises(ContinuousRefactorError, match="escapes repo"):
+        resolve_live_migrations_dir(project)

@@ -21,6 +21,7 @@ __all__ = [
     "load_taste",
     "manifest_path",
     "register_project",
+    "resolve_live_migrations_dir",
     "resolve_project",
     "save_manifest",
     "xdg_data_home",
@@ -43,6 +44,7 @@ class ProjectEntry:
     path: str
     git_remote: str | None
     created_at: str
+    live_migrations_dir: str | None = None
 
 
 @dataclass(frozen=True)
@@ -84,6 +86,7 @@ def _entry_from_dict(data: dict[str, object]) -> ProjectEntry:
         path=str(data["path"]),
         git_remote=data.get("git_remote"),  # type: ignore[arg-type]
         created_at=str(data["created_at"]),
+        live_migrations_dir=data.get("live_migrations_dir"),  # type: ignore[arg-type]
     )
 
 
@@ -180,6 +183,18 @@ def resolve_project(path: Path) -> ResolvedProject:
             f"Project not registered: {path.resolve()}"
         )
     return ResolvedProject(entry=entry, project_dir=_project_dir(entry.uuid))
+
+
+def resolve_live_migrations_dir(project: ResolvedProject) -> Path | None:
+    if project.entry.live_migrations_dir is None:
+        return None
+    repo_root = Path(project.entry.path)
+    resolved = (repo_root / project.entry.live_migrations_dir).resolve()
+    if not resolved.is_relative_to(repo_root):
+        raise ContinuousRefactorError(
+            f"live_migrations_dir escapes repo: {project.entry.live_migrations_dir}"
+        )
+    return resolved
 
 
 # ---------------------------------------------------------------------------

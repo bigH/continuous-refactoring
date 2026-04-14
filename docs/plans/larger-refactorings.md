@@ -121,7 +121,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": [],
-  "done": false,
+  "done": true,
   "id": "T1.2",
   "review_criteria": [
     "ProjectEntry in src/continuous_refactoring/config.py gains an optional field live_migrations_dir:str|None (stored as a repo-relative string, resolved later)",

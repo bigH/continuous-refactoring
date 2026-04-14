@@ -453,7 +453,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": ["T1.1", "T1.2", "T2.2", "T2.3", "T2.4"],
-  "done": false,
+  "done": true,
   "id": "T5.1",
   "review_criteria": [
     "cli.py gains a `review` subparser with nested subcommands `list` and `perform`",

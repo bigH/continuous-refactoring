@@ -183,6 +183,24 @@ def build_parser() -> argparse.ArgumentParser:
         help="Verify and upgrade global configuration.",
     )
 
+    review_parser = subparsers.add_parser(
+        "review",
+        help="Review migrations awaiting human review.",
+    )
+    review_sub = review_parser.add_subparsers(dest="review_command")
+    review_sub.add_parser("list", help="List migrations flagged for review.")
+    perform_parser = review_sub.add_parser(
+        "perform",
+        help="Perform review on a flagged migration.",
+    )
+    perform_parser.add_argument("migration", help="Migration name to review.")
+    perform_parser.add_argument(
+        "--with", dest="agent", choices=("codex", "claude"), required=True,
+        help="Agent backend.",
+    )
+    perform_parser.add_argument("--model", required=True, help="Model name.")
+    perform_parser.add_argument("--effort", required=True, help="Effort level.")
+
     return parser
 
 
@@ -452,6 +470,51 @@ def _handle_run(args: argparse.Namespace) -> None:
         raise SystemExit(1) from error
 
 
+def _handle_review_list() -> None:
+    from continuous_refactoring.config import resolve_live_migrations_dir, resolve_project
+    from continuous_refactoring.migrations import load_manifest as load_migration_manifest
+
+    try:
+        project = resolve_project(Path.cwd().resolve())
+    except ContinuousRefactorError:
+        print(
+            "Error: project not initialized; no live-migrations-dir available.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    live_dir = resolve_live_migrations_dir(project)
+    if live_dir is None:
+        print(
+            "Error: no live-migrations-dir configured for this project.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    if not live_dir.is_dir():
+        return
+
+    for child in sorted(live_dir.iterdir()):
+        if not child.is_dir() or child.name.startswith("__"):
+            continue
+        manifest_file = child / "manifest.json"
+        if not manifest_file.exists():
+            continue
+        manifest = load_migration_manifest(manifest_file)
+        if manifest.awaiting_human_review:
+            print(
+                f"{manifest.name}\t{manifest.status}\t"
+                f"{manifest.current_phase}\t{manifest.last_touch}"
+            )
+
+
+def _handle_review(args: argparse.Namespace) -> None:
+    if getattr(args, "review_command", None) == "list":
+        return _handle_review_list()
+    print("Usage: continuous-refactoring review {list,perform}", file=sys.stderr)
+    raise SystemExit(2)
+
+
 def _maybe_warn_stale_taste() -> None:
     from continuous_refactoring.config import load_taste, resolve_project, taste_is_stale
 
@@ -482,6 +545,8 @@ def cli_main() -> None:
         return _handle_taste(args)
     if args.command == "upgrade":
         return _handle_upgrade(args)
+    if args.command == "review":
+        return _handle_review(args)
     if args.command == "run-once":
         return _handle_run_once(args)
     if args.command == "run":

@@ -311,6 +311,37 @@ def _dispatch(
     )
 
 
+def _extract_claude_final_message(source: str) -> str | None:
+    """Claude stream-json output wraps the final assistant message inside
+    ``{"type":"result","result":"..."}``; return that field so the sentinel
+    scanner sees plain text rather than JSON-wrapped events.
+    """
+    for raw_line in reversed(source.splitlines()):
+        idx = raw_line.find('{"type":"result"')
+        if idx < 0:
+            continue
+        try:
+            event = json.loads(raw_line[idx:])
+        except json.JSONDecodeError:
+            continue
+        text = event.get("result")
+        return text if isinstance(text, str) else None
+    return None
+
+
+def _scan_for_sentinel(text: str) -> tuple[bool, str] | None:
+    for raw_line in reversed(text.splitlines()):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if line == REVIEW_OK:
+            return True, ""
+        if line.startswith(REVIEW_FAILED):
+            reason = line[len(REVIEW_FAILED):].lstrip(" :-") or "unspecified"
+            return False, reason
+    return None
+
+
 def _review_verdict(
     result: CommandCapture,
     last_message_path: Path | None = None,
@@ -319,9 +350,9 @@ def _review_verdict(
 
     Codex writes its final assistant message to ``last_message_path`` via
     ``--output-last-message`` and NOT to stdout, so check that file first.
-    Claude emits the full conversation to stdout. In either source, scan
-    bottom-up and skip non-sentinel lines so trailing banners (``tokens used``,
-    ``session complete``) don't clobber a real verdict.
+    Claude emits stream-json, where the sentinel is buried inside a
+    ``{"type":"result","result":"..."}`` envelope -- unwrap that before
+    scanning. Fall back to a plain-text scan so either format still works.
     """
     sources: list[str] = []
     if last_message_path is not None and last_message_path.exists():
@@ -332,15 +363,14 @@ def _review_verdict(
     sources.append(result.stderr)
 
     for source in sources:
-        for raw_line in reversed(source.splitlines()):
-            line = raw_line.strip()
-            if not line:
-                continue
-            if line == REVIEW_OK:
-                return True, ""
-            if line.startswith(REVIEW_FAILED):
-                reason = line[len(REVIEW_FAILED):].lstrip(" :-") or "unspecified"
-                return False, reason
+        claude_final = _extract_claude_final_message(source)
+        if claude_final is not None:
+            verdict = _scan_for_sentinel(claude_final)
+            if verdict is not None:
+                return verdict
+        verdict = _scan_for_sentinel(source)
+        if verdict is not None:
+            return verdict
     return False, "review agent emitted no REVIEW_OK/REVIEW_FAILED sentinel."
 
 

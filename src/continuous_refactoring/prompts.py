@@ -33,6 +33,26 @@ __all__ = [
     "compose_taste_upgrade_prompt",
     "prompt_file_text",
 ]
+
+
+def _join_sections(*sections: str | None) -> str:
+    return "\n\n".join(section for section in sections if section)
+
+
+def _format_target_files(files: tuple[str, ...]) -> str | None:
+    if not files:
+        return None
+    files_text = "\n".join(f"- {f}" for f in files)
+    return f"## Target Files\n{files_text}"
+
+
+def _first_scope(*scopes: str | None) -> str | None:
+    for scope in scopes:
+        if scope:
+            return f"## Scope\n{scope}"
+    return None
+
+
 REQUIRED_PREAMBLE = (
     "All changes must keep the project in a state where all tests pass. "
     "Do not finish unless the repository is green after your refactor."
@@ -251,29 +271,27 @@ def compose_full_prompt(
     previous_failure: str | None = None,
     fix_amendment: str | None = None,
 ) -> str:
-    sections = [f"Attempt {attempt}", base_prompt, REQUIRED_PREAMBLE]
-    sections.append(f"## Refactoring Taste\n{taste}")
-    if target.files:
-        files_text = "\n".join(f"- {f}" for f in target.files)
-        sections.append(f"## Target Files\n{files_text}")
-    if target.scoping or scope_instruction:
-        scope = target.scoping or scope_instruction
-        sections.append(f"## Scope\n{scope}")
-    sections.append(f"## Validation\nRun: `{validation_command}`")
+    sections: list[str] = [
+        f"Attempt {attempt}",
+        base_prompt,
+        REQUIRED_PREAMBLE,
+        f"## Refactoring Taste\n{taste}",
+        _format_target_files(target.files),
+        _first_scope(target.scoping, scope_instruction),
+        f"## Validation\nRun: `{validation_command}`",
+    ]
     if previous_failure:
         # previous_failure is summarize_output's tail (40 lines of validation command
         # or agent stdout+stderr). Verbatim input; trusted but not sanitized.
-        sections.append("Previous attempt failed tests with this output:\n")
-        sections.append(previous_failure)
-        sections.append(
-            "Use this as context only if it helps; do not copy test output into code."
-        )
-        sections.append(
-            "Only fix failures introduced by this refactoring pass."
-        )
+        sections.extend([
+            "Previous attempt failed tests with this output:\n",
+            previous_failure,
+            "Use this as context only if it helps; do not copy test output into code.",
+            "Only fix failures introduced by this refactoring pass.",
+        ])
     if fix_amendment:
         sections.append(fix_amendment)
-    return "\n\n".join(sections)
+    return _join_sections(*sections)
 
 
 PlanningStage = Literal[
@@ -428,15 +446,13 @@ def _format_manifest_summary(manifest: MigrationManifest) -> str:
 
 
 def compose_classifier_prompt(target: Target, taste: str) -> str:
-    sections: list[str] = [CLASSIFIER_PROMPT]
-    sections.append(f"## Target\n{target.description}")
-    if target.files:
-        files_text = "\n".join(f"- {f}" for f in target.files)
-        sections.append(f"## Target Files\n{files_text}")
-    if target.scoping:
-        sections.append(f"## Scope\n{target.scoping}")
-    sections.append(f"## Taste\n{taste}")
-    return "\n\n".join(sections)
+    return _join_sections(
+        CLASSIFIER_PROMPT,
+        f"## Target\n{target.description}",
+        _format_target_files(target.files),
+        _first_scope(target.scoping),
+        f"## Taste\n{taste}",
+    )
 
 
 def compose_planning_prompt(
@@ -446,34 +462,33 @@ def compose_planning_prompt(
     context: str,
 ) -> str:
     base = _PLANNING_STAGE_PROMPTS[stage]
-    sections: list[str] = [base, f"## Migration\n{migration_name}"]
-    if context:
-        sections.append(f"## Context\n{context}")
-    sections.append(f"## Taste\n{taste}")
-    return "\n\n".join(sections)
+    return _join_sections(
+        base,
+        f"## Migration\n{migration_name}",
+        f"## Context\n{context}" if context else None,
+        f"## Taste\n{taste}",
+    )
 
 
 def compose_phase_ready_prompt(
     phase: PhaseSpec, manifest: MigrationManifest,
 ) -> str:
-    sections = [
+    return _join_sections(
         PHASE_READY_CHECK_PROMPT,
         f"## Phase\nName: {phase.name}\nFile: {phase.file}\nReady when: {phase.ready_when}",
         f"## Manifest\n{_format_manifest_summary(manifest)}",
-    ]
-    return "\n\n".join(sections)
+    )
 
 
 def compose_phase_execution_prompt(
     phase: PhaseSpec, manifest: MigrationManifest, taste: str,
 ) -> str:
-    sections = [
+    return _join_sections(
         PHASE_EXECUTION_PROMPT,
         f"## Phase\nName: {phase.name}\nFile: {phase.file}",
         f"## Manifest\n{_format_manifest_summary(manifest)}",
         f"## Taste\n{taste}",
-    ]
-    return "\n\n".join(sections)
+    )
 
 
 REVIEW_PERFORM_PROMPT = """\
@@ -506,12 +521,12 @@ def compose_review_perform_prompt(
     phase_file: str | None,
     manifest: MigrationManifest,
 ) -> str:
-    sections: list[str] = [REVIEW_PERFORM_PROMPT]
-    sections.append(f"## Migration\nName: {migration_name}")
-    sections.append(
-        f"## Manifest\nPath: {manifest_path}\n{_format_manifest_summary(manifest)}"
-    )
-    sections.append(f"## Plan\nPath: {plan_path}")
+    sections: list[str] = [
+        REVIEW_PERFORM_PROMPT,
+        f"## Migration\nName: {migration_name}",
+        f"## Manifest\nPath: {manifest_path}\n{_format_manifest_summary(manifest)}",
+        f"## Plan\nPath: {plan_path}",
+    ]
     if phase_file:
         sections.append(f"## Current Phase File\n{phase_file}")
-    return "\n\n".join(sections)
+    return _join_sections(*sections)

@@ -12,6 +12,7 @@ from continuous_refactoring.prompts import (
     PLANNING_FINAL_REVIEW_PROMPT,
     PLANNING_PICK_BEST_PROMPT,
     PLANNING_REVIEW_PROMPT,
+    compose_full_prompt,
     compose_classifier_prompt,
     compose_phase_execution_prompt,
     compose_phase_ready_prompt,
@@ -215,6 +216,47 @@ def test_planning_final_review_has_output_contract() -> None:
 def test_planning_approaches_mentions_artifacts() -> None:
     result = compose_planning_prompt("approaches", "mig", _TASTE, "ctx")
     assert "approaches/" in result
+
+
+def test_full_prompt_prefers_target_scope_over_scope_instruction() -> None:
+    target = Target(
+        description="foo",
+        files=("src/foo.py",),
+        scoping="module scope from target",
+        model_override=None,
+        effort_override=None,
+    )
+    result = compose_full_prompt(
+        base_prompt="BASE-PROMPT",
+        taste="taste",
+        target=target,
+        scope_instruction="scope instruction fallback",
+        validation_command="uv run pytest",
+        attempt=1,
+    )
+
+    assert "## Scope\nmodule scope from target" in result
+    assert "## Scope\nscope instruction fallback" not in result
+
+
+def test_full_prompt_omits_scope_section_without_scoping_or_instruction() -> None:
+    target = Target(
+        description="foo",
+        files=(),
+        scoping=None,
+        model_override=None,
+        effort_override=None,
+    )
+    result = compose_full_prompt(
+        base_prompt="BASE-PROMPT",
+        taste="taste",
+        target=target,
+        scope_instruction=None,
+        validation_command="uv run pytest",
+        attempt=1,
+    )
+
+    assert "## Scope" not in result
 
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+from enum import Enum
 import subprocess
 import sys
 import textwrap
@@ -64,6 +65,23 @@ TASK_BLOCK_RE = re.compile(
     re.MULTILINE,
 )
 STATUS_RE = re.compile(r"^Status:\s*(?P<value>.+?)\s*$", re.MULTILINE)
+
+
+class PlanStatus(str, Enum):
+    TODO = "todo"
+    AWAITING = "awaiting"
+    FAILED = "failed"
+
+
+def parse_plan_status(raw: str) -> PlanStatus:
+    normalized = raw.strip().lower()
+    if normalized.startswith(PlanStatus.TODO.value):
+        return PlanStatus.TODO
+    if normalized.startswith(PlanStatus.AWAITING.value):
+        return PlanStatus.AWAITING
+    if normalized.startswith(PlanStatus.FAILED.value):
+        return PlanStatus.FAILED
+    raise ValueError(f"unrecognized plan status: {raw!r}")
 
 REVIEW_OK = "REVIEW_OK"
 REVIEW_FAILED = "REVIEW_FAILED"
@@ -601,14 +619,19 @@ def main(argv: list[str] | None = None) -> int:
 
     plan = parse_plan(PLAN_PATH.read_text(encoding="utf-8"))
     validate_plan(plan)
+    try:
+        status = parse_plan_status(plan.status)
+    except ValueError as exc:
+        print(f"unrecognized plan status: {plan.status!r}", file=sys.stderr)
+        return 1
 
-    if plan.status.lower().startswith("failed"):
+    if status is PlanStatus.FAILED:
         print(f"plan is failed: {plan.status}", file=sys.stderr)
         return 1
-    if plan.status.lower().startswith("awaiting"):
+    if status is PlanStatus.AWAITING:
         print(f"plan is blocked: {plan.status}")
         return 0
-    if not plan.status.lower().startswith("todo"):
+    if status is not PlanStatus.TODO:
         print(f"unrecognized plan status: {plan.status!r}", file=sys.stderr)
         return 1
 
@@ -634,10 +657,20 @@ def main(argv: list[str] | None = None) -> int:
         plan_text = PLAN_PATH.read_text(encoding="utf-8")
         plan = parse_plan(plan_text)
         validate_plan(plan)
+        try:
+            status = parse_plan_status(plan.status)
+        except ValueError:
+            artifacts.log(
+                "ERROR",
+                f"plan status is now unrecognized: {plan.status!r}",
+                event="invalid_status",
+            )
+            artifacts.finish("failed", error_message="unrecognized plan status")
+            return 1
 
-        if not plan.status.lower().startswith("todo"):
+        if status is not PlanStatus.TODO:
             artifacts.log("INFO", f"plan status is now {plan.status!r}; stopping.")
-            return 0 if plan.status.lower().startswith("awaiting") else 1
+            return 0 if status is PlanStatus.AWAITING else 1
 
         task = pick_next_task(plan)
         if task is None:

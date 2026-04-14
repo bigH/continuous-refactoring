@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
 from continuous_refactoring.artifacts import CommandCapture
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -129,3 +130,18 @@ def test_stderr_scan_falls_back_when_stdout_lacks_sentinel() -> None:
     ok, reason = rlrp._review_verdict(_capture(stdout=stdout, stderr=stderr))
     assert ok is False
     assert reason == "tests red"
+
+
+def test_parse_plan_status_understands_prefixed_states() -> None:
+    assert rlrp.parse_plan_status("todo") is rlrp.PlanStatus.TODO
+    assert rlrp.parse_plan_status("TODO") is rlrp.PlanStatus.TODO
+    assert rlrp.parse_plan_status("awaiting human review") is rlrp.PlanStatus.AWAITING
+    assert (
+        rlrp.parse_plan_status("failed -- incompatible task state")
+        is rlrp.PlanStatus.FAILED
+    )
+
+
+def test_parse_plan_status_rejects_unknown() -> None:
+    with pytest.raises(ValueError, match="unrecognized plan status"):
+        rlrp.parse_plan_status("stalled")

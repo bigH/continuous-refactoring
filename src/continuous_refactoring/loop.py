@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import random
+import re
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import argparse
+
+    from continuous_refactoring.artifacts import RunArtifacts
 
 __all__ = [
     "run_baseline_checks",
@@ -23,7 +26,11 @@ from continuous_refactoring.agent import (
     run_tests,
     summarize_output,
 )
-from continuous_refactoring.config import load_taste, resolve_project
+from continuous_refactoring.config import (
+    load_taste,
+    resolve_live_migrations_dir,
+    resolve_project,
+)
 from continuous_refactoring.git import (
     detect_main_branch,
     discard_workspace_changes,
@@ -38,12 +45,14 @@ from continuous_refactoring.git import (
     revert_to,
     run_command,
 )
+from continuous_refactoring.planning import run_planning
 from continuous_refactoring.prompts import (
     DEFAULT_FIX_AMENDMENT,
     DEFAULT_REFACTORING_PROMPT,
     compose_full_prompt,
     prompt_file_text,
 )
+from continuous_refactoring.routing import classify_target
 from continuous_refactoring.targeting import Target, resolve_targets
 
 
@@ -71,6 +80,61 @@ def _load_taste_safe(repo_root: Path) -> str:
         return load_taste(project)
     except ContinuousRefactorError:
         return load_taste(None)
+
+
+def _resolve_live_migrations_dir(repo_root: Path) -> Path | None:
+    try:
+        project = resolve_project(repo_root)
+    except ContinuousRefactorError:
+        return None
+    return resolve_live_migrations_dir(project)
+
+
+def _migration_name_from_target(target: Target) -> str:
+    from datetime import datetime
+
+    slug = re.sub(r"[^a-z0-9]+", "-", target.description.lower()).strip("-")
+    ts = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S")
+    prefix = slug[:40] if slug else "migration"
+    return f"{prefix}-{ts}"
+
+
+def _route_and_run(
+    target: Target,
+    taste: str,
+    repo_root: Path,
+    artifacts: RunArtifacts,
+    *,
+    agent: str,
+    model: str,
+    effort: str,
+    timeout: int | None,
+    commit_message_prefix: str,
+) -> bool:
+    live_dir = _resolve_live_migrations_dir(repo_root)
+    if live_dir is None:
+        return False
+
+    decision = classify_target(
+        target, taste, repo_root, artifacts,
+        agent=agent, model=model, effort=effort, timeout=timeout,
+    )
+    print(f"Classification: {decision} — {target.description}")
+
+    if decision == "cohesive-cleanup":
+        return False
+
+    migration_name = _migration_name_from_target(target)
+    outcome = run_planning(
+        migration_name, target.description, taste, repo_root, live_dir, artifacts,
+        agent=agent, model=model, effort=effort, timeout=timeout,
+    )
+
+    if repo_change_count(repo_root):
+        git_commit(repo_root, f"{commit_message_prefix}: plan {migration_name}")
+
+    print(f"Planning: {outcome.status} — {outcome.reason}")
+    return True
 
 
 def _resolve_base_prompt(args: argparse.Namespace) -> str:
@@ -146,6 +210,15 @@ def run_once(args: argparse.Namespace) -> int:
             args.use_branch,
             generate_run_once_branch_name(),
         )
+
+        if _route_and_run(
+            target, taste, repo_root, artifacts,
+            agent=args.agent, model=model, effort=effort,
+            timeout=timeout,
+            commit_message_prefix="continuous refactor",
+        ):
+            final_status = "completed"
+            return 0
 
         prompt = compose_full_prompt(
             base_prompt=base_prompt,
@@ -309,6 +382,16 @@ def run_loop(args: argparse.Namespace) -> int:
 
             model = target.model_override or args.model
             effort = target.effort_override or args.effort
+
+            if _route_and_run(
+                target, taste, repo_root, artifacts,
+                agent=args.agent, model=model, effort=effort,
+                timeout=timeout,
+                commit_message_prefix=args.commit_message_prefix,
+            ):
+                consecutive_failures = 0
+                continue
+
             previous_failure: str | None = None
             target_succeeded = False
             retry = 0

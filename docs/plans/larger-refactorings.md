@@ -333,7 +333,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": ["T1.1", "T1.2", "T3.2", "T3.3"],
-  "done": false,
+  "done": true,
   "id": "T3.4",
   "review_criteria": [
     "loop.py _load_taste_safe is joined by a new _resolve_live_migrations_dir(repo_root) -> Path | None helper that delegates to config.resolve_live_migrations_dir",

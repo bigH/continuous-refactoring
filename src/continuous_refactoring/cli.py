@@ -82,6 +82,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Project path (default: current directory).",
     )
+    init_parser.add_argument(
+        "--live-migrations-dir",
+        type=Path,
+        default=None,
+        help="Directory for live migration artifacts (repo-relative path).",
+    )
 
     taste_parser = subparsers.add_parser(
         "taste",
@@ -181,15 +187,35 @@ def _validate_targeting(args: argparse.Namespace) -> None:
 
 
 def _handle_init(args: argparse.Namespace) -> None:
-    from continuous_refactoring.config import ensure_taste_file, register_project
+    from continuous_refactoring.config import (
+        ensure_taste_file,
+        register_project,
+        set_live_migrations_dir,
+    )
 
     path = (args.path or Path.cwd()).resolve()
     project = register_project(path)
     taste_path = project.project_dir / "taste.md"
     ensure_taste_file(taste_path)
+
+    live_dir_arg: Path | None = getattr(args, "live_migrations_dir", None)
+    if live_dir_arg is not None:
+        resolved_live = (path / live_dir_arg).resolve()
+        if not resolved_live.is_relative_to(path):
+            print(
+                f"Error: --live-migrations-dir must be inside the repo: {live_dir_arg}",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        relative = str(resolved_live.relative_to(path))
+        resolved_live.mkdir(parents=True, exist_ok=True)
+        set_live_migrations_dir(project.entry.uuid, relative)
+
     print(f"Project registered: {project.entry.uuid}")
     print(f"Data directory: {project.project_dir}")
     print(f"Taste file: {taste_path}")
+    if live_dir_arg is not None:
+        print(f"Live migrations dir: {resolved_live}")
 
 
 def _resolve_taste_path(global_: bool) -> Path:

@@ -3,10 +3,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
 from continuous_refactoring.cli import _handle_init, _handle_taste
 from continuous_refactoring.config import (
@@ -152,6 +149,57 @@ def test_init_detects_git_remote(
     manifest = load_manifest()
     entry = next(iter(manifest.values()))
     assert entry.git_remote == remote_url
+
+
+def test_init_live_migrations_dir_creates_and_stores(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "project"
+    _init_repo(repo)
+
+    args = argparse.Namespace(path=repo, live_migrations_dir=Path(".migrations"))
+    _handle_init(args)
+
+    manifest = load_manifest()
+    entry = next(iter(manifest.values()))
+    assert entry.live_migrations_dir == ".migrations"
+    assert (repo / ".migrations").is_dir()
+
+    out = capsys.readouterr().out
+    assert entry.uuid in out
+    assert "Live migrations dir:" in out
+
+    # Second call is idempotent: overwrites value, no duplicate entries
+    args2 = argparse.Namespace(path=repo, live_migrations_dir=Path("other-dir"))
+    _handle_init(args2)
+
+    manifest2 = load_manifest()
+    assert len(manifest2) == 1
+    entry2 = next(iter(manifest2.values()))
+    assert entry2.uuid == entry.uuid
+    assert entry2.live_migrations_dir == "other-dir"
+    assert (repo / "other-dir").is_dir()
+
+
+def test_init_live_migrations_dir_rejects_outside_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "project"
+    _init_repo(repo)
+
+    args = argparse.Namespace(path=repo, live_migrations_dir=Path("../outside"))
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_init(args)
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "must be inside the repo" in err
 
 
 # ---------------------------------------------------------------------------

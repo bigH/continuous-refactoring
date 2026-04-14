@@ -5,7 +5,7 @@ import os
 import subprocess
 import tempfile
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
@@ -24,6 +24,7 @@ __all__ = [
     "resolve_live_migrations_dir",
     "resolve_project",
     "save_manifest",
+    "set_live_migrations_dir",
     "xdg_data_home",
 ]
 
@@ -195,6 +196,13 @@ def resolve_live_migrations_dir(project: ResolvedProject) -> Path | None:
             f"live_migrations_dir escapes repo: {project.entry.live_migrations_dir}"
         )
     return resolved
+
+
+def set_live_migrations_dir(project_uuid: str, relative_dir: str) -> None:
+    manifest = load_manifest()
+    old = manifest[project_uuid]
+    manifest[project_uuid] = replace(old, live_migrations_dir=relative_dir)
+    save_manifest(manifest)
 
 
 # ---------------------------------------------------------------------------

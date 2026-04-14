@@ -143,7 +143,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": ["T1.1", "T1.2"],
-  "done": false,
+  "done": true,
   "id": "T1.3",
   "review_criteria": [
     "cli.py `init` subparser accepts an optional --live-migrations-dir PATH argument",

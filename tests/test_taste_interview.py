@@ -3,12 +3,9 @@ from __future__ import annotations
 import argparse
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
+from collections.abc import Callable
 
 import pytest
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
 
 from continuous_refactoring.cli import _handle_taste, build_parser
 from continuous_refactoring.config import (
@@ -36,6 +33,22 @@ def _init_repo(path: Path) -> None:
     subprocess.run(
         ["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True,
     )
+
+
+def _init_test_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    return repo
+
+
+def _init_taste_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    repo = _init_test_repo(tmp_path, monkeypatch)
+    monkeypatch.chdir(repo)
+    project = register_project(repo)
+    taste_path = project.project_dir / "taste.md"
+    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    return taste_path
 
 
 def _interview_args(
@@ -106,12 +119,7 @@ def test_interview_writes_taste_project_level(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    monkeypatch.chdir(repo)
-    project = register_project(repo)
-    taste_path = project.project_dir / "taste.md"
+    taste_path = _init_taste_project(tmp_path, monkeypatch)
 
     monkeypatch.setattr(
         "continuous_refactoring.cli.run_agent_interactive",
@@ -151,13 +159,7 @@ def test_interview_refuses_overwrite_without_force(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    monkeypatch.chdir(repo)
-    project = register_project(repo)
-    taste_path = project.project_dir / "taste.md"
-    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path = _init_taste_project(tmp_path, monkeypatch)
     taste_path.write_text("- pre-existing custom\n", encoding="utf-8")
 
     calls: list[tuple[str, ...]] = []
@@ -184,13 +186,7 @@ def test_interview_refuses_overwrite_without_force(
 def test_interview_allows_overwrite_on_default_content(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    monkeypatch.chdir(repo)
-    project = register_project(repo)
-    taste_path = project.project_dir / "taste.md"
-    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path = _init_taste_project(tmp_path, monkeypatch)
     taste_path.write_text(default_taste_text(), encoding="utf-8")
 
     monkeypatch.setattr(
@@ -206,13 +202,7 @@ def test_interview_allows_overwrite_on_default_content(
 def test_interview_backup_on_force(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    monkeypatch.chdir(repo)
-    project = register_project(repo)
-    taste_path = project.project_dir / "taste.md"
-    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path = _init_taste_project(tmp_path, monkeypatch)
     taste_path.write_text("original\n", encoding="utf-8")
 
     monkeypatch.setattr(
@@ -235,12 +225,7 @@ def test_interview_errors_if_agent_did_not_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    monkeypatch.chdir(repo)
-    project = register_project(repo)
-    taste_path = project.project_dir / "taste.md"
+    taste_path = _init_taste_project(tmp_path, monkeypatch)
     if taste_path.exists():
         taste_path.unlink()
 

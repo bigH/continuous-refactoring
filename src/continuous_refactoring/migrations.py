@@ -3,7 +3,8 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -13,9 +14,12 @@ __all__ = [
     "MigrationManifest",
     "PhaseSpec",
     "approaches_dir",
+    "bump_last_touch",
+    "eligible_now",
     "intentional_skips_dir",
     "load_manifest",
     "migration_root",
+    "parse_iso",
     "phase_path",
     "save_manifest",
 ]
@@ -109,3 +113,28 @@ def save_manifest(manifest: MigrationManifest, path: Path) -> None:
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
+
+
+# ---------------------------------------------------------------------------
+# Wake-up eligibility
+# ---------------------------------------------------------------------------
+
+_COOLDOWN = timedelta(hours=6)
+_STALE = timedelta(days=7)
+
+
+def parse_iso(s: str) -> datetime:
+    return datetime.fromisoformat(s)
+
+
+def eligible_now(manifest: MigrationManifest, now: datetime) -> bool:
+    elapsed = now - parse_iso(manifest.last_touch)
+    if elapsed < _COOLDOWN:
+        return False
+    if manifest.wake_up_on is None:
+        return True
+    return parse_iso(manifest.wake_up_on) <= now or elapsed >= _STALE
+
+
+def bump_last_touch(manifest: MigrationManifest, now: datetime) -> MigrationManifest:
+    return replace(manifest, last_touch=now.isoformat(timespec="milliseconds"))

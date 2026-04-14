@@ -382,7 +382,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": ["T1.1"],
-  "done": false,
+  "done": true,
   "id": "T4.1",
   "review_criteria": [
     "migrations.py gains pure helpers: parse_iso(s:str) -> datetime; eligible_now(manifest, now:datetime) -> bool that returns True iff (now - parse_iso(last_touch)) >= 6h AND (wake_up_on is None OR parse_iso(wake_up_on) <= now OR (now - parse_iso(last_touch)) >= 7d)",

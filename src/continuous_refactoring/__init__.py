@@ -41,6 +41,12 @@ __all__ = [
     # planning
     "PlanningOutcome",
     "run_planning",
+    # phases
+    "ExecutePhaseOutcome",
+    "ReadyVerdict",
+    "check_phase_ready",
+    "execute_phase",
+    "generate_phase_branch_name",
     # prompts
     "DEFAULT_FIX_AMENDMENT",
     "DEFAULT_REFACTORING_PROMPT",
@@ -103,6 +109,13 @@ from continuous_refactoring.routing import (
 from continuous_refactoring.planning import (
     PlanningOutcome,
     run_planning,
+)
+from continuous_refactoring.phases import (
+    ExecutePhaseOutcome,
+    ReadyVerdict,
+    check_phase_ready,
+    execute_phase,
+    generate_phase_branch_name,
 )
 from continuous_refactoring.prompts import (
     DEFAULT_FIX_AMENDMENT,

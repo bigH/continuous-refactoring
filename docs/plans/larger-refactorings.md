@@ -403,7 +403,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": ["T1.1", "T3.1", "T4.1"],
-  "done": false,
+  "done": true,
   "id": "T4.2",
   "review_criteria": [
     "new module src/continuous_refactoring/phases.py exports check_phase_ready(phase:PhaseSpec, manifest, taste, repo_root, artifacts, *, agent, model, effort, timeout) -> Literal['yes','no','unverifiable'] + reason string",

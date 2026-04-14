@@ -99,27 +99,33 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Use global taste file instead of project-level.",
     )
-    taste_parser.add_argument(
+    taste_mode = taste_parser.add_mutually_exclusive_group()
+    taste_mode.add_argument(
         "--interview",
         action="store_true",
         help="Interview the user with an agent and write answers to the taste file.",
+    )
+    taste_mode.add_argument(
+        "--upgrade",
+        action="store_true",
+        help="Upgrade taste to current version (interview about new dimensions only).",
     )
     taste_parser.add_argument(
         "--with",
         dest="agent",
         choices=("codex", "claude"),
         default=None,
-        help="Agent backend for --interview.",
+        help="Agent backend for --interview or --upgrade.",
     )
     taste_parser.add_argument(
         "--model",
         default=None,
-        help="Model name for --interview.",
+        help="Model name for --interview or --upgrade.",
     )
     taste_parser.add_argument(
         "--effort",
         default=None,
-        help="Effort level for --interview.",
+        help="Effort level for --interview or --upgrade.",
     )
     taste_parser.add_argument(
         "--force",
@@ -248,16 +254,20 @@ def _resolve_taste_path(global_: bool) -> Path:
 
 def _handle_taste(args: argparse.Namespace) -> None:
     interview = getattr(args, "interview", False)
+    upgrade = getattr(args, "upgrade", False)
     agent_flags_set = any(
         getattr(args, name, None) is not None for name in ("agent", "model", "effort")
     )
 
-    if not interview and agent_flags_set:
+    if not interview and not upgrade and agent_flags_set:
         print(
-            "Error: --with/--model/--effort require --interview.",
+            "Error: --with/--model/--effort require --interview or --upgrade.",
             file=sys.stderr,
         )
         raise SystemExit(2)
+
+    if upgrade:
+        return _handle_taste_upgrade(args)
 
     if interview:
         missing = [
@@ -322,6 +332,65 @@ def _handle_taste_interview(args: argparse.Namespace) -> None:
     if not path.exists() or path.stat().st_size == 0:
         print(
             f"Error: interview agent did not write to {path}.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    print(str(path))
+
+
+def _handle_taste_upgrade(args: argparse.Namespace) -> None:
+    from continuous_refactoring.config import (
+        TASTE_CURRENT_VERSION,
+        parse_taste_version,
+    )
+    from continuous_refactoring.prompts import compose_taste_upgrade_prompt
+
+    path = _resolve_taste_path(args.global_)
+
+    existing: str | None = None
+    stored_version: int | None = None
+    if path.exists():
+        existing = path.read_text(encoding="utf-8")
+        stored_version = parse_taste_version(existing)
+
+    if stored_version == TASTE_CURRENT_VERSION:
+        print("taste already current")
+        return
+
+    missing = [
+        flag
+        for flag, value in (
+            ("--with", getattr(args, "agent", None)),
+            ("--model", getattr(args, "model", None)),
+            ("--effort", getattr(args, "effort", None)),
+        )
+        if not value
+    ]
+    if missing:
+        print(
+            "Error: --upgrade requires " + ", ".join(missing) + ".",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+    prompt = compose_taste_upgrade_prompt(
+        path, existing, stored_version, TASTE_CURRENT_VERSION,
+    )
+    repo_root = Path.cwd().resolve()
+    returncode = run_agent_interactive(
+        args.agent, args.model, args.effort, prompt, repo_root,
+    )
+    if returncode != 0:
+        print(
+            f"Error: upgrade agent exited with code {returncode}.",
+            file=sys.stderr,
+        )
+        raise SystemExit(returncode)
+
+    if not path.exists() or path.stat().st_size == 0:
+        print(
+            f"Error: upgrade agent did not write to {path}.",
             file=sys.stderr,
         )
         raise SystemExit(1)

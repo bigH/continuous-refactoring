@@ -218,7 +218,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": ["T2.1"],
-  "done": false,
+  "done": true,
   "id": "T2.3",
   "review_criteria": [
     "taste subparser accepts --upgrade (mutually exclusive with --interview at argparse level or enforced in _handle_taste)",

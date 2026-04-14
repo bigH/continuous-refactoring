@@ -11,8 +11,10 @@ __all__ = [
     "DEFAULT_REFACTORING_PROMPT",
     "INTERVIEW_PROMPT_TEMPLATE",
     "REQUIRED_PREAMBLE",
+    "TASTE_UPGRADE_PROMPT_TEMPLATE",
     "compose_full_prompt",
     "compose_interview_prompt",
+    "compose_taste_upgrade_prompt",
     "prompt_file_text",
 ]
 REQUIRED_PREAMBLE = (
@@ -142,6 +144,66 @@ Rules:
 - Do not add a header -- the file is consumed verbatim.
 - Exit cleanly after writing.\
 """
+
+
+TASTE_UPGRADE_PROMPT_TEMPLATE = """\
+You are upgrading a refactoring taste file for continuous-refactoring.
+
+Taste file target: {taste_path}
+
+{version_context}
+
+{existing_block}\
+New dimensions to interview about:
+- large-scope decisions: when to split vs. unify modules, when to introduce or
+  remove interfaces, when cross-cutting concerns warrant a shared library vs.
+  inline duplication.
+- rollout style: caution level for wide-blast-radius changes, whether to
+  feature-flag user-visible behavior, incremental steps vs. large-bang rewrites.
+
+Rules:
+- Ask 3-4 focused questions about the new dimensions only.
+- One question at a time. Wait for the answer before the next.
+- Probe vague answers with follow-ups.
+- Preserve all existing taste preferences. Add new bullets for the new dimensions.
+- The file MUST begin with the header line 'taste-scoping-version: {target_version}'
+  followed by a blank line.
+- Show the draft. Ask for corrections. Iterate until the user approves.
+- Write the final content to {taste_path}. Overwrite any existing content.
+- Exit cleanly after writing.\
+"""
+
+
+def compose_taste_upgrade_prompt(
+    taste_path: Path,
+    existing_taste: str | None,
+    stored_version: int | None,
+    target_version: int,
+) -> str:
+    if stored_version is None:
+        version_context = (
+            "The stored taste has no version header. This is a legacy taste file.\n"
+            "Replace it with a versioned v1 taste that includes the two new\n"
+            "dimensions: large-scope decisions and rollout style."
+        )
+    else:
+        version_context = (
+            f"The stored taste is at version {stored_version}; "
+            f"current is {target_version}."
+        )
+    if existing_taste:
+        existing_block = (
+            "Existing taste content (preserve existing preferences):\n\n"
+            f"{existing_taste}\n\n"
+        )
+    else:
+        existing_block = ""
+    return TASTE_UPGRADE_PROMPT_TEMPLATE.format(
+        taste_path=str(taste_path),
+        version_context=version_context,
+        existing_block=existing_block,
+        target_version=target_version,
+    )
 
 
 def compose_interview_prompt(taste_path: Path, existing_taste: str | None) -> str:

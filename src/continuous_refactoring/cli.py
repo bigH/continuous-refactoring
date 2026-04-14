@@ -270,6 +270,55 @@ def _resolve_taste_path(global_: bool) -> Path:
     return project.project_dir / "taste.md"
 
 
+def _require_taste_action_flags(
+    *,
+    action: str,
+    agent: str | None,
+    model: str | None,
+    effort: str | None,
+) -> None:
+    missing = [
+        flag
+        for flag, value in (
+            ("--with", agent),
+            ("--model", model),
+            ("--effort", effort),
+        )
+        if not value
+    ]
+    if missing:
+        print(
+            f"Error: --{action} requires " + ", ".join(missing) + ".",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+
+def _run_taste_agent(
+    *,
+    action: str,
+    args: argparse.Namespace,
+    prompt: str,
+    path: Path,
+) -> None:
+    returncode = run_agent_interactive(
+        args.agent, args.model, args.effort, prompt, Path.cwd().resolve(),
+    )
+    if returncode != 0:
+        print(
+            f"Error: {action} agent exited with code {returncode}.",
+            file=sys.stderr,
+        )
+        raise SystemExit(returncode)
+
+    if not path.exists() or path.stat().st_size == 0:
+        print(
+            f"Error: {action} agent did not write to {path}.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
 def _handle_taste(args: argparse.Namespace) -> None:
     interview = getattr(args, "interview", False)
     upgrade = getattr(args, "upgrade", False)
@@ -288,21 +337,12 @@ def _handle_taste(args: argparse.Namespace) -> None:
         return _handle_taste_upgrade(args)
 
     if interview:
-        missing = [
-            flag
-            for flag, value in (
-                ("--with", getattr(args, "agent", None)),
-                ("--model", getattr(args, "model", None)),
-                ("--effort", getattr(args, "effort", None)),
-            )
-            if not value
-        ]
-        if missing:
-            print(
-                "Error: --interview requires " + ", ".join(missing) + ".",
-                file=sys.stderr,
-            )
-            raise SystemExit(2)
+        _require_taste_action_flags(
+            action="interview",
+            agent=getattr(args, "agent", None),
+            model=getattr(args, "model", None),
+            effort=getattr(args, "effort", None),
+        )
         return _handle_taste_interview(args)
 
     from continuous_refactoring.config import ensure_taste_file
@@ -336,24 +376,12 @@ def _handle_taste_interview(args: argparse.Namespace) -> None:
 
     path.parent.mkdir(parents=True, exist_ok=True)
     prompt = compose_interview_prompt(path, existing)
-    repo_root = Path.cwd().resolve()
-    returncode = run_agent_interactive(
-        args.agent, args.model, args.effort, prompt, repo_root,
+    _run_taste_agent(
+        action="interview",
+        args=args,
+        prompt=prompt,
+        path=path,
     )
-    if returncode != 0:
-        print(
-            f"Error: interview agent exited with code {returncode}.",
-            file=sys.stderr,
-        )
-        raise SystemExit(returncode)
-
-    if not path.exists() or path.stat().st_size == 0:
-        print(
-            f"Error: interview agent did not write to {path}.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-
     print(str(path))
 
 
@@ -376,43 +404,22 @@ def _handle_taste_upgrade(args: argparse.Namespace) -> None:
         print("taste already current")
         return
 
-    missing = [
-        flag
-        for flag, value in (
-            ("--with", getattr(args, "agent", None)),
-            ("--model", getattr(args, "model", None)),
-            ("--effort", getattr(args, "effort", None)),
-        )
-        if not value
-    ]
-    if missing:
-        print(
-            "Error: --upgrade requires " + ", ".join(missing) + ".",
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
+    _require_taste_action_flags(
+        action="upgrade",
+        agent=getattr(args, "agent", None),
+        model=getattr(args, "model", None),
+        effort=getattr(args, "effort", None),
+    )
 
     prompt = compose_taste_upgrade_prompt(
         path, existing, stored_version, TASTE_CURRENT_VERSION,
     )
-    repo_root = Path.cwd().resolve()
-    returncode = run_agent_interactive(
-        args.agent, args.model, args.effort, prompt, repo_root,
+    _run_taste_agent(
+        action="upgrade",
+        args=args,
+        prompt=prompt,
+        path=path,
     )
-    if returncode != 0:
-        print(
-            f"Error: upgrade agent exited with code {returncode}.",
-            file=sys.stderr,
-        )
-        raise SystemExit(returncode)
-
-    if not path.exists() or path.stat().st_size == 0:
-        print(
-            f"Error: upgrade agent did not write to {path}.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-
     print(str(path))
 
 

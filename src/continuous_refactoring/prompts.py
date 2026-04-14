@@ -21,6 +21,7 @@ __all__ = [
     "PLANNING_REVIEW_PROMPT",
     "PlanningStage",
     "REQUIRED_PREAMBLE",
+    "REVIEW_PERFORM_PROMPT",
     "TASTE_UPGRADE_PROMPT_TEMPLATE",
     "compose_classifier_prompt",
     "compose_full_prompt",
@@ -28,6 +29,7 @@ __all__ = [
     "compose_phase_execution_prompt",
     "compose_phase_ready_prompt",
     "compose_planning_prompt",
+    "compose_review_perform_prompt",
     "compose_taste_upgrade_prompt",
     "prompt_file_text",
 ]
@@ -471,4 +473,45 @@ def compose_phase_execution_prompt(
         f"## Manifest\n{_format_manifest_summary(manifest)}",
         f"## Taste\n{taste}",
     ]
+    return "\n\n".join(sections)
+
+
+REVIEW_PERFORM_PROMPT = """\
+You are conducting a human review of a refactoring migration that was flagged
+for human input during planning.
+
+Your job:
+1. Read the migration plan (plan.md), the current phase file, and the manifest.
+2. Present the situation to the user: what the migration does, what phase it is
+   on, and why it was flagged for review.
+3. Ask the user whatever questions are needed to unblock the migration.
+4. Based on the user's answers, update plan.md and/or phase files as needed.
+5. When the review is complete and the user approves, update manifest.json:
+   set "awaiting_human_review" to false.
+
+If the user wants to abort or cannot resolve the review, leave
+awaiting_human_review as true and exit cleanly.
+
+## Output Contract
+When the review is successfully completed:
+- manifest.json MUST have "awaiting_human_review": false
+- Any plan or phase file updates MUST be written before exiting\
+"""
+
+
+def compose_review_perform_prompt(
+    migration_name: str,
+    manifest_path: Path,
+    plan_path: Path,
+    phase_file: str | None,
+    manifest: MigrationManifest,
+) -> str:
+    sections: list[str] = [REVIEW_PERFORM_PROMPT]
+    sections.append(f"## Migration\nName: {migration_name}")
+    sections.append(
+        f"## Manifest\nPath: {manifest_path}\n{_format_manifest_summary(manifest)}"
+    )
+    sections.append(f"## Plan\nPath: {plan_path}")
+    if phase_file:
+        sections.append(f"## Current Phase File\n{phase_file}")
     return "\n\n".join(sections)

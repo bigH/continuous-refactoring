@@ -1,14 +1,16 @@
 from __future__ import annotations
 
+import argparse
 import subprocess
 from pathlib import Path
 
 import pytest
 
-from continuous_refactoring.cli import _handle_review_list
+from continuous_refactoring.cli import _handle_review_list, _handle_review_perform
 from continuous_refactoring.config import register_project, set_live_migrations_dir
 from continuous_refactoring.migrations import (
     MigrationManifest,
+    load_manifest as load_migration_manifest,
     save_manifest as save_migration,
 )
 
@@ -124,3 +126,121 @@ def test_review_list_exits_1_when_no_live_migrations_dir(
     assert exc_info.value.code == 1
     err = capsys.readouterr().err
     assert "live-migrations-dir" in err
+
+
+def _make_perform_args(migration: str) -> argparse.Namespace:
+    return argparse.Namespace(
+        migration=migration,
+        agent="codex",
+        model="test-model",
+        effort="low",
+    )
+
+
+def _setup_review_project(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    awaiting: bool = True,
+) -> tuple[Path, Path]:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    monkeypatch.chdir(repo)
+
+    project = register_project(repo)
+    live_dir = repo / ".migrations"
+    live_dir.mkdir()
+    set_live_migrations_dir(project.entry.uuid, ".migrations")
+
+    save_migration(
+        _make_manifest("my-mig", awaiting_human_review=awaiting, status="ready"),
+        live_dir / "my-mig" / "manifest.json",
+    )
+    return repo, live_dir
+
+
+def test_review_perform_happy_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo, live_dir = _setup_review_project(tmp_path, monkeypatch, awaiting=True)
+    manifest_path = live_dir / "my-mig" / "manifest.json"
+
+    def fake_interactive(
+        agent: str, model: str, effort: str, prompt: str, repo_root: Path,
+    ) -> int:
+        manifest = load_migration_manifest(manifest_path)
+        from dataclasses import replace
+        updated = replace(manifest, awaiting_human_review=False)
+        save_migration(updated, manifest_path)
+        return 0
+
+    monkeypatch.setattr(
+        "continuous_refactoring.cli.run_agent_interactive", fake_interactive,
+    )
+
+    _handle_review_perform(_make_perform_args("my-mig"))
+
+
+def test_review_perform_exits_1_when_flag_not_cleared(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo, live_dir = _setup_review_project(tmp_path, monkeypatch, awaiting=True)
+
+    def fake_interactive(
+        agent: str, model: str, effort: str, prompt: str, repo_root: Path,
+    ) -> int:
+        return 0
+
+    monkeypatch.setattr(
+        "continuous_refactoring.cli.run_agent_interactive", fake_interactive,
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_review_perform(_make_perform_args("my-mig"))
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "not completed" in err
+
+
+def test_review_perform_exits_2_when_migration_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    monkeypatch.chdir(repo)
+
+    project = register_project(repo)
+    live_dir = repo / ".migrations"
+    live_dir.mkdir()
+    set_live_migrations_dir(project.entry.uuid, ".migrations")
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_review_perform(_make_perform_args("nonexistent"))
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "does not exist" in err
+
+
+def test_review_perform_exits_2_when_not_flagged_for_review(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo, live_dir = _setup_review_project(tmp_path, monkeypatch, awaiting=False)
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_review_perform(_make_perform_args("my-mig"))
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "not flagged" in err

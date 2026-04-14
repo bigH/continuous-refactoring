@@ -474,7 +474,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": ["T5.1", "T3.1"],
-  "done": false,
+  "done": true,
   "id": "T5.2",
   "review_criteria": [
     "`review perform <migration>` requires --with/--model/--effort (same validation pattern as taste --interview)",

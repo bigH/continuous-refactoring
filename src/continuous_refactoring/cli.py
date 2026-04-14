@@ -508,9 +508,81 @@ def _handle_review_list() -> None:
             )
 
 
+def _handle_review_perform(args: argparse.Namespace) -> None:
+    from continuous_refactoring.config import resolve_live_migrations_dir, resolve_project
+    from continuous_refactoring.migrations import load_manifest as load_migration_manifest
+    from continuous_refactoring.prompts import compose_review_perform_prompt
+
+    try:
+        project = resolve_project(Path.cwd().resolve())
+    except ContinuousRefactorError:
+        print(
+            "Error: project not initialized; no live-migrations-dir available.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+    live_dir = resolve_live_migrations_dir(project)
+    if live_dir is None:
+        print(
+            "Error: no live-migrations-dir configured for this project.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+    migration_name: str = args.migration
+    migration_dir = live_dir / migration_name
+    manifest_path = migration_dir / "manifest.json"
+    if not manifest_path.exists():
+        print(
+            f"Error: migration '{migration_name}' does not exist.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+    manifest = load_migration_manifest(manifest_path)
+    if not manifest.awaiting_human_review:
+        print(
+            f"Error: migration '{migration_name}' is not flagged for review.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+
+    plan_path = migration_dir / "plan.md"
+    phase_file: str | None = None
+    if 0 <= manifest.current_phase < len(manifest.phases):
+        phase_file = manifest.phases[manifest.current_phase].file
+
+    prompt = compose_review_perform_prompt(
+        migration_name, manifest_path, plan_path, phase_file, manifest,
+    )
+    repo_root = Path.cwd().resolve()
+    returncode = run_agent_interactive(
+        args.agent, args.model, args.effort, prompt, repo_root,
+    )
+    if returncode != 0:
+        print(
+            f"Error: review agent exited with code {returncode}.",
+            file=sys.stderr,
+        )
+        raise SystemExit(returncode)
+
+    reloaded = load_migration_manifest(manifest_path)
+    if reloaded.awaiting_human_review:
+        print(
+            f"Error: review of '{migration_name}' was not completed — "
+            "awaiting_human_review is still set.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+
 def _handle_review(args: argparse.Namespace) -> None:
-    if getattr(args, "review_command", None) == "list":
+    review_command = getattr(args, "review_command", None)
+    if review_command == "list":
         return _handle_review_list()
+    if review_command == "perform":
+        return _handle_review_perform(args)
     print("Usage: continuous-refactoring review {list,perform}", file=sys.stderr)
     raise SystemExit(2)
 

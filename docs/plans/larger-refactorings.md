@@ -427,7 +427,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": ["T3.4", "T4.2"],
-  "done": false,
+  "done": true,
   "id": "T4.3",
   "review_criteria": [
     "loop.py's per-tick routing (T3.4's _route_and_run) now runs a migration-scan step first: enumerate manifests under live_dir; filter by eligible_now(manifest, now); sort ascending by created_at; take the first that also passes check_phase_ready == 'yes' for its current phase",

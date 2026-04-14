@@ -20,6 +20,7 @@ __all__ = [
     "get_head_sha",
     "git_commit",
     "git_push",
+    "prepare_phase_branch",
     "prepare_run_branch",
     "repo_change_count",
     "repo_has_changes",
@@ -142,6 +143,15 @@ def prepare_run_branch(
     checkout_main(repo_root)
     branch_name = use_branch or default_name
     create_branch(repo_root, branch_name)
+    return branch_name
+
+
+def prepare_phase_branch(repo_root: Path, branch_name: str) -> str:
+    checkout_main(repo_root)
+    if branch_exists(repo_root, branch_name):
+        checkout_branch(repo_root, branch_name)
+    else:
+        create_branch(repo_root, branch_name)
     return branch_name
 
 

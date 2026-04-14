@@ -3,13 +3,16 @@ from __future__ import annotations
 import random
 import re
 import sys
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import argparse
 
     from continuous_refactoring.artifacts import RunArtifacts
+    from continuous_refactoring.migrations import MigrationManifest
 
 __all__ = [
     "run_baseline_checks",
@@ -32,6 +35,8 @@ from continuous_refactoring.config import (
     resolve_project,
 )
 from continuous_refactoring.git import (
+    checkout_branch,
+    current_branch,
     detect_main_branch,
     discard_workspace_changes,
     generate_run_branch_name,
@@ -39,11 +44,24 @@ from continuous_refactoring.git import (
     get_head_sha,
     git_commit,
     git_push,
+    prepare_phase_branch,
     prepare_run_branch,
     repo_change_count,
     require_clean_worktree,
     revert_to,
     run_command,
+)
+from continuous_refactoring.migrations import (
+    bump_last_touch,
+    eligible_now,
+    load_manifest,
+    parse_iso,
+    save_manifest,
+)
+from continuous_refactoring.phases import (
+    check_phase_ready,
+    execute_phase,
+    generate_phase_branch_name,
 )
 from continuous_refactoring.planning import run_planning
 from continuous_refactoring.prompts import (
@@ -91,12 +109,97 @@ def _resolve_live_migrations_dir(repo_root: Path) -> Path | None:
 
 
 def _migration_name_from_target(target: Target) -> str:
-    from datetime import datetime
-
     slug = re.sub(r"[^a-z0-9]+", "-", target.description.lower()).strip("-")
     ts = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S")
     prefix = slug[:40] if slug else "migration"
     return f"{prefix}-{ts}"
+
+
+TickOutcome = Literal["not-routed", "success", "failed"]
+
+
+def _enumerate_eligible_manifests(
+    live_dir: Path, now: datetime,
+) -> list[tuple[MigrationManifest, Path]]:
+    if not live_dir.is_dir():
+        return []
+    candidates: list[tuple[MigrationManifest, Path]] = []
+    for entry in sorted(live_dir.iterdir()):
+        if not entry.is_dir() or entry.name.startswith("__"):
+            continue
+        manifest_path = entry / "manifest.json"
+        if not manifest_path.exists():
+            continue
+        manifest = load_manifest(manifest_path)
+        if manifest.status not in ("ready", "in-progress"):
+            continue
+        if manifest.current_phase >= len(manifest.phases):
+            continue
+        if not eligible_now(manifest, now):
+            continue
+        candidates.append((manifest, manifest_path))
+    candidates.sort(key=lambda pair: parse_iso(pair[0].created_at))
+    return candidates
+
+
+def _try_migration_tick(
+    live_dir: Path,
+    taste: str,
+    repo_root: Path,
+    artifacts: RunArtifacts,
+    *,
+    agent: str,
+    model: str,
+    effort: str,
+    timeout: int | None,
+    commit_message_prefix: str,
+) -> TickOutcome:
+    now = datetime.now(timezone.utc)
+    candidates = _enumerate_eligible_manifests(live_dir, now)
+
+    for manifest, manifest_path in candidates:
+        phase = manifest.phases[manifest.current_phase]
+        verdict, _reason = check_phase_ready(
+            phase, manifest, taste, repo_root, artifacts,
+            agent=agent, model=model, effort=effort, timeout=timeout,
+        )
+
+        if verdict == "yes":
+            phase_branch = generate_phase_branch_name(
+                manifest.name, manifest.current_phase, phase.name,
+            )
+            saved_branch = current_branch(repo_root)
+            prepare_phase_branch(repo_root, phase_branch)
+
+            outcome = execute_phase(
+                phase, manifest, None, taste, repo_root, live_dir, artifacts,
+                agent=agent, model=model, effort=effort, timeout=timeout,
+            )
+
+            if repo_change_count(repo_root):
+                git_commit(
+                    repo_root,
+                    f"{commit_message_prefix}: migration/{manifest.name}"
+                    f"/phase-{manifest.current_phase}/{phase.name}",
+                )
+
+            checkout_branch(repo_root, saved_branch)
+
+            print(
+                f"Migration: {outcome.status}"
+                f" — {manifest.name} phase-{manifest.current_phase}/{phase.name}"
+            )
+            return "failed" if outcome.status == "failed" else "success"
+
+        updated = bump_last_touch(manifest, now)
+        if updated.wake_up_on is None:
+            wake = (now + timedelta(days=7)).isoformat(timespec="milliseconds")
+            updated = replace(updated, wake_up_on=wake)
+        if verdict == "unverifiable":
+            updated = replace(updated, awaiting_human_review=True)
+        save_manifest(updated, manifest_path)
+
+    return "not-routed"
 
 
 def _route_and_run(
@@ -110,10 +213,18 @@ def _route_and_run(
     effort: str,
     timeout: int | None,
     commit_message_prefix: str,
-) -> bool:
+) -> TickOutcome:
     live_dir = _resolve_live_migrations_dir(repo_root)
     if live_dir is None:
-        return False
+        return "not-routed"
+
+    migration_result = _try_migration_tick(
+        live_dir, taste, repo_root, artifacts,
+        agent=agent, model=model, effort=effort,
+        timeout=timeout, commit_message_prefix=commit_message_prefix,
+    )
+    if migration_result != "not-routed":
+        return migration_result
 
     decision = classify_target(
         target, taste, repo_root, artifacts,
@@ -122,7 +233,7 @@ def _route_and_run(
     print(f"Classification: {decision} — {target.description}")
 
     if decision == "cohesive-cleanup":
-        return False
+        return "not-routed"
 
     migration_name = _migration_name_from_target(target)
     outcome = run_planning(
@@ -134,7 +245,7 @@ def _route_and_run(
         git_commit(repo_root, f"{commit_message_prefix}: plan {migration_name}")
 
     print(f"Planning: {outcome.status} — {outcome.reason}")
-    return True
+    return "success"
 
 
 def _resolve_base_prompt(args: argparse.Namespace) -> str:
@@ -211,14 +322,20 @@ def run_once(args: argparse.Namespace) -> int:
             generate_run_once_branch_name(),
         )
 
-        if _route_and_run(
+        tick_outcome = _route_and_run(
             target, taste, repo_root, artifacts,
             agent=args.agent, model=model, effort=effort,
             timeout=timeout,
             commit_message_prefix="continuous refactor",
-        ):
+        )
+        if tick_outcome == "success":
             final_status = "completed"
             return 0
+        if tick_outcome == "failed":
+            final_status = "migration_failed"
+            raise ContinuousRefactorError(
+                "Migration phase execution failed"
+            )
 
         prompt = compose_full_prompt(
             base_prompt=base_prompt,
@@ -383,13 +500,22 @@ def run_loop(args: argparse.Namespace) -> int:
             model = target.model_override or args.model
             effort = target.effort_override or args.effort
 
-            if _route_and_run(
+            tick_outcome = _route_and_run(
                 target, taste, repo_root, artifacts,
                 agent=args.agent, model=model, effort=effort,
                 timeout=timeout,
                 commit_message_prefix=args.commit_message_prefix,
-            ):
+            )
+            if tick_outcome == "success":
                 consecutive_failures = 0
+                continue
+            if tick_outcome == "failed":
+                consecutive_failures += 1
+                if consecutive_failures >= max_consecutive:
+                    final_status = "max_consecutive_failures"
+                    raise ContinuousRefactorError(
+                        f"Stopping: {max_consecutive} consecutive failures"
+                    )
                 continue
 
             previous_failure: str | None = None

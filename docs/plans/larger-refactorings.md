@@ -308,7 +308,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": ["T1.1", "T3.1"],
-  "done": false,
+  "done": true,
   "id": "T3.3",
   "review_criteria": [
     "new module src/continuous_refactoring/planning.py exports run_planning(migration_name, target, taste, repo_root, live_dir, artifacts, *, agent, model, effort, timeout) -> PlanningOutcome",

@@ -35,6 +35,9 @@ __all__ = [
     # routing
     "ClassifierDecision",
     "classify_target",
+    # planning
+    "PlanningOutcome",
+    "run_planning",
     # prompts
     "DEFAULT_FIX_AMENDMENT",
     "DEFAULT_REFACTORING_PROMPT",
@@ -90,6 +93,10 @@ from continuous_refactoring.migrations import (
 from continuous_refactoring.routing import (
     ClassifierDecision,
     classify_target,
+)
+from continuous_refactoring.planning import (
+    PlanningOutcome,
+    run_planning,
 )
 from continuous_refactoring.prompts import (
     DEFAULT_FIX_AMENDMENT,

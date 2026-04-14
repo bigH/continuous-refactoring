@@ -286,7 +286,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": ["T3.1"],
-  "done": false,
+  "done": true,
   "id": "T3.2",
   "review_criteria": [
     "new module src/continuous_refactoring/routing.py exports classify_target(target, taste, repo_root, artifacts, *, agent, model, effort, timeout) -> Literal['cohesive-cleanup','needs-plan']",

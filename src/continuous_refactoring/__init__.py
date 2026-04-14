@@ -32,6 +32,9 @@ __all__ = [
     "migration_root",
     "phase_path",
     "save_manifest",
+    # routing
+    "ClassifierDecision",
+    "classify_target",
     # prompts
     "DEFAULT_FIX_AMENDMENT",
     "DEFAULT_REFACTORING_PROMPT",
@@ -83,6 +86,10 @@ from continuous_refactoring.migrations import (
     migration_root,
     phase_path,
     save_manifest,
+)
+from continuous_refactoring.routing import (
+    ClassifierDecision,
+    classify_target,
 )
 from continuous_refactoring.prompts import (
     DEFAULT_FIX_AMENDMENT,

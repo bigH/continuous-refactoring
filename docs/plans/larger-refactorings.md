@@ -241,7 +241,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": ["T2.1"],
-  "done": false,
+  "done": true,
   "id": "T2.4",
   "review_criteria": [
     "cli_main prints a single-line stderr warning 'warning: taste out of date — run `continuous-refactoring taste --upgrade`' when the resolved taste (project or global) fails taste_is_stale before dispatching to a handler",

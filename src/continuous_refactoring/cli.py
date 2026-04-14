@@ -452,9 +452,29 @@ def _handle_run(args: argparse.Namespace) -> None:
         raise SystemExit(1) from error
 
 
+def _maybe_warn_stale_taste() -> None:
+    from continuous_refactoring.config import load_taste, resolve_project, taste_is_stale
+
+    try:
+        project = resolve_project(Path.cwd().resolve())
+    except Exception:
+        project = None
+
+    taste_text = load_taste(project)
+    if taste_is_stale(taste_text):
+        print(
+            "warning: taste out of date — "
+            "run `continuous-refactoring taste --upgrade`",
+            file=sys.stderr,
+        )
+
+
 def cli_main() -> None:
     parser = build_parser()
     args = parser.parse_args()
+
+    if args.command is not None:
+        _maybe_warn_stale_taste()
 
     if args.command == "init":
         return _handle_init(args)

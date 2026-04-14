@@ -57,8 +57,13 @@ continuous-refactoring run \
 | `taste` | Prints the active taste file path. Add `--interview` to have an agent author it with you. `--global` targets the shared user-level file. |
 | `run-once` | Single pass on one target. No retry, no push. Leaves the branch for you to review. |
 | `run` | The loop. Iterates targets, retries on failure, commits and pushes greens. |
+| `upgrade` | Validates global config version; warns (but doesn't block) if taste is stale. |
+| `review list` | Lists migrations flagged for human review (`awaiting_human_review`). |
+| `review perform <migration>` | Starts an interactive agent session to resolve a flagged migration's review. |
 
-## Targeting
+## Targeting / Useful flags
+
+### Target selection
 
 Pick *one* of these to tell the tool what to clean up:
 
@@ -70,7 +75,12 @@ Pick *one* of these to tell the tool what to clean up:
 
 If none of these match any tracked files, you must provide `--scope-instruction` as a fallback.
 
-## Useful flags
+### Migrations & taste flags
+
+- `init --live-migrations-dir PATH` — enables the larger-refactoring workflow for this project. The path is stored repo-relative in the project registry and created if missing.
+- `taste --upgrade` — re-interviews for taste dimensions added since your last version. No-op when already current.
+
+### Common flags
 
 - `--validation-command` — defaults to `uv run pytest`. Swap it for whatever keeps your repo honest.
 - `--max-attempts N` — per-target retry budget. `1` = no retry, `0` = unlimited (⚠️ loops forever on broken targets).
@@ -108,3 +118,58 @@ The taste file is a short bullet list of your refactoring preferences. It gets i
 - Global taste: `~/.local/share/continuous-refactoring/global/taste.md`
 
 Project taste wins over global. Use `taste --interview` to bootstrap one; edit the file directly any time.
+
+## Larger refactorings
+
+When a cleanup is too big for a single commit — needs a plan, touches many files, or should ship in stages — use the migrations model.
+
+### Enabling it
+
+```bash
+continuous-refactoring init --live-migrations-dir migrations/
+```
+
+This tells the CLI where to store migration artifacts. The path is repo-relative, stored in the XDG project registry (no project config file is created). When this directory is unset, the one-shot cleanup path remains byte-identical to the default behavior.
+
+### How it works
+
+Each `run` / `run-once` tick now checks for eligible migration work before falling back to single-commit cleanups:
+
+1. **Classify** — a classifier agent reads the target and decides: `cohesive-cleanup` (one-shot path) or `needs-plan` (migration path).
+2. **Plan** — for `needs-plan` targets, a six-stage planning workflow runs: generate approaches → pick best → expand into phases → review → revise → final review. Artifacts land under `<live-migrations-dir>/<migration-name>/`.
+3. **Execute** — each phase is a self-contained unit of work. The tick picks the oldest eligible migration, checks whether its current phase is ready, and executes it on a dedicated branch (`migration/<name>/phase-<n>-<phase-name>`).
+
+### Migration directory layout
+
+```
+<live-migrations-dir>/
+  <migration-name>/
+    manifest.json          # status, phases, wake-up schedule
+    plan.md                # the expanded plan
+    approaches/            # candidate approaches considered during planning
+    phase-1-<name>.md      # per-phase specification
+    phase-2-<name>.md
+    ...
+  __intentional_skips__/   # migrations rejected at final review
+```
+
+### Wake-up rules
+
+Migrations don't run on every tick. A migration is eligible when **all** of:
+
+- At least **6 hours** since its last touch (safety invariant — always enforced, cannot be overridden).
+- Either `wake_up_on` has elapsed, **or** it has been stale for ≥7 days with no `wake_up_on` set.
+
+This prevents the loop from hammering a stuck migration while still ensuring nothing is forgotten.
+
+### Phase model
+
+Each migration moves through phases sequentially. Before executing a phase, a ready-check agent verifies that prerequisites are met. Possible outcomes:
+
+- **ready: yes** — phase executes; on green tests, the phase is marked done and the migration advances.
+- **ready: no** — manifest is bumped with a future `wake_up_on`; the tick moves on.
+- **ready: unverifiable** — the migration is flagged `awaiting_human_review`. Use `review list` to find it and `review perform <migration>` to resolve it interactively.
+
+### What the CLI doesn't do
+
+Rollout mechanics — feature flag names, deploy tooling, metric dashboards, canary analysis — are the coding agent's responsibility, not a CLI-visible concern. The CLI manages the planning and phased execution workflow; the agent writes whatever rollout code the plan calls for.

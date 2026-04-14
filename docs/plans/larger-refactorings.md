@@ -499,7 +499,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": ["T1.3", "T2.2", "T2.3", "T2.4", "T3.4", "T4.1", "T4.3", "T5.2"],
-  "done": false,
+  "done": true,
   "id": "T6.1",
   "review_criteria": [
     "README.md gains a top-level section 'Larger refactorings' explaining the migrations model, the live-migrations-dir layout, wake-up rules, and the phase model in ≤60 lines",

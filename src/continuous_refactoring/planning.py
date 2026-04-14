@@ -25,7 +25,7 @@ __all__ = ["PlanningOutcome", "run_planning"]
 PlanningStatus = Literal["ready", "awaiting_human_review", "skipped"]
 
 _FINAL_DECISION_RE = re.compile(
-    r"^final-decision:\s*(approve-auto|approve-needs-human|reject)\b",
+    r"^final-decision:\s*(approve-auto|approve-needs-human|reject)(?:\s*[—-]\s*(.+))?$",
     re.IGNORECASE,
 )
 
@@ -51,23 +51,24 @@ def _parse_final_decision(stdout: str) -> tuple[str, str]:
         if not stripped:
             continue
         match = _FINAL_DECISION_RE.match(stripped)
-        if match:
-            decision = match.group(1).lower()
-            reason = stripped[match.end():].lstrip(" \u2014-").strip() or decision
-            return decision, reason
-        raise ContinuousRefactorError(
-            f"Final review produced unrecognised output: {stripped!r}"
-        )
+        if not match:
+            continue
+        decision = match.group(1).lower()
+        reason = match.group(2).strip() if match.group(2) else decision
+        return decision, reason
     raise ContinuousRefactorError("Final review produced no output")
 
 
 def _review_has_findings(stdout: str) -> bool:
-    for line in reversed(stdout.splitlines()):
+    has_non_empty = False
+    for line in stdout.splitlines():
         stripped = line.strip().lower()
         if not stripped:
             continue
-        return "no findings" not in stripped
-    return False
+        has_non_empty = True
+        if "no findings" in stripped:
+            return False
+    return has_non_empty
 
 
 # ---------------------------------------------------------------------------

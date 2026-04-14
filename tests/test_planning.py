@@ -6,6 +6,7 @@ import pytest
 
 from continuous_refactoring.artifacts import (
     CommandCapture,
+    ContinuousRefactorError,
     RunArtifacts,
     create_run_artifacts,
 )
@@ -14,7 +15,12 @@ from continuous_refactoring.migrations import (
     load_manifest,
     migration_root,
 )
-from continuous_refactoring.planning import PlanningOutcome, run_planning
+from continuous_refactoring.planning import (
+    _parse_final_decision,
+    _review_has_findings,
+    PlanningOutcome,
+    run_planning,
+)
 
 
 _TASTE = "- Prefer deletion over wrapping.\n- Fail fast at boundaries."
@@ -282,3 +288,36 @@ def test_review_findings_trigger_revise(
 
     assert (mig_root / "plan.md").read_text(encoding="utf-8") == "# Plan v2 (revised)"
     assert mock.call_count == 7
+
+
+def test_parse_final_decision_ignores_trailing_lines() -> None:
+    decision, reason = _parse_final_decision(
+        "\n".join(
+            [
+                "debug: planning done",
+                "final-decision: approve-auto — trailing log noise tolerated",
+                "temporary debug line from telemetry",
+            ]
+        )
+    )
+
+    assert decision == "approve-auto"
+    assert reason == "trailing log noise tolerated"
+
+
+def test_parse_final_decision_without_reason_defaults_to_decision() -> None:
+    decision, reason = _parse_final_decision("final-decision: reject")
+
+    assert decision == "reject"
+    assert reason == "reject"
+
+
+def test_parse_final_decision_with_no_valid_line_raises() -> None:
+    with pytest.raises(ContinuousRefactorError, match="Final review produced no output"):
+        _parse_final_decision("temporary debug line\nanother line")
+
+
+def test_review_has_findings_prefers_no_findings_anywhere() -> None:
+    assert _review_has_findings("1. issue list\nNo findings\n") is False
+    assert _review_has_findings("analysis complete") is True
+    assert _review_has_findings("   \n") is False

@@ -176,6 +176,27 @@ def test_check_ready_yes(
     assert reason == "yes"
 
 
+def test_check_ready_yes_with_trailing_noise(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
+    (tmp_path / "tmpdir").mkdir()
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.maybe_run_agent",
+        _make_fake_agent(
+            "ready: yes\nthis line should not veto readiness\n",
+            tmp_path,
+        ),
+    )
+
+    verdict, reason = check_phase_ready(
+        _PHASE_0, _make_manifest(), _TASTE, tmp_path, _make_artifacts(tmp_path),
+        agent="codex", model="fake", effort="low", timeout=None,
+    )
+    assert verdict == "yes"
+    assert reason == "yes"
+
+
 def test_check_ready_no(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

@@ -38,19 +38,20 @@ class ExecutePhaseOutcome:
 
 
 def _parse_ready_verdict(stdout: str) -> tuple[ReadyVerdict, str]:
-    for line in reversed(stdout.splitlines()):
+    nonempty_lines = [line.strip() for line in stdout.splitlines() if line.strip()]
+    if not nonempty_lines:
+        raise ContinuousRefactorError("Phase ready-check produced no output")
+
+    for line in reversed(nonempty_lines):
         stripped = line.strip()
-        if not stripped:
-            continue
         match = _READY_RE.match(stripped)
         if match:
             verdict: ReadyVerdict = match.group(1).lower()  # type: ignore[assignment]
             reason = stripped[match.end():].lstrip(" \u2014-").strip() or verdict
             return verdict, reason
-        raise ContinuousRefactorError(
-            f"Phase ready-check produced unrecognised output: {stripped!r}"
-        )
-    raise ContinuousRefactorError("Phase ready-check produced no output")
+    raise ContinuousRefactorError(
+        f"Phase ready-check produced unrecognised output: {nonempty_lines[-1]!r}"
+    )
 
 
 def _slugify(text: str) -> str:

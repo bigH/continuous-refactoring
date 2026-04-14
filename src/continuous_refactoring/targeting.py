@@ -59,7 +59,7 @@ def parse_globs(raw: str) -> tuple[str, ...]:
 def validate_target_line(data: dict) -> Target | None:
     """Validate a parsed JSON dict and return a Target, or None if invalid."""
     description = data.get("description")
-    if not isinstance(description, str) or not description:
+    if not isinstance(description, str) or not description.strip():
         print("warning: target line has missing or empty description, skipping", file=sys.stderr)
         return None
 
@@ -68,16 +68,41 @@ def validate_target_line(data: dict) -> Target | None:
         print("warning: target line has missing or empty files, skipping", file=sys.stderr)
         return None
 
-    if not all(isinstance(f, str) for f in files):
-        print("warning: target line has non-string file entries, skipping", file=sys.stderr)
+    if not all(isinstance(f, str) and f for f in files):
+        print("warning: target line has invalid file entries, skipping", file=sys.stderr)
+        return None
+
+    scoping = data.get("scoping")
+    if scoping is not None and (not isinstance(scoping, str) or not scoping.strip()):
+        print("warning: target line has non-string or empty scoping, skipping", file=sys.stderr)
+        return None
+
+    model_override = data.get("model-override")
+    if model_override is not None and (
+        not isinstance(model_override, str) or not model_override.strip()
+    ):
+        print(
+            "warning: target line has non-string or empty model-override, skipping",
+            file=sys.stderr,
+        )
+        return None
+
+    effort_override = data.get("effort-override")
+    if effort_override is not None and (
+        not isinstance(effort_override, str) or not effort_override.strip()
+    ):
+        print(
+            "warning: target line has non-string or empty effort-override, skipping",
+            file=sys.stderr,
+        )
         return None
 
     return Target(
         description=description,
         files=tuple(files),
-        scoping=data.get("scoping"),
-        model_override=data.get("model-override"),
-        effort_override=data.get("effort-override"),
+        scoping=scoping,
+        model_override=model_override,
+        effort_override=effort_override,
     )
 
 

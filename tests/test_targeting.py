@@ -194,6 +194,59 @@ def test_validate_target_line_all_fields() -> None:
     assert target.effort_override == "high"
 
 
+def test_validate_target_line_rejects_empty_and_invalid_optional_fields() -> None:
+    target = validate_target_line(
+        {
+            "description": "  ",
+            "files": ["src/**/*.py"],
+            "scoping": None,
+        },
+    )
+    assert target is None
+
+    target = validate_target_line(
+        {
+            "description": "good",
+            "files": [""],
+        },
+    )
+    assert target is None
+
+    target = validate_target_line(
+        {
+            "description": "good",
+            "files": ["src/**/*.py"],
+            "model-override": 123,
+        },
+    )
+    assert target is None
+
+    target = validate_target_line(
+        {
+            "description": "good",
+            "files": ["src/**/*.py"],
+            "effort-override": "   ",
+        },
+    )
+    assert target is None
+
+
+def test_load_targets_jsonl_skips_invalid_optional_fields(tmp_path: Path, capsys) -> None:
+    jsonl = tmp_path / "targets.jsonl"
+    lines = [
+        json.dumps({"description": "good", "files": ["*.py"]}),
+        json.dumps({"description": "bad", "files": ["*.py"], "model-override": 99}),
+        json.dumps({"description": "also good", "files": ["*.ts"]}),
+    ]
+    jsonl.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    targets = load_targets_jsonl(jsonl)
+
+    assert len(targets) == 2
+    captured = capsys.readouterr()
+    assert "model-override" in captured.err
+
+
 # ---------------------------------------------------------------------------
 # select_random_files
 # ---------------------------------------------------------------------------

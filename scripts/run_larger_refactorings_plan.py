@@ -27,6 +27,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import subprocess
 import sys
 import textwrap
 from dataclasses import dataclass
@@ -55,10 +56,12 @@ from continuous_refactoring.git import (  # noqa: E402
 
 PLAN_PATH = REPO_ROOT / "docs" / "plans" / "larger-refactorings.md"
 
-# One task = one ```json task``` fenced block. Non-greedy body capture; the
-# closing fence must sit on its own line.
+# One task = one ```json task``` fenced block. Non-greedy body capture; both
+# fences are anchored to line starts so prose mentioning ```json task``` inline
+# cannot match.
 TASK_BLOCK_RE = re.compile(
-    r"```json task\s*\n(?P<body>[\s\S]*?)\n```",
+    r"^```json task\s*\n(?P<body>[\s\S]*?)\n^```",
+    re.MULTILINE,
 )
 STATUS_RE = re.compile(r"^Status:\s*(?P<value>.+?)\s*$", re.MULTILINE)
 
@@ -110,19 +113,24 @@ def parse_plan(text: str) -> Plan:
             raise SystemExit(
                 f"task block is not valid JSON at offset {block_match.start()}: {error}"
             ) from error
-        tasks.append(
-            Task(
-                id=str(data["id"]),
-                title=str(data["title"]),
-                type=str(data["type"]),
-                touches=list(data.get("touches", [])),
-                blocked_by=list(data.get("blocked_by", [])),
-                review_criteria=list(data.get("review_criteria", [])),
-                done=bool(data["done"]),
-                raw=body,
-                span=(block_match.start("body"), block_match.end("body")),
+        try:
+            tasks.append(
+                Task(
+                    id=str(data["id"]),
+                    title=str(data["title"]),
+                    type=str(data["type"]),
+                    touches=list(data.get("touches", [])),
+                    blocked_by=list(data.get("blocked_by", [])),
+                    review_criteria=list(data.get("review_criteria", [])),
+                    done=bool(data["done"]),
+                    raw=body,
+                    span=(block_match.start("body"), block_match.end("body")),
+                )
             )
-        )
+        except KeyError as error:
+            raise SystemExit(
+                f"task block at offset {block_match.start()} missing required field {error}."
+            ) from error
     return Plan(path=PLAN_PATH, text=text, status=status, tasks=tasks)
 
 
@@ -166,11 +174,23 @@ def pick_next_task(plan: Plan) -> Task | None:
     return None
 
 
+_DONE_FALSE_RE = re.compile(r'"done"\s*:\s*false')
+
+
 def rewrite_task_done(plan_text: str, task: Task) -> str:
-    data = json.loads(task.raw)
-    data["done"] = True
-    new_body = json.dumps(data, indent=2, sort_keys=True)
+    """Flip ``"done": false`` to ``"done": true`` inside a single task body.
+
+    Targeted substitution rather than a JSON round-trip so the body's original
+    formatting -- compact arrays, non-ASCII characters (em-dash, arrow), key
+    ordering -- survives byte-for-byte.
+    """
     start, end = task.span
+    body = plan_text[start:end]
+    new_body, count = _DONE_FALSE_RE.subn('"done": true', body, count=1)
+    if count != 1:
+        raise SystemExit(
+            f"task {task.id}: expected one `\"done\": false` to flip, found {count}."
+        )
     return plan_text[:start] + new_body + plan_text[end:]
 
 
@@ -291,19 +311,37 @@ def _dispatch(
     )
 
 
-def _review_verdict(result: CommandCapture) -> tuple[bool, str]:
-    combined = result.stdout + "\n" + result.stderr
-    for line in reversed(combined.splitlines()):
-        line = line.strip()
-        if not line:
-            continue
-        if line == REVIEW_OK:
-            return True, ""
-        if line.startswith(REVIEW_FAILED):
-            reason = line[len(REVIEW_FAILED):].lstrip(" :-") or "unspecified"
-            return False, reason
-        return False, f"no review sentinel on last non-blank line: {line!r}"
-    return False, "review agent produced no output"
+def _review_verdict(
+    result: CommandCapture,
+    last_message_path: Path | None = None,
+) -> tuple[bool, str]:
+    """Decide the review verdict from agent output.
+
+    Codex writes its final assistant message to ``last_message_path`` via
+    ``--output-last-message`` and NOT to stdout, so check that file first.
+    Claude emits the full conversation to stdout. In either source, scan
+    bottom-up and skip non-sentinel lines so trailing banners (``tokens used``,
+    ``session complete``) don't clobber a real verdict.
+    """
+    sources: list[str] = []
+    if last_message_path is not None and last_message_path.exists():
+        sources.append(
+            last_message_path.read_text(encoding="utf-8", errors="replace")
+        )
+    sources.append(result.stdout)
+    sources.append(result.stderr)
+
+    for source in sources:
+        for raw_line in reversed(source.splitlines()):
+            line = raw_line.strip()
+            if not line:
+                continue
+            if line == REVIEW_OK:
+                return True, ""
+            if line.startswith(REVIEW_FAILED):
+                reason = line[len(REVIEW_FAILED):].lstrip(" :-") or "unspecified"
+                return False, reason
+    return False, "review agent emitted no REVIEW_OK/REVIEW_FAILED sentinel."
 
 
 # ---------------------------------------------------------------------------
@@ -361,6 +399,7 @@ def execute_task(
             continue
 
         review_dir = _attempt_dir(artifacts_root, task, attempt, "review")
+        review_last_message = _last_message_path(args, review_dir)
         review = _dispatch(
             agent=args.agent,
             model=args.model,
@@ -368,7 +407,7 @@ def execute_task(
             prompt=build_review_prompt(task, args.validation_command),
             stdout_path=review_dir / "agent.stdout.log",
             stderr_path=review_dir / "agent.stderr.log",
-            last_message_path=_last_message_path(args, review_dir),
+            last_message_path=review_last_message,
             mirror=args.show_agent_logs,
             timeout=args.timeout,
         )
@@ -379,7 +418,7 @@ def execute_task(
             )
             continue
 
-        ok, reason = _review_verdict(review)
+        ok, reason = _review_verdict(review, review_last_message)
         if not ok:
             prior_reason = reason
             continue
@@ -486,6 +525,43 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
+def _recover_interrupted_success(repo_root: Path) -> str | None:
+    """Commit a pending success left behind by a prior run that crashed between
+    rewriting the plan and committing it. Detects the case where the on-disk plan
+    has a ``done: true`` flip not yet present at HEAD and commits it together
+    with whatever code changes accompany it.
+    """
+    if not repo_has_changes(repo_root):
+        return None
+
+    plan_rel = PLAN_PATH.relative_to(repo_root).as_posix()
+    result = subprocess.run(
+        ["git", "show", f"HEAD:{plan_rel}"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        return None
+
+    try:
+        head_plan = parse_plan(result.stdout)
+        disk_plan = parse_plan(PLAN_PATH.read_text(encoding="utf-8"))
+    except SystemExit:
+        return None
+
+    head_done = {t.id: t.done for t in head_plan.tasks}
+    flipped = [t for t in disk_plan.tasks if t.done and not head_done.get(t.id, False)]
+    if len(flipped) != 1:
+        return None
+
+    task = flipped[0]
+    sha = git_commit(repo_root, f"plan/{task.id}: {task.title}")
+    print(f"recovered interrupted task {task.id}; committed as {sha}.")
+    return sha
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
 
@@ -502,10 +578,11 @@ def main(argv: list[str] | None = None) -> int:
     if plan.status.lower().startswith("awaiting"):
         print(f"plan is blocked: {plan.status}")
         return 0
-    if plan.status.lower() != "todo":
+    if not plan.status.lower().startswith("todo"):
         print(f"unrecognized plan status: {plan.status!r}", file=sys.stderr)
         return 1
 
+    _recover_interrupted_success(REPO_ROOT)
     require_clean_worktree(REPO_ROOT)
 
     artifacts = create_run_artifacts(

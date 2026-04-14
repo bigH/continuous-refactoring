@@ -4,7 +4,7 @@ Status: todo
 
 ## Problem statement
 
-`continuous-refactoring` today runs single-session cleanup refactorings gated by a validation command. We need two new task classes: **multi-agent complex refactorings** that need a planning phase before they can be worked, and **phased-rollout refactorings** that ship in signal-gated increments. The existing one-shot path must remain byte-identical when no live-migrations directory is configured. Per-user taste grows two dimensions (large-scope decisions, rollout style) behind a `taste-scoping-version` header that invalidates existing tastes on bump. A per-project `live-migrations-dir` (path stored in the XDG project registry — **no project config file**) holds each migration's `manifest.json`, `plan.md`, `approaches/`, `phase-N-<name>.md`, plus a shared `__intentional_skips__/` directory. Wake-up mechanics gate phase progression (≥6h since last touch AND (wake_up_on elapsed OR ≥7d stale)); the 6h cooldown is a safety invariant the code enforces regardless of what agents write. New CLI surface: `init --live-migrations-dir`, `review list`, `review perform`, `upgrade`, `taste --upgrade`.
+`continuous-refactoring` today runs single-session cleanup refactorings gated by a validation command. We need two new task classes: **multi-agent complex refactorings** that need a planning phase before they can be worked, and **phased-rollout refactorings** that ship in signal-gated increments. The existing one-shot path must remain byte-identical when no live-migrations directory is configured. Per-user taste grows two dimensions (large-scope decisions, rollout style) behind a `taste-scoping-version` header whose mismatch warns (does not block) when existing tastes are at an older version on any subcommand, and is upgraded on demand via `taste --upgrade`. A per-project `live-migrations-dir` (path stored in the XDG project registry — **no project config file**) holds each migration's `manifest.json`, `plan.md`, `approaches/`, `phase-N-<name>.md`, plus a shared `__intentional_skips__/` directory. Wake-up mechanics gate phase progression (≥6h since last touch AND (wake_up_on elapsed OR ≥7d stale)); the 6h cooldown is a safety invariant the code enforces regardless of what agents write. New CLI surface: `init --live-migrations-dir`, `review list`, `review perform`, `upgrade`, `taste --upgrade`.
 
 ## Mermaid
 
@@ -85,7 +85,7 @@ The orchestrator treats these top-level `Status:` values:
 
 - `Status: todo` — work pending
 - `Status: awaiting <human|plan-slug|clarification>` — blocked; orchestrator prints the reason and exits 0
-- `Status: failed — <reason>` — orchestrator prints reason and exits 1
+- `Status: failed -- <reason>` — orchestrator prints reason and exits 1
 
 Batches are announced by `### Batch N: <name>` headings. Every batch leaves `main` shippable with the one-shot path working. Tasks inside a batch may run concurrently only if their `blocked_by` lists allow it; in practice the orchestrator works them sequentially.
 
@@ -245,7 +245,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
   "id": "T2.4",
   "review_criteria": [
     "cli_main prints a single-line stderr warning 'warning: taste out of date — run `continuous-refactoring taste --upgrade`' when the resolved taste (project or global) fails taste_is_stale before dispatching to a handler",
-    "the warning fires for every subcommand (init, taste, run, run-once, review, upgrade) and fires at most once per invocation",
+    "the warning fires for every subcommand (init, taste, run, run-once, review, upgrade); tests assert capsys.readouterr().err contains the warning text exactly once per invocation",
     "the warning does not change exit codes and does not mutate state",
     "tests assert warning appears for run/run-once with a legacy taste fixture and is absent when the taste is current",
     "uv run pytest passes"
@@ -332,7 +332,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 
 ```json task
 {
-  "blocked_by": ["T1.2", "T3.2", "T3.3"],
+  "blocked_by": ["T1.1", "T1.2", "T3.2", "T3.3"],
   "done": false,
   "id": "T3.4",
   "review_criteria": [
@@ -362,11 +362,11 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
   "id": "T3.5",
   "review_criteria": [
     "tests/test_run_once_regression.py exists and contains at least three cases, all using the existing prompt_capture/noop_tests fixtures",
-    "case A: `run_once` with no live-migrations-dir configured produces a prompt whose text equals what compose_full_prompt produced for the same inputs pre-change (snapshot string comparison)",
+    "case A: `run_once` with no live-migrations-dir configured produces a prompt whose text equals `compose_full_prompt(...)` called directly with the same inputs (base prompt, taste, target) — compose_full_prompt is pure so no pre-change snapshot is needed",
     "case B: `run_once` with no live-migrations-dir produces a branch matching `^cr/\\d{8}T\\d{6}$` and an output containing 'Branch: cr/' — same assertion surface as test_run_once_creates_branch",
     "case C: `run_loop` with no live-migrations-dir against a 2-target batch produces exactly 2 agent invocations, same commit-message prefix, same push semantics as the pre-change test_run behavior",
-    "case D: with live-migrations-dir SET and routing.classify_target stubbed to return 'cohesive-cleanup', the composed prompt, branch name, commit message, and push semantics are byte-identical to case A (snapshot comparison)",
-    "routing.classify_target is never invoked in cases A-C (assert via spy/monkeypatch that routing.classify_target raises if called)",
+    "case D: with live-migrations-dir SET and routing.classify_target stubbed to return 'cohesive-cleanup', the composed prompt, branch name, commit message, and push semantics match case A (compared against the same `compose_full_prompt(...)` call)",
+    "in cases A-C, routing.classify_target is monkeypatched to raise if invoked (asserting the one-shot path does not touch the classifier); in case D the stub is called exactly once and returns 'cohesive-cleanup'",
     "uv run pytest passes"
   ],
   "title": "add regression tests asserting one-shot path behavior is unchanged when live-migrations-dir is unset",
@@ -435,7 +435,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
     "when a migration is ineligible or not ready, the tick must bump manifest.last_touch and (if wake_up_on is None) set wake_up_on to now+7d via migrations.save_manifest and continue scanning; the 6h safety invariant MUST be respected — no save_manifest call can result in eligible_now being True within 6h of the original last_touch",
     "when no migration has work, the tick falls through to T3.4's existing classifier gate (or directly to the one-shot path when live_dir is unset)",
     "run_loop still honours max_consecutive_failures, max_refactors, max_attempts — a failed migration tick counts as one consecutive failure only when execute_phase returns status='failed' (awaiting_human_review is not a failure)",
-    "tests/test_phases.py (or a new tests/test_loop_migration_tick.py) covers: single-eligible-ready migration advances one phase; no-eligible migrations fall through to existing target path; eligible-but-not-ready bumps wake_up_on and moves on; the 6h invariant holds when a prior tick set wake_up_on via agent fiat",
+    "tests/test_phases.py (or a new tests/test_loop_migration_tick.py) covers: single-eligible-ready migration advances one phase; no-eligible migrations fall through to existing target path; eligible-but-not-ready bumps wake_up_on and moves on; the 6h invariant is asserted concretely — seed manifest with last_touch=now-1h and wake_up_on=now-1d (both making the agent 'want' eligibility), assert eligible_now returns False AND execute_phase is never invoked",
     "uv run pytest passes"
   ],
   "title": "integrate migration scan into loop tick; phase branch + commit + safety invariant",
@@ -452,7 +452,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 
 ```json task
 {
-  "blocked_by": ["T1.1", "T1.2"],
+  "blocked_by": ["T1.1", "T1.2", "T2.2", "T2.3", "T2.4"],
   "done": false,
   "id": "T5.1",
   "review_criteria": [
@@ -498,7 +498,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 
 ```json task
 {
-  "blocked_by": ["T1.3", "T2.2", "T2.3", "T2.4", "T3.4", "T4.3", "T5.2"],
+  "blocked_by": ["T1.3", "T2.2", "T2.3", "T2.4", "T3.4", "T4.1", "T4.3", "T5.2"],
   "done": false,
   "id": "T6.1",
   "review_criteria": [
@@ -519,4 +519,4 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 
 ## Open questions
 
-None at this time — the plan sets `Status: todo`. If the orchestrator encounters a design contradiction mid-flight, it sets `Status: failed — <reason>`; if a human must intervene to unblock a task, they manually flip `Status: awaiting human` and add context in a new `## Open questions` section.
+None at this time — the plan sets `Status: todo`. If the orchestrator encounters a design contradiction mid-flight, it sets `Status: failed -- <reason>`; if a human must intervene to unblock a task, they manually flip `Status: awaiting human` and add context in a new `## Open questions` section.

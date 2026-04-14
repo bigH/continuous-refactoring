@@ -445,6 +445,31 @@ def _handle_upgrade(args: argparse.Namespace) -> None:
                 file=sys.stderr,
             )
 
+def _resolve_review_context(
+    *,
+    project_error_code: int,
+    missing_live_dir_code: int,
+) -> Path:
+    from continuous_refactoring.config import resolve_live_migrations_dir, resolve_project
+
+    try:
+        project = resolve_project(Path.cwd().resolve())
+    except ContinuousRefactorError:
+        print(
+            "Error: project not initialized; no live-migrations-dir available.",
+            file=sys.stderr,
+        )
+        raise SystemExit(project_error_code)
+
+    live_dir = resolve_live_migrations_dir(project)
+    if live_dir is None:
+        print(
+            "Error: no live-migrations-dir configured for this project.",
+            file=sys.stderr,
+        )
+        raise SystemExit(missing_live_dir_code)
+
+    return live_dir
 
 def _handle_run_once(args: argparse.Namespace) -> None:
     _validate_targeting(args)
@@ -471,25 +496,12 @@ def _handle_run(args: argparse.Namespace) -> None:
 
 
 def _handle_review_list() -> None:
-    from continuous_refactoring.config import resolve_live_migrations_dir, resolve_project
     from continuous_refactoring.migrations import load_manifest as load_migration_manifest
 
-    try:
-        project = resolve_project(Path.cwd().resolve())
-    except ContinuousRefactorError:
-        print(
-            "Error: project not initialized; no live-migrations-dir available.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
-
-    live_dir = resolve_live_migrations_dir(project)
-    if live_dir is None:
-        print(
-            "Error: no live-migrations-dir configured for this project.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
+    live_dir = _resolve_review_context(
+        project_error_code=1,
+        missing_live_dir_code=1,
+    )
 
     if not live_dir.is_dir():
         return
@@ -509,26 +521,13 @@ def _handle_review_list() -> None:
 
 
 def _handle_review_perform(args: argparse.Namespace) -> None:
-    from continuous_refactoring.config import resolve_live_migrations_dir, resolve_project
     from continuous_refactoring.migrations import load_manifest as load_migration_manifest
     from continuous_refactoring.prompts import compose_review_perform_prompt
 
-    try:
-        project = resolve_project(Path.cwd().resolve())
-    except ContinuousRefactorError:
-        print(
-            "Error: project not initialized; no live-migrations-dir available.",
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
-
-    live_dir = resolve_live_migrations_dir(project)
-    if live_dir is None:
-        print(
-            "Error: no live-migrations-dir configured for this project.",
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
+    live_dir = _resolve_review_context(
+        project_error_code=2,
+        missing_live_dir_code=2,
+    )
 
     migration_name: str = args.migration
     migration_dir = live_dir / migration_name

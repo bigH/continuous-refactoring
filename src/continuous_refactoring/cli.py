@@ -172,6 +172,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="Stop after N consecutive failures.",
     )
 
+    subparsers.add_parser(
+        "upgrade",
+        help="Verify and upgrade global configuration.",
+    )
+
     return parser
 
 
@@ -324,6 +329,36 @@ def _handle_taste_interview(args: argparse.Namespace) -> None:
     print(str(path))
 
 
+def _handle_upgrade(args: argparse.Namespace) -> None:
+    from continuous_refactoring.config import (
+        config_is_current,
+        global_dir,
+        load_manifest,
+        save_manifest,
+        taste_is_stale,
+    )
+
+    if not config_is_current():
+        print(
+            "Error: config version is absent or out of date.",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
+    manifest = load_manifest()
+    save_manifest(manifest)
+
+    global_taste_path = global_dir() / "taste.md"
+    if global_taste_path.exists():
+        taste_text = global_taste_path.read_text(encoding="utf-8")
+        if taste_is_stale(taste_text):
+            print(
+                "warning: global taste is out of date — "
+                "run 'continuous-refactoring taste --upgrade' to update.",
+                file=sys.stderr,
+            )
+
+
 def _handle_run_once(args: argparse.Namespace) -> None:
     _validate_targeting(args)
     try:
@@ -356,6 +391,8 @@ def cli_main() -> None:
         return _handle_init(args)
     if args.command == "taste":
         return _handle_taste(args)
+    if args.command == "upgrade":
+        return _handle_upgrade(args)
     if args.command == "run-once":
         return _handle_run_once(args)
     if args.command == "run":

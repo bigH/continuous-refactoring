@@ -194,7 +194,7 @@ Batches are announced by `### Batch N: <name>` headings. Every batch leaves `mai
 ```json task
 {
   "blocked_by": ["T2.1"],
-  "done": false,
+  "done": true,
   "id": "T2.2",
   "review_criteria": [
     "new CLI subcommand `upgrade` registered in build_parser() — no required flags",

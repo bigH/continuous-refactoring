@@ -10,14 +10,17 @@ from datetime import datetime
 from pathlib import Path
 
 __all__ = [
+    "CONFIG_CURRENT_VERSION",
     "ProjectEntry",
     "ResolvedProject",
     "TASTE_CURRENT_VERSION",
     "app_data_dir",
+    "config_is_current",
     "default_taste_text",
     "ensure_taste_file",
     "find_project",
     "global_dir",
+    "load_config_version",
     "load_manifest",
     "load_taste",
     "manifest_path",
@@ -33,6 +36,7 @@ __all__ = [
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
 
+CONFIG_CURRENT_VERSION = 1
 TASTE_CURRENT_VERSION = 1
 
 _DEFAULT_TASTE = """\
@@ -123,7 +127,8 @@ def save_manifest(manifest: dict[str, ProjectEntry]) -> None:
     path = manifest_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "projects": {uid: asdict(entry) for uid, entry in manifest.items()}
+        "version": CONFIG_CURRENT_VERSION,
+        "projects": {uid: asdict(entry) for uid, entry in manifest.items()},
     }
     content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
@@ -135,6 +140,19 @@ def save_manifest(manifest: dict[str, ProjectEntry]) -> None:
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
+
+
+def load_config_version() -> int | None:
+    path = manifest_path()
+    if not path.exists():
+        return None
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    version = raw.get("version")
+    return version if isinstance(version, int) else None
+
+
+def config_is_current() -> bool:
+    return load_config_version() == CONFIG_CURRENT_VERSION
 
 
 # ---------------------------------------------------------------------------

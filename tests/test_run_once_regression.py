@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-import argparse
 import json
 import re
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -19,6 +17,7 @@ from continuous_refactoring.targeting import Target, resolve_targets
 
 from conftest import (
     init_repo,
+    make_run_loop_args,
     make_run_once_args,
     noop_agent,
     noop_tests,
@@ -57,45 +56,6 @@ def _expected_one_shot_prompt(
         scope_instruction=scope_instruction,
         validation_command=validation_command,
         attempt=1,
-    )
-
-
-def _make_run_loop_args(
-    repo_root: Path,
-    *,
-    targets: Path | None = None,
-    max_refactors: int | None = None,
-    no_push: bool = True,
-    push_remote: str = "origin",
-    commit_message_prefix: str = "continuous refactor",
-    max_consecutive_failures: int = 3,
-) -> argparse.Namespace:
-    test_script = repo_root.parent / "check_tests.py"
-    if not test_script.exists():
-        test_script.write_text("print('tests ok')\n", encoding="utf-8")
-    return argparse.Namespace(
-        agent="codex",
-        model="fake-model",
-        effort="xhigh",
-        validation_command=f"{sys.executable} {test_script}",
-        extensions=None,
-        globs=None,
-        targets=targets,
-        paths=None,
-        scope_instruction="general cleanup",
-        timeout=None,
-        refactoring_prompt=None,
-        fix_prompt=None,
-        show_agent_logs=False,
-        show_command_logs=False,
-        repo_root=repo_root,
-        max_attempts=None,
-        max_refactors=max_refactors,
-        no_push=no_push,
-        push_remote=push_remote,
-        commit_message_prefix=commit_message_prefix,
-        max_consecutive_failures=max_consecutive_failures,
-        use_branch=None,
     )
 
 
@@ -185,7 +145,7 @@ def test_run_loop_two_targets_unchanged(
     ]
     targets_file.write_text("\n".join(lines), encoding="utf-8")
 
-    args = _make_run_loop_args(
+    args = make_run_loop_args(
         repo_root,
         targets=targets_file,
         no_push=False,

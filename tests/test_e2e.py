@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import argparse
 import json
 import os
 import subprocess
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,7 +14,13 @@ import continuous_refactoring.loop
 from continuous_refactoring.artifacts import CommandCapture
 from continuous_refactoring.config import default_taste_text, register_project
 
-from conftest import make_run_once_args, noop_agent, noop_tests, write_fake_codex
+from conftest import (
+    make_run_loop_args,
+    make_run_once_args,
+    noop_agent,
+    noop_tests,
+    write_fake_codex,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -135,29 +139,11 @@ def test_e2e_init_then_run_with_failures(
         encoding="utf-8",
     )
 
-    args = argparse.Namespace(
-        agent="codex",
-        model="fake-model",
-        effort="xhigh",
-        validation_command=f"{sys.executable} -c \"print('ok')\"",
-        extensions=None,
-        globs=None,
+    args = make_run_loop_args(
+        run_once_env,
         targets=targets_file,
-        paths=None,
         scope_instruction=None,
-        timeout=None,
-        refactoring_prompt=None,
-        fix_prompt=None,
-        show_agent_logs=False,
-        show_command_logs=False,
-        repo_root=run_once_env,
-        max_attempts=None,
-        max_refactors=None,
-        no_push=True,
-        push_remote="origin",
-        commit_message_prefix="continuous refactor",
         max_consecutive_failures=5,
-        use_branch=None,
     )
     exit_code = continuous_refactoring.run_loop(args)
 

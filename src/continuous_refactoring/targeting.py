@@ -224,6 +224,10 @@ def expand_patterns_to_files(
     return tuple(sorted(matched))
 
 
+def _targets_from_patterns(patterns: tuple[str, ...], repo_root: Path) -> list[Target]:
+    return [Target(description=path, files=(path,)) for path in expand_patterns_to_files(patterns, repo_root)]
+
+
 def resolve_targets(
     *,
     extensions: str | None,
@@ -242,17 +246,11 @@ def resolve_targets(
 
     if globs is not None:
         patterns = parse_globs(globs)
-        return [
-            Target(description=f, files=(f,))
-            for f in expand_patterns_to_files(patterns, repo_root)
-        ]
+        return _targets_from_patterns(patterns, repo_root)
 
     if extensions is not None:
         patterns = parse_extensions(extensions)
-        return [
-            Target(description=f, files=(f,))
-            for f in expand_patterns_to_files(patterns, repo_root)
-        ]
+        return _targets_from_patterns(patterns, repo_root)
 
     if paths:
         return [Target(description="specified paths", files=paths)]

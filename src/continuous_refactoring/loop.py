@@ -152,6 +152,7 @@ def _try_migration_tick(
     effort: str,
     timeout: int | None,
     commit_message_prefix: str,
+    attempt: int,
 ) -> TickOutcome:
     now = datetime.now(timezone.utc)
     candidates = _enumerate_eligible_manifests(live_dir, now)
@@ -169,17 +170,22 @@ def _try_migration_tick(
             )
             saved_branch = current_branch(repo_root)
             prepare_phase_branch(repo_root, phase_branch)
+            head_before = get_head_sha(repo_root)
 
             outcome = execute_phase(
                 phase, manifest, taste, repo_root, live_dir, artifacts,
                 agent=agent, model=model, effort=effort, timeout=timeout,
             )
 
-            if repo_change_count(repo_root):
-                git_commit(
+            if outcome.status != "failed":
+                _finalize_commit(
                     repo_root,
+                    head_before,
                     f"{commit_message_prefix}: migration/{manifest.name}"
                     f"/phase-{manifest.current_phase}/{phase.name}",
+                    artifacts=artifacts,
+                    attempt=attempt,
+                    phase="migration",
                 )
 
             checkout_branch(repo_root, saved_branch)
@@ -212,6 +218,7 @@ def _route_and_run(
     effort: str,
     timeout: int | None,
     commit_message_prefix: str,
+    attempt: int,
 ) -> TickOutcome:
     live_dir = _resolve_live_migrations_dir(repo_root)
     if live_dir is None:
@@ -221,6 +228,7 @@ def _route_and_run(
         live_dir, taste, repo_root, artifacts,
         agent=agent, model=model, effort=effort,
         timeout=timeout, commit_message_prefix=commit_message_prefix,
+        attempt=attempt,
     )
     if migration_result != "not-routed":
         return migration_result
@@ -235,13 +243,20 @@ def _route_and_run(
         return "not-routed"
 
     migration_name = _migration_name_from_target(target)
+    head_before = get_head_sha(repo_root)
     outcome = run_planning(
         migration_name, target.description, taste, repo_root, live_dir, artifacts,
         agent=agent, model=model, effort=effort, timeout=timeout,
     )
 
-    if repo_change_count(repo_root):
-        git_commit(repo_root, f"{commit_message_prefix}: plan {migration_name}")
+    _finalize_commit(
+        repo_root,
+        head_before,
+        f"{commit_message_prefix}: plan {migration_name}",
+        artifacts=artifacts,
+        attempt=attempt,
+        phase="planning",
+    )
 
     print(f"Planning: {outcome.status} — {outcome.reason}")
     return "success"
@@ -318,6 +333,30 @@ def _max_attempts_exhausted(
     return True
 
 
+def _finalize_commit(
+    repo_root: Path,
+    head_before: str,
+    commit_message: str,
+    *,
+    artifacts: RunArtifacts,
+    attempt: int,
+    phase: str,
+) -> str | None:
+    head_after = get_head_sha(repo_root)
+    if head_after == head_before and repo_change_count(repo_root) == 0:
+        return None
+
+    # The runner owns the final commit. If an agent already committed, squash it
+    # back into a single driver commit so logs and artifacts match git history.
+    if head_after != head_before:
+        run_command(["git", "reset", "--soft", head_before], cwd=repo_root)
+
+    commit = git_commit(repo_root, commit_message)
+    artifacts.record_commit(attempt, phase, commit)
+    print(f"Committed: {commit}")
+    return commit
+
+
 def run_once(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
     timeout = args.timeout or 900
@@ -353,12 +392,14 @@ def run_once(args: argparse.Namespace) -> int:
             args.use_branch,
             generate_run_once_branch_name(),
         )
+        artifacts.mark_attempt_started(1)
 
         tick_outcome = _route_and_run(
             target, taste, repo_root, artifacts,
             agent=args.agent, model=model, effort=effort,
             timeout=timeout,
             commit_message_prefix="continuous refactor",
+            attempt=1,
         )
         if tick_outcome == "success":
             final_status = "completed"
@@ -417,9 +458,14 @@ def run_once(args: argparse.Namespace) -> int:
             final_status = "validation_failed"
             raise ContinuousRefactorError("Validation failed after agent run")
 
-        change_count = repo_change_count(repo_root)
-        if change_count:
-            git_commit(repo_root, "continuous refactor: run-once")
+        _finalize_commit(
+            repo_root,
+            head_before,
+            "continuous refactor: run-once",
+            artifacts=artifacts,
+            attempt=1,
+            phase="run_once",
+        )
 
         main_branch = detect_main_branch(repo_root)
         diff_stat = run_command(
@@ -530,6 +576,7 @@ def run_loop(args: argparse.Namespace) -> int:
                 agent=args.agent, model=model, effort=effort,
                 timeout=timeout,
                 commit_message_prefix=args.commit_message_prefix,
+                attempt=target_index,
             )
             if tick_outcome == "success":
                 consecutive_failures = 0
@@ -633,14 +680,15 @@ def run_loop(args: argparse.Namespace) -> int:
                     previous_failure = summarize_output(validation_result)
                     continue
 
-                change_count = repo_change_count(repo_root)
-                if change_count:
-                    commit = git_commit(
-                        repo_root,
-                        f"{args.commit_message_prefix}: {target.description}",
-                    )
-                    artifacts.record_commit(target_index, "refactor", commit)
-                    print(f"Committed: {commit}")
+                commit = _finalize_commit(
+                    repo_root,
+                    head_before,
+                    f"{args.commit_message_prefix}: {target.description}",
+                    artifacts=artifacts,
+                    attempt=target_index,
+                    phase="refactor",
+                )
+                if commit is not None:
                     if not args.no_push:
                         git_push(repo_root, args.push_remote, branch_name)
                         artifacts.record_push(target_index)

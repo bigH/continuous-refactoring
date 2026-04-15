@@ -8,6 +8,7 @@ from continuous_refactoring.config import TASTE_CURRENT_VERSION, default_taste_t
 from continuous_refactoring.migrations import MigrationManifest, PhaseSpec
 from continuous_refactoring.prompts import (
     CLASSIFIER_PROMPT,
+    DEFAULT_REFACTORING_PROMPT,
     PHASE_EXECUTION_PROMPT,
     PHASE_READY_CHECK_PROMPT,
     PLANNING_APPROACHES_PROMPT,
@@ -96,6 +97,11 @@ def _manifest() -> MigrationManifest:
 def test_classifier_output_contract() -> None:
     assert "decision: cohesive-cleanup" in CLASSIFIER_PROMPT
     assert "decision: needs-plan" in CLASSIFIER_PROMPT
+
+
+def test_refactoring_prompt_defers_commit_to_driver() -> None:
+    assert "Do not create git commits yourself." in DEFAULT_REFACTORING_PROMPT
+    assert "commit it immediately" not in DEFAULT_REFACTORING_PROMPT
 
 
 def test_final_review_output_contract() -> None:

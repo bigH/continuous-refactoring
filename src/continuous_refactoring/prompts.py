@@ -138,7 +138,8 @@ Workflow:
    - Test encoded accidental complexity: simplify only if boundary behavior remains protected and repo evidence still supports the simpler contract.
    - Failure that predates your change: keep going only if repo evidence proves it predates the change; otherwise stop blocked.
 8. Keep the batch only if it is a net improvement in clarity, truthfulness, maintenance cost, or testability.
-9. If the batch is working and validated, commit it immediately as one atomic commit, then stop.
+9. If the batch is working and validated, stop with the tree ready for the driver
+   to commit as one atomic commit. Do not create git commits yourself.
 10. If not, stop without a commit.
 
 Refactoring taste:
@@ -164,7 +165,7 @@ Output:
 - `broad_validation`
 - `failure_triage` when non-empty
 - `decision` (`commit`, `revert`, or `blocked`)
-- `commit_sha` or `blocked_reason`
+- `blocked_reason` when blocked
 - `next_candidate`\
 """
 

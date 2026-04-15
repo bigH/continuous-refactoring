@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 
@@ -15,6 +16,13 @@ from conftest import (
     noop_agent,
     noop_tests,
 )
+
+
+def _read_single_run_summary(run_once_env: Path) -> dict[str, object]:
+    run_root = run_once_env.parent / "tmpdir" / "continuous-refactoring"
+    run_dirs = list(run_root.iterdir())
+    assert len(run_dirs) == 1
+    return json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
 
 
 def _install_noop_driver(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,6 +139,38 @@ def test_run_once_prints_branch_and_diff(
     assert exit_code == 0
     output = capsys.readouterr().out
     assert "Branch: cr/" in output
+
+
+def test_run_once_prints_and_records_commit(
+    run_once_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    def touching_agent(**kwargs: object) -> CommandCapture:
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / "new_file.txt").write_text("x\n", encoding="utf-8")
+        return noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+
+    exit_code = continuous_refactoring.run_once(make_run_once_args(run_once_env))
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Committed: " in output
+    assert "Branch: cr/" in output
+
+    log = continuous_refactoring.run_command(
+        ["git", "log", "--oneline"], cwd=run_once_env,
+    ).stdout
+    assert "continuous refactor: run-once" in log
+
+    summary = _read_single_run_summary(run_once_env)
+    assert summary["counts"]["commits_created"] == 1
+    attempts = summary["attempts"]
+    assert len(attempts) == 1
+    assert attempts[0]["commit_phase"] == "run_once"
 
 
 def test_run_once_timeout(

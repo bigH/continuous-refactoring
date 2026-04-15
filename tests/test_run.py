@@ -23,6 +23,13 @@ from conftest import (
 )
 
 
+def _read_single_run_summary(tmpdir_root: Path) -> dict[str, object]:
+    run_root = tmpdir_root / "continuous-refactoring"
+    run_dirs = list(run_root.iterdir())
+    assert len(run_dirs) == 1
+    return json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
+
+
 def _failing_agent(**kwargs: object) -> CommandCapture:
     stdout_path = kwargs.get("stdout_path")
     stderr_path = kwargs.get("stderr_path")
@@ -135,6 +142,107 @@ def test_run_no_push_flag(
 
     assert exit_code == 0
     assert len(push_calls) == 0
+
+
+def test_run_reports_and_records_driver_owned_commit_for_agent_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo_root = tmp_path / "repo"
+    init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    def committing_agent(**kwargs: object) -> CommandCapture:
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / "agent_change.txt").write_text("x\n", encoding="utf-8")
+        continuous_refactoring.run_command(["git", "add", "-A"], cwd=rr)
+        continuous_refactoring.run_command(
+            ["git", "commit", "-m", "agent commit"], cwd=rr,
+        )
+        return noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", committing_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+
+    exit_code = continuous_refactoring.run_loop(make_run_loop_args(repo_root, max_refactors=1))
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Committed: " in output
+
+    log = continuous_refactoring.run_command(
+        ["git", "log", "--oneline"], cwd=repo_root,
+    ).stdout
+    assert "continuous refactor: random files" in log
+    assert "agent commit" not in log
+
+    summary = _read_single_run_summary(tmpdir_root)
+    assert summary["counts"]["commits_created"] == 1
+    attempts = summary["attempts"]
+    assert len(attempts) == 1
+    assert attempts[0]["commit_phase"] == "refactor"
+
+
+def test_run_routed_planning_reports_and_records_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo_root = tmp_path / "repo"
+    init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+    live_dir = repo_root / ".migrations"
+    live_dir.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.loop.classify_target",
+        lambda *_args, **_kwargs: "needs-plan",
+    )
+
+    class StubPlanningOutcome:
+        status = "ready"
+        reason = "stub"
+
+    def fake_run_planning(*_args: object, **_kwargs: object) -> StubPlanningOutcome:
+        (repo_root / "plan.txt").write_text("plan\n", encoding="utf-8")
+        return StubPlanningOutcome()
+
+    monkeypatch.setattr("continuous_refactoring.loop.run_planning", fake_run_planning)
+
+    exit_code = continuous_refactoring.run_loop(make_run_loop_args(repo_root, max_refactors=1))
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Classification: needs-plan — random files" in output
+    assert "Committed: " in output
+    assert "Planning: ready — stub" in output
+
+    log = continuous_refactoring.run_command(
+        ["git", "log", "--oneline"], cwd=repo_root,
+    ).stdout
+    assert "continuous refactor: plan " in log
+
+    summary = _read_single_run_summary(tmpdir_root)
+    assert summary["counts"]["commits_created"] == 1
+    attempts = summary["attempts"]
+    assert len(attempts) == 1
+    assert attempts[0]["commit_phase"] == "planning"
 
 
 def test_run_stops_after_max_consecutive_failures(

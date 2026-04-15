@@ -278,6 +278,13 @@ def _resolve_taste_path(global_: bool) -> Path:
     return project.project_dir / "taste.md"
 
 
+def _active_taste_mode(args: argparse.Namespace) -> str | None:
+    for mode in ("upgrade", "refine", "interview"):
+        if getattr(args, mode, False):
+            return mode
+    return None
+
+
 def _require_taste_action_flags(
     *,
     action: str,
@@ -341,44 +348,37 @@ def _run_taste_agent(
 
 
 def _handle_taste(args: argparse.Namespace) -> None:
-    interview = getattr(args, "interview", False)
-    upgrade = getattr(args, "upgrade", False)
-    refine = getattr(args, "refine", False)
+    mode = _active_taste_mode(args)
     agent_flags_set = any(
         getattr(args, name, None) is not None for name in ("agent", "model", "effort")
     )
 
-    if not interview and not upgrade and not refine and agent_flags_set:
+    if getattr(args, "force", False) and not getattr(args, "interview", False):
+        print("Error: --force requires --interview.", file=sys.stderr)
+        raise SystemExit(2)
+
+    if mode is None and agent_flags_set:
         print(
             "Error: --with/--model/--effort require --interview, --upgrade, or --refine.",
             file=sys.stderr,
         )
         raise SystemExit(2)
 
-    if getattr(args, "force", False) and not interview:
-        print("Error: --force requires --interview.", file=sys.stderr)
-        raise SystemExit(2)
-
-    if upgrade:
+    if mode == "upgrade":
         return _handle_taste_upgrade(args)
 
-    if refine:
+    if mode is not None:
         _require_taste_action_flags(
-            action="refine",
+            action=mode,
             agent=getattr(args, "agent", None),
             model=getattr(args, "model", None),
             effort=getattr(args, "effort", None),
         )
-        return _handle_taste_refine(args)
-
-    if interview:
-        _require_taste_action_flags(
-            action="interview",
-            agent=getattr(args, "agent", None),
-            model=getattr(args, "model", None),
-            effort=getattr(args, "effort", None),
-        )
-        return _handle_taste_interview(args)
+        handlers = {
+            "interview": _handle_taste_interview,
+            "refine": _handle_taste_refine,
+        }
+        return handlers[mode](args)
 
     from continuous_refactoring.config import ensure_taste_file
 

@@ -3,7 +3,10 @@ from __future__ import annotations
 import argparse
 import subprocess
 from pathlib import Path
+
 import pytest
+
+from conftest import init_repo as _init_repo
 
 from continuous_refactoring.cli import _handle_init, _handle_taste
 from continuous_refactoring.config import (
@@ -11,28 +14,6 @@ from continuous_refactoring.config import (
     load_manifest,
     register_project,
 )
-
-
-def _init_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@example.com"],
-        cwd=path, check=True, capture_output=True,
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "Test User"],
-        cwd=path, check=True, capture_output=True,
-    )
-    (path / "README.md").write_text("seed\n", encoding="utf-8")
-    subprocess.run(
-        ["git", "add", "README.md"], cwd=path, check=True, capture_output=True,
-    )
-    subprocess.run(
-        ["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True,
-    )
-
-
 # ---------------------------------------------------------------------------
 # init subcommand
 # ---------------------------------------------------------------------------

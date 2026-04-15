@@ -169,7 +169,7 @@ def test_check_ready_yes(
     )
 
     verdict, reason = check_phase_ready(
-        _PHASE_0, _make_manifest(), _TASTE, tmp_path, _make_artifacts(tmp_path),
+        _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
         agent="codex", model="fake", effort="low", timeout=None,
     )
     assert verdict == "yes"
@@ -190,7 +190,7 @@ def test_check_ready_yes_with_trailing_noise(
     )
 
     verdict, reason = check_phase_ready(
-        _PHASE_0, _make_manifest(), _TASTE, tmp_path, _make_artifacts(tmp_path),
+        _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
         agent="codex", model="fake", effort="low", timeout=None,
     )
     assert verdict == "yes"
@@ -210,7 +210,7 @@ def test_check_ready_no(
     )
 
     verdict, reason = check_phase_ready(
-        _PHASE_0, _make_manifest(), _TASTE, tmp_path, _make_artifacts(tmp_path),
+        _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
         agent="codex", model="fake", effort="low", timeout=None,
     )
     assert verdict == "no"
@@ -230,7 +230,7 @@ def test_check_ready_unverifiable(
     )
 
     verdict, reason = check_phase_ready(
-        _PHASE_0, _make_manifest(), _TASTE, tmp_path, _make_artifacts(tmp_path),
+        _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
         agent="codex", model="fake", effort="low", timeout=None,
     )
     assert verdict == "unverifiable"
@@ -262,7 +262,7 @@ def test_ready_yes_green_tests_flips_phase_done(
     monkeypatch.setattr("continuous_refactoring.phases.run_tests", _passing_tests)
 
     outcome = execute_phase(
-        _PHASE_0, manifest, None, _TASTE, tmp_path, live_dir,
+        _PHASE_0, manifest, _TASTE, tmp_path, live_dir,
         _make_artifacts(tmp_path),
         agent="codex", model="fake", effort="low", timeout=None,
     )
@@ -298,7 +298,7 @@ def test_ready_no_leaves_manifest_untouched(
     )
 
     verdict, _reason = check_phase_ready(
-        _PHASE_0, manifest, _TASTE, tmp_path, _make_artifacts(tmp_path),
+        _PHASE_0, manifest, tmp_path, _make_artifacts(tmp_path),
         agent="codex", model="fake", effort="low", timeout=None,
     )
     assert verdict == "no"
@@ -343,7 +343,7 @@ def test_ready_unverifiable_sets_awaiting_human_review(
     )
 
     verdict, _reason = check_phase_ready(
-        _PHASE_0, manifest, _TASTE, tmp_path, _make_artifacts(tmp_path),
+        _PHASE_0, manifest, tmp_path, _make_artifacts(tmp_path),
         agent="codex", model="fake", effort="low", timeout=None,
     )
     assert verdict == "unverifiable"
@@ -387,7 +387,7 @@ def test_execute_phase_test_failure_reverts_workspace(
     monkeypatch.setattr("continuous_refactoring.phases.run_tests", _failing_tests)
 
     outcome = execute_phase(
-        _PHASE_0, manifest, None, _TASTE, tmp_path, live_dir,
+        _PHASE_0, manifest, _TASTE, tmp_path, live_dir,
         _make_artifacts(tmp_path),
         agent="codex", model="fake", effort="low", timeout=None,
     )

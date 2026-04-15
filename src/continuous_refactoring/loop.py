@@ -160,7 +160,7 @@ def _try_migration_tick(
     for manifest, manifest_path in candidates:
         phase = manifest.phases[manifest.current_phase]
         verdict, _reason = check_phase_ready(
-            phase, manifest, taste, repo_root, artifacts,
+            phase, manifest, repo_root, artifacts,
             agent=agent, model=model, effort=effort, timeout=timeout,
         )
 
@@ -172,7 +172,7 @@ def _try_migration_tick(
             prepare_phase_branch(repo_root, phase_branch)
 
             outcome = execute_phase(
-                phase, manifest, None, taste, repo_root, live_dir, artifacts,
+                phase, manifest, taste, repo_root, live_dir, artifacts,
                 agent=agent, model=model, effort=effort, timeout=timeout,
             )
 

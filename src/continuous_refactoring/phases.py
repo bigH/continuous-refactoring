@@ -70,7 +70,6 @@ def generate_phase_branch_name(
 def check_phase_ready(
     phase: PhaseSpec,
     manifest: MigrationManifest,
-    taste: str,
     repo_root: Path,
     artifacts: RunArtifacts,
     *,
@@ -116,7 +115,6 @@ def _find_phase_index(manifest: MigrationManifest, phase: PhaseSpec) -> int:
 def execute_phase(
     phase: PhaseSpec,
     manifest: MigrationManifest,
-    target_or_none: str | None,
     taste: str,
     repo_root: Path,
     live_dir: Path,

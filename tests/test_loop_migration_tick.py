@@ -119,7 +119,7 @@ def _patch_execute_phase(
     calls: list[str] = []
 
     def fake(
-        phase: object, manifest: object, target: object,
+        phase: object, manifest: object,
         taste: object, repo_root: object, live_dir: object,
         artifacts: object, **kwargs: object,
     ) -> ExecutePhaseOutcome:

@@ -35,6 +35,25 @@ def test_run_observed_command_writes_timestamped_logs(tmp_path: Path) -> None:
     assert "<no output>" in stderr_path.read_text(encoding="utf-8")
 
 
+def test_package_exports_are_stable() -> None:
+    assert isinstance(continuous_refactoring.__all__, tuple)
+    assert len(continuous_refactoring.__all__) == len(set(continuous_refactoring.__all__))
+    for name in (
+        "AttemptStats",
+        "build_command",
+        "run_observed_command",
+        "run_command",
+        "bump_last_touch",
+        "check_phase_ready",
+        "PlanningOutcome",
+        "compose_full_prompt",
+        "ClassifierDecision",
+        "run_once",
+        "cli_main",
+    ):
+        assert hasattr(continuous_refactoring, name)
+
+
 def test_build_command_claude_streams_json_so_watchdog_sees_progress() -> None:
     command = continuous_refactoring.build_command(
         "claude", "opus", "medium", "do the thing", Path("/repo"),

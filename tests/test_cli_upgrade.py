@@ -4,10 +4,8 @@ import argparse
 import json
 import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
 from continuous_refactoring.cli import _handle_upgrade
 from continuous_refactoring.config import (
@@ -42,6 +40,22 @@ def _upgrade_args() -> argparse.Namespace:
     return argparse.Namespace(command="upgrade")
 
 
+def _set_xdg_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    xdg = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
+    return xdg
+
+
+def _register_project_with_upgrade_layout(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _set_xdg_home(tmp_path, monkeypatch)
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    register_project(repo)
+
+
 # ---------------------------------------------------------------------------
 # Happy path: current config version → exit 0
 # ---------------------------------------------------------------------------
@@ -50,10 +64,7 @@ def _upgrade_args() -> argparse.Namespace:
 def test_upgrade_succeeds_when_config_current(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    register_project(repo)
+    _register_project_with_upgrade_layout(tmp_path, monkeypatch)
 
     _handle_upgrade(_upgrade_args())
 
@@ -61,10 +72,7 @@ def test_upgrade_succeeds_when_config_current(
 def test_upgrade_is_idempotent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    register_project(repo)
+    _register_project_with_upgrade_layout(tmp_path, monkeypatch)
 
     _handle_upgrade(_upgrade_args())
     _handle_upgrade(_upgrade_args())
@@ -82,11 +90,9 @@ def test_upgrade_fails_when_config_missing(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    import pytest as _pytest
+    _set_xdg_home(tmp_path, monkeypatch)
 
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-
-    with _pytest.raises(SystemExit) as exc_info:
+    with pytest.raises(SystemExit) as exc_info:
         _handle_upgrade(_upgrade_args())
 
     assert exc_info.value.code == 1
@@ -104,9 +110,7 @@ def test_upgrade_fails_when_config_stale(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    import pytest as _pytest
-
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    _set_xdg_home(tmp_path, monkeypatch)
 
     manifest_dir = tmp_path / "xdg" / "continuous-refactoring"
     manifest_dir.mkdir(parents=True, exist_ok=True)
@@ -114,7 +118,7 @@ def test_upgrade_fails_when_config_stale(
         json.dumps({"projects": {}}), encoding="utf-8",
     )
 
-    with _pytest.raises(SystemExit) as exc_info:
+    with pytest.raises(SystemExit) as exc_info:
         _handle_upgrade(_upgrade_args())
 
     assert exc_info.value.code == 1
@@ -132,10 +136,7 @@ def test_upgrade_warns_on_stale_global_taste(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    register_project(repo)
+    _register_project_with_upgrade_layout(tmp_path, monkeypatch)
 
     gdir = global_dir()
     gdir.mkdir(parents=True, exist_ok=True)
@@ -153,10 +154,7 @@ def test_upgrade_no_taste_warning_when_current(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    register_project(repo)
+    _register_project_with_upgrade_layout(tmp_path, monkeypatch)
 
     gdir = global_dir()
     gdir.mkdir(parents=True, exist_ok=True)
@@ -173,10 +171,7 @@ def test_upgrade_no_taste_warning_when_absent(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    register_project(repo)
+    _register_project_with_upgrade_layout(tmp_path, monkeypatch)
 
     _handle_upgrade(_upgrade_args())
 

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import subprocess
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -13,6 +12,7 @@ from continuous_refactoring.artifacts import ContinuousRefactorError
 from continuous_refactoring.agent import run_observed_command
 from continuous_refactoring.git import (
     create_branch,
+    current_branch,
     checkout_main,
     branch_exists,
     generate_run_branch_name,
@@ -27,38 +27,15 @@ from continuous_refactoring.git import (
 
 def _init_repo(path: Path, *, branch: str = "main") -> None:
     path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["git", "init", "-b", branch], cwd=path, check=True, capture_output=True
-    )
-    subprocess.run(
+    run_command(["git", "init", "-b", branch], cwd=path)
+    run_command(
         ["git", "config", "user.email", "test@example.com"],
         cwd=path,
-        check=True,
-        capture_output=True,
     )
-    subprocess.run(
-        ["git", "config", "user.name", "Test User"],
-        cwd=path,
-        check=True,
-        capture_output=True,
-    )
+    run_command(["git", "config", "user.name", "Test User"], cwd=path)
     (path / "README.md").write_text("seed\n", encoding="utf-8")
-    subprocess.run(
-        ["git", "add", "README.md"], cwd=path, check=True, capture_output=True
-    )
-    subprocess.run(
-        ["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True
-    )
-
-
-def _current_branch(path: Path) -> str:
-    return subprocess.run(
-        ["git", "branch", "--show-current"],
-        cwd=path,
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
+    run_command(["git", "add", "README.md"], cwd=path)
+    run_command(["git", "commit", "-m", "init"], cwd=path)
 
 
 # -----------------------------------------------------------------------
@@ -72,7 +49,7 @@ def test_create_branch(tmp_path: Path) -> None:
 
     create_branch(repo, "feature-x")
 
-    assert _current_branch(repo) == "feature-x"
+    assert current_branch(repo) == "feature-x"
 
 
 # -----------------------------------------------------------------------
@@ -85,10 +62,10 @@ def test_checkout_main_detects_main(tmp_path: Path) -> None:
     _init_repo(repo, branch="main")
 
     create_branch(repo, "work")
-    assert _current_branch(repo) == "work"
+    assert current_branch(repo) == "work"
 
     checkout_main(repo)
-    assert _current_branch(repo) == "main"
+    assert current_branch(repo) == "main"
 
 
 def test_checkout_main_detects_master(tmp_path: Path) -> None:
@@ -96,10 +73,10 @@ def test_checkout_main_detects_master(tmp_path: Path) -> None:
     _init_repo(repo, branch="master")
 
     create_branch(repo, "work")
-    assert _current_branch(repo) == "work"
+    assert current_branch(repo) == "work"
 
     checkout_main(repo)
-    assert _current_branch(repo) == "master"
+    assert current_branch(repo) == "master"
 
 
 def test_prepare_run_branch_reuses_existing_branch(tmp_path: Path) -> None:
@@ -107,12 +84,12 @@ def test_prepare_run_branch_reuses_existing_branch(tmp_path: Path) -> None:
     _init_repo(repo)
 
     create_branch(repo, "my-branch")
-    assert _current_branch(repo) == "my-branch"
+    assert current_branch(repo) == "my-branch"
 
     result = prepare_run_branch(repo, "my-branch", "fallback")
 
     assert result == "my-branch"
-    assert _current_branch(repo) == "my-branch"
+    assert current_branch(repo) == "my-branch"
 
 
 def test_prepare_phase_branch_reuses_existing_branch(tmp_path: Path) -> None:
@@ -121,12 +98,12 @@ def test_prepare_phase_branch_reuses_existing_branch(tmp_path: Path) -> None:
 
     create_branch(repo, "phase-branch")
     create_branch(repo, "work")
-    assert _current_branch(repo) == "work"
+    assert current_branch(repo) == "work"
 
     result = prepare_phase_branch(repo, "phase-branch")
 
     assert result == "phase-branch"
-    assert _current_branch(repo) == "phase-branch"
+    assert current_branch(repo) == "phase-branch"
 
 
 def test_prepare_phase_branch_starts_from_main(tmp_path: Path) -> None:
@@ -142,7 +119,7 @@ def test_prepare_phase_branch_starts_from_main(tmp_path: Path) -> None:
     result = prepare_phase_branch(repo, "phase-fresh")
 
     assert result == "phase-fresh"
-    assert _current_branch(repo) == "phase-fresh"
+    assert current_branch(repo) == "phase-fresh"
     assert get_head_sha(repo) == main_head
 
 
@@ -158,10 +135,8 @@ def test_undo_last_commit(tmp_path: Path) -> None:
     original_sha = get_head_sha(repo)
 
     (repo / "extra.txt").write_text("extra\n", encoding="utf-8")
-    subprocess.run(["git", "add", "extra.txt"], cwd=repo, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", "add extra"], cwd=repo, check=True, capture_output=True
-    )
+    run_command(["git", "add", "extra.txt"], cwd=repo)
+    run_command(["git", "commit", "-m", "add extra"], cwd=repo)
     assert get_head_sha(repo) != original_sha
     assert (repo / "extra.txt").exists()
 
@@ -230,16 +205,11 @@ def test_consecutive_failure_tracking(tmp_path: Path) -> None:
     original_sha = get_head_sha(repo)
 
     create_branch(repo, "test-branch")
-    assert _current_branch(repo) == "test-branch"
+    assert current_branch(repo) == "test-branch"
 
     (repo / "change.txt").write_text("change\n", encoding="utf-8")
-    subprocess.run(["git", "add", "change.txt"], cwd=repo, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "commit", "-m", "test commit"],
-        cwd=repo,
-        check=True,
-        capture_output=True,
-    )
+    run_command(["git", "add", "change.txt"], cwd=repo)
+    run_command(["git", "commit", "-m", "test commit"], cwd=repo)
     commit_sha = get_head_sha(repo)
     assert commit_sha != original_sha
 

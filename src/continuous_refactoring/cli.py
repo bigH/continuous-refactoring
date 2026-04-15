@@ -17,6 +17,12 @@ from continuous_refactoring.agent import (
 from continuous_refactoring.artifacts import ContinuousRefactorError
 from continuous_refactoring.loop import run_loop, run_once
 
+_TASTE_WARNING = "warning: taste out of date — run `continuous-refactoring taste --upgrade`"
+_GLOBAL_TASTE_WARNING = (
+    "warning: global taste is out of date — "
+    "run 'continuous-refactoring taste --upgrade' to update."
+)
+
 
 def parse_max_attempts(value: str) -> int:
     try:
@@ -509,11 +515,7 @@ def _handle_upgrade(args: argparse.Namespace) -> None:
     if global_taste_path.exists():
         taste_text = global_taste_path.read_text(encoding="utf-8")
         if taste_is_stale(taste_text):
-            print(
-                "warning: global taste is out of date — "
-                "run 'continuous-refactoring taste --upgrade' to update.",
-                file=sys.stderr,
-            )
+            print(_GLOBAL_TASTE_WARNING, file=sys.stderr)
 
 def _resolve_review_context(*, error_code: int) -> Path:
     from continuous_refactoring.config import resolve_live_migrations_dir, resolve_project
@@ -655,16 +657,12 @@ def _maybe_warn_stale_taste() -> None:
 
     try:
         project = resolve_project(Path.cwd().resolve())
-    except Exception:
+    except ContinuousRefactorError:
         project = None
 
     taste_text = load_taste(project)
     if taste_is_stale(taste_text):
-        print(
-            "warning: taste out of date — "
-            "run `continuous-refactoring taste --upgrade`",
-            file=sys.stderr,
-        )
+        print(_TASTE_WARNING, file=sys.stderr)
 
 
 def cli_main() -> None:

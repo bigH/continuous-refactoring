@@ -7,12 +7,8 @@ from collections.abc import Callable
 import pytest
 
 from continuous_refactoring.cli import cli_main
+from continuous_refactoring.cli import _TASTE_WARNING
 from continuous_refactoring.config import default_taste_text
-
-_WARNING = (
-    "warning: taste out of date — "
-    "run `continuous-refactoring taste --upgrade`"
-)
 
 _LEGACY_TASTE = "- Old taste without version header.\n"
 
@@ -111,9 +107,9 @@ def test_taste_warning_behavior(
 
     err = capsys.readouterr().err
     if warns:
-        assert err.count(_WARNING) == 1
+        assert err.count(_TASTE_WARNING) == 1
     else:
-        assert _WARNING not in err
+        assert _TASTE_WARNING not in err
 
 
 # ---------------------------------------------------------------------------
@@ -141,7 +137,7 @@ def test_warning_preserves_exit_code(
 
     assert exc_info.value.code == 42
     err = capsys.readouterr().err
-    assert _WARNING in err
+    assert _TASTE_WARNING in err
 
 
 # ---------------------------------------------------------------------------

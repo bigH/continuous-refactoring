@@ -32,6 +32,27 @@ class Target:
     effort_override: str | None = None
 
 
+def _warn_skip(message: str) -> None:
+    print(f"warning: target line has {message}, skipping", file=sys.stderr)
+
+
+def _extract_nonempty_str(
+    data: dict[str, object],
+    key: str,
+    reason: str,
+    *,
+    required: bool = False,
+) -> tuple[str | None, bool]:
+    value = data.get(key)
+    if isinstance(value, str) and value.strip():
+        return value, True
+    if value is None and not required:
+        return None, True
+
+    _warn_skip(reason)
+    return None, False
+
+
 def parse_extensions(raw: str) -> tuple[str, ...]:
     """Convert comma-separated extensions to glob patterns.
 
@@ -56,45 +77,48 @@ def parse_globs(raw: str) -> tuple[str, ...]:
     return tuple(g for g in (p.strip() for p in raw.split(":")) if g)
 
 
-def validate_target_line(data: dict) -> Target | None:
+def validate_target_line(data: object) -> Target | None:
     """Validate a parsed JSON dict and return a Target, or None if invalid."""
-    description = data.get("description")
-    if not isinstance(description, str) or not description.strip():
-        print("warning: target line has missing or empty description, skipping", file=sys.stderr)
+    if not isinstance(data, dict):
+        _warn_skip("non-dict target data")
+        return None
+
+    description, ok = _extract_nonempty_str(
+        data,
+        "description",
+        "missing or empty description",
+        required=True,
+    )
+    if not ok:
         return None
 
     files = data.get("files")
     if not isinstance(files, list) or not files:
-        print("warning: target line has missing or empty files, skipping", file=sys.stderr)
+        _warn_skip("missing or empty files")
         return None
 
     if not all(isinstance(f, str) and f for f in files):
-        print("warning: target line has invalid file entries, skipping", file=sys.stderr)
+        _warn_skip("invalid file entries")
         return None
 
-    scoping = data.get("scoping")
-    if scoping is not None and (not isinstance(scoping, str) or not scoping.strip()):
-        print("warning: target line has non-string or empty scoping, skipping", file=sys.stderr)
+    scoping, ok = _extract_nonempty_str(data, "scoping", "non-string or empty scoping")
+    if not ok:
         return None
 
-    model_override = data.get("model-override")
-    if model_override is not None and (
-        not isinstance(model_override, str) or not model_override.strip()
-    ):
-        print(
-            "warning: target line has non-string or empty model-override, skipping",
-            file=sys.stderr,
-        )
+    model_override, ok = _extract_nonempty_str(
+        data,
+        "model-override",
+        "non-string or empty model-override",
+    )
+    if not ok:
         return None
 
-    effort_override = data.get("effort-override")
-    if effort_override is not None and (
-        not isinstance(effort_override, str) or not effort_override.strip()
-    ):
-        print(
-            "warning: target line has non-string or empty effort-override, skipping",
-            file=sys.stderr,
-        )
+    effort_override, ok = _extract_nonempty_str(
+        data,
+        "effort-override",
+        "non-string or empty effort-override",
+    )
+    if not ok:
         return None
 
     return Target(
@@ -200,10 +224,6 @@ def expand_patterns_to_files(
     return tuple(sorted(matched))
 
 
-def _targets_per_file(files: tuple[str, ...]) -> list[Target]:
-    return [Target(description=f, files=(f,)) for f in files]
-
-
 def resolve_targets(
     *,
     extensions: str | None,
@@ -222,11 +242,17 @@ def resolve_targets(
 
     if globs is not None:
         patterns = parse_globs(globs)
-        return _targets_per_file(expand_patterns_to_files(patterns, repo_root))
+        return [
+            Target(description=f, files=(f,))
+            for f in expand_patterns_to_files(patterns, repo_root)
+        ]
 
     if extensions is not None:
         patterns = parse_extensions(extensions)
-        return _targets_per_file(expand_patterns_to_files(patterns, repo_root))
+        return [
+            Target(description=f, files=(f,))
+            for f in expand_patterns_to_files(patterns, repo_root)
+        ]
 
     if paths:
         return [Target(description="specified paths", files=paths)]

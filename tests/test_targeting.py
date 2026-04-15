@@ -119,6 +119,24 @@ def test_load_targets_jsonl_skips_invalid(tmp_path: Path, capsys) -> None:
     assert "invalid JSON" in captured.err
 
 
+def test_load_targets_jsonl_skips_non_dict_lines(tmp_path: Path, capsys) -> None:
+    jsonl = tmp_path / "targets.jsonl"
+    lines = [
+        json.dumps({"description": "good", "files": ["*.py"]}),
+        "123",
+        "true",
+        "null",
+        json.dumps({"description": "also good", "files": ["*.ts"]}),
+    ]
+    jsonl.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+    targets = load_targets_jsonl(jsonl)
+
+    assert len(targets) == 2
+    captured = capsys.readouterr()
+    assert "non-dict target data" in captured.err
+
+
 def test_load_targets_jsonl_empty_description_skipped(tmp_path: Path, capsys) -> None:
     jsonl = tmp_path / "targets.jsonl"
     jsonl.write_text(

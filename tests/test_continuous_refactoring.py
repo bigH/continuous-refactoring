@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import re
 import sys
@@ -57,17 +58,19 @@ def test_build_command_rejects_unknown_agent() -> None:
         )
 
 
-def test_run_agent_interactive_until_settled_kills_process_after_settle(
+def test_run_agent_interactive_until_settled_requests_graceful_exit_after_settle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     content_path = tmp_path / "taste.md"
     settle_path = tmp_path / "taste.md.done"
     pid_path = tmp_path / "pid.txt"
+    signal_path = tmp_path / "signal.txt"
     script_path = tmp_path / "writer.py"
     script_path.write_text(
         """
 import hashlib
 import os
+import signal
 import sys
 import time
 from pathlib import Path
@@ -75,7 +78,14 @@ from pathlib import Path
 content_path = Path(sys.argv[1])
 settle_path = Path(sys.argv[2])
 pid_path = Path(sys.argv[3])
+signal_path = Path(sys.argv[4])
 payload = "- settled\\n"
+
+def handle_sigint(_signum, _frame):
+    signal_path.write_text("sigint\\n", encoding="utf-8")
+    raise SystemExit(0)
+
+signal.signal(signal.SIGINT, handle_sigint)
 pid_path.write_text(str(os.getpid()), encoding="utf-8")
 content_path.write_text(payload, encoding="utf-8")
 settle_path.write_text(
@@ -96,6 +106,7 @@ time.sleep(30)
             str(content_path),
             str(settle_path),
             str(pid_path),
+            str(signal_path),
         ],
     )
 
@@ -116,6 +127,7 @@ time.sleep(30)
     assert returncode == 0
     assert elapsed < 5
     assert content_path.read_text(encoding="utf-8") == "- settled\n"
+    assert signal_path.read_text(encoding="utf-8") == "sigint\n"
 
     pid = int(pid_path.read_text(encoding="utf-8"))
     with pytest.raises(ProcessLookupError):
@@ -184,6 +196,178 @@ time.sleep(30)
     assert returncode == 0
     assert elapsed >= 0.5
     assert content_path.read_text(encoding="utf-8") == new_payload
+
+
+def test_run_agent_interactive_until_settled_restores_terminal_state_and_codex_modes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content_path = tmp_path / "taste.md"
+    settle_path = tmp_path / "taste.md.done"
+    script_path = tmp_path / "writer.py"
+    script_path.write_text(
+        """
+import hashlib
+import signal
+import sys
+import time
+from pathlib import Path
+
+content_path = Path(sys.argv[1])
+settle_path = Path(sys.argv[2])
+payload = "- settled\\n"
+
+def handle_sigint(_signum, _frame):
+    raise SystemExit(0)
+
+signal.signal(signal.SIGINT, handle_sigint)
+content_path.write_text(payload, encoding="utf-8")
+settle_path.write_text(
+    f"sha256:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}",
+    encoding="utf-8",
+)
+time.sleep(30)
+""".strip(),
+        encoding="utf-8",
+    )
+
+    restored: list[tuple[int | None, object | None]] = []
+    events: list[str] = []
+
+    monkeypatch.setattr("continuous_refactoring.agent.which", lambda _: "/bin/fake")
+    monkeypatch.setattr(
+        "continuous_refactoring.agent._build_interactive_command",
+        lambda *args, **kwargs: [
+            sys.executable,
+            str(script_path),
+            str(content_path),
+            str(settle_path),
+        ],
+    )
+    monkeypatch.setattr("continuous_refactoring.agent._terminal_control_fd", lambda: 99)
+    monkeypatch.setattr(
+        "continuous_refactoring.agent._capture_terminal_state",
+        lambda fd: ["saved-state"] if fd == 99 else None,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.agent._restore_terminal_state",
+        lambda fd, state: (events.append("restore"), restored.append((fd, state))),
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.agent._restore_codex_terminal_modes_after_forced_stop",
+        lambda: events.append("reset"),
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.agent._flush_terminal_input",
+        lambda fd: events.append(f"flush:{fd}"),
+    )
+
+    returncode = continuous_refactoring.run_agent_interactive_until_settled(
+        "codex",
+        "gpt-test",
+        "high",
+        "prompt",
+        tmp_path,
+        content_path=content_path,
+        settle_path=settle_path,
+        settle_window_seconds=0.2,
+        poll_interval_seconds=0.05,
+    )
+
+    assert returncode == 0
+    assert events == ["reset", "restore", "flush:99"]
+    assert restored == [(99, ["saved-state"])]
+
+
+def test_run_agent_interactive_until_settled_skips_codex_reset_on_clean_exit(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content_path = tmp_path / "taste.md"
+    settle_path = tmp_path / "taste.md.done"
+    script_path = tmp_path / "writer.py"
+    script_path.write_text(
+        """
+import hashlib
+import sys
+from pathlib import Path
+
+content_path = Path(sys.argv[1])
+settle_path = Path(sys.argv[2])
+payload = "- settled\\n"
+content_path.write_text(payload, encoding="utf-8")
+settle_path.write_text(
+    f"sha256:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}",
+    encoding="utf-8",
+)
+""".strip(),
+        encoding="utf-8",
+    )
+
+    codex_resets: list[str] = []
+    flushed: list[int | None] = []
+
+    monkeypatch.setattr("continuous_refactoring.agent.which", lambda _: "/bin/fake")
+    monkeypatch.setattr(
+        "continuous_refactoring.agent._build_interactive_command",
+        lambda *args, **kwargs: [
+            sys.executable,
+            str(script_path),
+            str(content_path),
+            str(settle_path),
+        ],
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.agent._restore_codex_terminal_modes_after_forced_stop",
+        lambda: codex_resets.append("reset"),
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.agent._flush_terminal_input",
+        lambda fd: flushed.append(fd),
+    )
+
+    returncode = continuous_refactoring.run_agent_interactive_until_settled(
+        "codex",
+        "gpt-test",
+        "high",
+        "prompt",
+        tmp_path,
+        content_path=content_path,
+        settle_path=settle_path,
+        settle_window_seconds=0.2,
+        poll_interval_seconds=0.05,
+    )
+
+    assert returncode == 0
+    assert codex_resets == []
+    assert flushed == []
+
+
+def test_restore_codex_terminal_modes_writes_expected_escape_sequence(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class FakeTTY:
+        def __init__(self) -> None:
+            self.buffer = io.BytesIO()
+
+        def isatty(self) -> bool:
+            return True
+
+    class FakeNonTTY:
+        def isatty(self) -> bool:
+            return False
+
+    fake_stdout = FakeTTY()
+    monkeypatch.setattr("continuous_refactoring.agent.sys.stdout", fake_stdout)
+    monkeypatch.setattr("continuous_refactoring.agent.sys.stderr", FakeNonTTY())
+
+    continuous_refactoring.agent._restore_codex_terminal_modes_after_forced_stop()
+
+    assert fake_stdout.buffer.getvalue() == (
+        b"\x1b[<u"
+        b"\x1b[?2004l"
+        b"\x1b[?1004l"
+        b"\x1b[>4m"
+        b"\x1b[?25h"
+    )
 
 
 def test_compose_full_prompt_orders_previous_failure_then_fix_amendment() -> None:

@@ -17,10 +17,12 @@ from continuous_refactoring.prompts import (
     PLANNING_REVIEW_PROMPT,
     compose_full_prompt,
     compose_classifier_prompt,
+    compose_interview_prompt,
     compose_phase_execution_prompt,
     compose_phase_ready_prompt,
     compose_planning_prompt,
     compose_taste_refine_prompt,
+    compose_taste_upgrade_prompt,
 )
 from continuous_refactoring.targeting import Target
 
@@ -222,6 +224,31 @@ def test_taste_refine_prompt_preserves_current_version_header_by_default() -> No
     assert f"'taste-scoping-version: {TASTE_CURRENT_VERSION}'" in result
     assert "Keep that header unless the user explicitly asks to change it." in result
     assert "Do not add one unless the user explicitly asks for it." not in result
+
+
+def test_taste_prompts_tell_agent_to_exit_after_settle() -> None:
+    taste_path = Path("/tmp/taste.md")
+    settle_path = Path("/tmp/taste.md.done")
+
+    prompts = (
+        compose_interview_prompt(taste_path, settle_path, None),
+        compose_taste_refine_prompt(
+            taste_path=taste_path,
+            settle_path=settle_path,
+            starting_taste=default_taste_text(),
+        ),
+        compose_taste_upgrade_prompt(
+            taste_path=taste_path,
+            settle_path=settle_path,
+            existing_taste="- Legacy rule.\n",
+            stored_version=None,
+            target_version=TASTE_CURRENT_VERSION,
+        ),
+    )
+
+    for prompt in prompts:
+        assert "After writing" in prompt
+        assert "exit immediately without any extra output" in prompt
 
 
 def test_planning_final_review_has_output_contract() -> None:

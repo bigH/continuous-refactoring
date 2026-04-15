@@ -183,6 +183,7 @@ Rules:
 - After writing {taste_path}, compute its SHA-256 and write exactly
   'sha256:<hex>' to {settle_path}.
 - After writing {settle_path}, do not modify either file again.
+- After writing {settle_path}, exit immediately without any extra output.
 - Do not add a header -- the file is consumed verbatim.
 - The host will end the session after both files settle.\
 """
@@ -214,6 +215,7 @@ Rules:
 - After writing {taste_path}, compute its SHA-256 and write exactly
   'sha256:<hex>' to {settle_path}.
 - After writing {settle_path}, do not modify either file again.
+- After writing {settle_path}, exit immediately without any extra output.
 - The host will end the session after both files settle.\
 """
 
@@ -246,6 +248,7 @@ Rules:
 - After writing {taste_path}, compute its SHA-256 and write exactly
   'sha256:<hex>' to {settle_path}.
 - After writing {settle_path}, do not modify either file again.
+- After writing {settle_path}, exit immediately without any extra output.
 - The host will end the session after both files settle.\
 """
 

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import hashlib
+import os
+import signal
 import shlex
 import subprocess
 import sys
@@ -9,6 +11,11 @@ import time
 from pathlib import Path
 from shutil import which
 from typing import TYPE_CHECKING, TextIO
+
+try:
+    import termios
+except ImportError:  # pragma: no cover - termios is unavailable on Windows.
+    termios = None
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -172,7 +179,12 @@ def run_agent_interactive(
     """Exec the agent attached to the user's terminal. Returns exit code."""
     _require_agent_on_path(agent)
     command = _build_interactive_command(agent, model, effort, prompt, repo_root)
-    return subprocess.call(command, cwd=repo_root)
+    terminal_fd = _terminal_control_fd()
+    terminal_state = _capture_terminal_state(terminal_fd)
+    try:
+        return subprocess.call(command, cwd=repo_root)
+    finally:
+        _restore_terminal_state(terminal_fd, terminal_state)
 
 
 def _read_sha256(path: Path) -> str | None:
@@ -230,6 +242,116 @@ def _kill_process(process: subprocess.Popen[object]) -> None:
         pass
 
 
+def _terminal_control_fd() -> int | None:
+    for stream in (sys.stdin, sys.stdout, sys.stderr):
+        try:
+            if stream.isatty():
+                return stream.fileno()
+        except (AttributeError, OSError, ValueError):
+            continue
+    return None
+
+
+def _capture_terminal_state(fd: int | None) -> object | None:
+    if fd is None or termios is None:
+        return None
+    try:
+        return termios.tcgetattr(fd)
+    except (termios.error, OSError, ValueError):
+        return None
+
+
+def _restore_terminal_state(fd: int | None, state: object | None) -> None:
+    if fd is None or state is None or termios is None:
+        return
+    try:
+        termios.tcsetattr(fd, termios.TCSADRAIN, state)
+    except (termios.error, OSError, ValueError):
+        pass
+
+
+_FORCED_CODEX_TERMINAL_RESET = (
+    b"\x1b[<u"  # Pop keyboard enhancement flags.
+    b"\x1b[?2004l"  # Disable bracketed paste.
+    b"\x1b[?1004l"  # Disable focus reporting.
+    b"\x1b[>4m"  # Disable modifyOtherKeys.
+    b"\x1b[?25h"  # Show cursor.
+)
+
+
+def _restore_codex_terminal_modes_after_forced_stop() -> None:
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            if not stream.isatty():
+                continue
+            buffer = getattr(stream, "buffer", None)
+            if buffer is not None:
+                buffer.write(_FORCED_CODEX_TERMINAL_RESET)
+                buffer.flush()
+                return
+            stream.write(_FORCED_CODEX_TERMINAL_RESET.decode("ascii"))
+            stream.flush()
+            return
+        except (AttributeError, OSError, ValueError):
+            continue
+
+    try:
+        with open("/dev/tty", "wb", buffering=0) as tty:
+            tty.write(_FORCED_CODEX_TERMINAL_RESET)
+    except OSError:
+        pass
+
+
+def _flush_terminal_input(fd: int | None) -> None:
+    if fd is None or termios is None:
+        return
+    try:
+        termios.tcflush(fd, termios.TCIFLUSH)
+    except (termios.error, OSError, ValueError):
+        pass
+
+
+def _gracefully_stop_interactive_process(
+    process: subprocess.Popen[object],
+    *,
+    interrupt_timeout: float = 1.0,
+    terminate_timeout: float = 2.0,
+) -> None:
+    if process.poll() is not None:
+        return
+
+    try:
+        process.send_signal(signal.SIGINT)
+    except (OSError, ValueError):
+        pass
+    else:
+        try:
+            process.wait(timeout=interrupt_timeout)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+
+    if process.poll() is not None:
+        return
+
+    try:
+        process.send_signal(signal.SIGTERM)
+    except (OSError, ValueError):
+        pass
+    else:
+        try:
+            process.wait(timeout=terminate_timeout)
+            return
+        except subprocess.TimeoutExpired:
+            pass
+
+    _kill_process(process)
+    try:
+        process.wait()
+    except OSError:
+        pass
+
+
 def run_agent_interactive_until_settled(
     agent: str,
     model: str,
@@ -252,37 +374,47 @@ def run_agent_interactive_until_settled(
         settle_path.unlink()
 
     command = _build_interactive_command(agent, model, effort, prompt, repo_root)
+    terminal_fd = _terminal_control_fd()
+    terminal_state = _capture_terminal_state(terminal_fd)
     process = subprocess.Popen(command, cwd=repo_root)
     settled_since: float | None = None
     last_fingerprint: tuple[str, int, int, int, int] | None = None
+    forced_codex_stop = False
 
-    while True:
-        fingerprint = _interactive_settle_fingerprint(content_path, settle_path)
-        if fingerprint is None:
-            settled_since = None
-            last_fingerprint = None
-        elif fingerprint != last_fingerprint:
-            last_fingerprint = fingerprint
-            settled_since = time.monotonic()
-        elif settled_since is not None:
-            elapsed = time.monotonic() - settled_since
-            if elapsed >= settle_window_seconds:
-                returncode = process.poll()
-                if returncode is not None:
+    try:
+        while True:
+            fingerprint = _interactive_settle_fingerprint(content_path, settle_path)
+            if fingerprint is None:
+                settled_since = None
+                last_fingerprint = None
+            elif fingerprint != last_fingerprint:
+                last_fingerprint = fingerprint
+                settled_since = time.monotonic()
+            elif settled_since is not None:
+                elapsed = time.monotonic() - settled_since
+                if elapsed >= settle_window_seconds:
+                    returncode = process.poll()
+                    if returncode is not None:
+                        return returncode
+                    forced_codex_stop = agent == "codex"
+                    _gracefully_stop_interactive_process(process)
+                    return 0
+
+            returncode = process.poll()
+            if returncode is not None:
+                if fingerprint is not None:
                     return returncode
-                _kill_process(process)
-                process.wait()
-                return 0
+                raise ContinuousRefactorError(
+                    "interactive agent exited before the settled write was confirmed"
+                )
 
-        returncode = process.poll()
-        if returncode is not None:
-            if fingerprint is not None:
-                return returncode
-            raise ContinuousRefactorError(
-                "interactive agent exited before the settled write was confirmed"
-            )
-
-        time.sleep(poll_interval_seconds)
+            time.sleep(poll_interval_seconds)
+    finally:
+        if forced_codex_stop:
+            _restore_codex_terminal_modes_after_forced_stop()
+        _restore_terminal_state(terminal_fd, terminal_state)
+        if forced_codex_stop:
+            _flush_terminal_input(terminal_fd)
 
 
 def maybe_run_agent(

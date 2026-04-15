@@ -28,6 +28,7 @@ from continuous_refactoring.config import (
     xdg_data_home,
     ProjectEntry,
     ResolvedProject,
+    set_live_migrations_dir,
 )
 
 
@@ -208,6 +209,22 @@ def test_register_project_idempotent(
 
     manifest = load_manifest()
     assert len(manifest) == 1
+
+
+def test_register_project_recreates_missing_project_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    project_path = tmp_path / "my-project"
+    _init_repo(project_path)
+
+    registered = register_project(project_path)
+    registered.project_dir.rmdir()
+    assert not registered.project_dir.exists()
+
+    re_registered = register_project(project_path)
+    assert re_registered.entry.uuid == registered.entry.uuid
+    assert re_registered.project_dir.exists()
 
 
 def test_register_project_detects_git_remote(
@@ -443,6 +460,16 @@ def test_legacy_manifest_without_live_migrations_dir(
     loaded = load_manifest()
     assert uid in loaded
     assert loaded[uid].live_migrations_dir is None
+
+
+def test_set_live_migrations_dir_rejects_unknown_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pytest as _pytest
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    with _pytest.raises(ContinuousRefactorError, match="Project not registered"):
+        set_live_migrations_dir("missing", ".migrations")
 
 
 def test_resolve_live_migrations_dir_none_when_unset(

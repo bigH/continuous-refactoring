@@ -165,6 +165,15 @@ def _entry_from_dict(uid: str, data: object) -> ProjectEntry:
     )
 
 
+def _require_project_entry(
+    manifest: dict[str, ProjectEntry], project_uuid: str
+) -> ProjectEntry:
+    entry = manifest.get(project_uuid)
+    if entry is None:
+        raise ContinuousRefactorError(f"Project not registered: {project_uuid}")
+    return entry
+
+
 def load_manifest() -> dict[str, ProjectEntry]:
     payload = _load_manifest_payload()
     projects_raw = _load_manifest_projects(payload)
@@ -237,10 +246,9 @@ def register_project(path: Path) -> ResolvedProject:
     manifest = load_manifest()
     existing = find_project(resolved, manifest)
     if existing is not None:
-        return ResolvedProject(
-            entry=existing,
-            project_dir=_project_dir(existing.uuid),
-        )
+        project_dir = _project_dir(existing.uuid)
+        project_dir.mkdir(parents=True, exist_ok=True)
+        return ResolvedProject(entry=existing, project_dir=project_dir)
 
     uid = str(uuid.uuid4())
     entry = ProjectEntry(
@@ -280,7 +288,7 @@ def resolve_live_migrations_dir(project: ResolvedProject) -> Path | None:
 
 def set_live_migrations_dir(project_uuid: str, relative_dir: str) -> None:
     manifest = load_manifest()
-    old = manifest[project_uuid]
+    old = _require_project_entry(manifest, project_uuid)
     manifest[project_uuid] = replace(old, live_migrations_dir=relative_dir)
     save_manifest(manifest)
 

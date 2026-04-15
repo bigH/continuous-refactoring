@@ -123,23 +123,52 @@ def _load_manifest_projects(payload: dict[str, object]) -> dict[str, object]:
     return projects_raw
 
 
-def _entry_from_dict(data: dict[str, object]) -> ProjectEntry:
+def _require_str_field(data: dict[str, object], key: str, *, project_id: str) -> str:
+    value = data.get(key)
+    if value is None:
+        raise ContinuousRefactorError(
+            f"Manifest file is malformed: project '{project_id}' missing '{key}'."
+        )
+    if not isinstance(value, str):
+        raise ContinuousRefactorError(
+            f"Manifest file is malformed: project '{project_id}' field '{key}' must be a string."
+        )
+    return value
+
+
+def _require_optional_str_field(
+    data: dict[str, object], key: str, *, project_id: str
+) -> str | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        raise ContinuousRefactorError(
+            f"Manifest file is malformed: project '{project_id}' field '{key}' must be a string."
+        )
+    return value
+
+
+def _entry_from_dict(uid: str, data: object) -> ProjectEntry:
+    if not isinstance(data, dict):
+        raise ContinuousRefactorError(
+            f"Manifest file is malformed: project '{uid}' must be a JSON object."
+        )
     return ProjectEntry(
-        uuid=str(data["uuid"]),
-        path=str(data["path"]),
-        git_remote=data.get("git_remote"),  # type: ignore[arg-type]
-        created_at=str(data["created_at"]),
-        live_migrations_dir=data.get("live_migrations_dir"),  # type: ignore[arg-type]
+        uuid=_require_str_field(data, "uuid", project_id=uid),
+        path=_require_str_field(data, "path", project_id=uid),
+        git_remote=_require_optional_str_field(data, "git_remote", project_id=uid),
+        created_at=_require_str_field(data, "created_at", project_id=uid),
+        live_migrations_dir=_require_optional_str_field(
+            data, "live_migrations_dir", project_id=uid
+        ),
     )
 
 
 def load_manifest() -> dict[str, ProjectEntry]:
     payload = _load_manifest_payload()
     projects_raw = _load_manifest_projects(payload)
-    return {
-        uid: _entry_from_dict(entry)
-        for uid, entry in projects_raw.items()
-    }
+    return {uid: _entry_from_dict(uid, entry) for uid, entry in projects_raw.items()}
 
 
 def save_manifest(manifest: dict[str, ProjectEntry]) -> None:

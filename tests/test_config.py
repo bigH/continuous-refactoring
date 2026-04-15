@@ -110,6 +110,40 @@ def test_load_manifest_rejects_non_mapping_projects(
         load_manifest()
 
 
+def test_load_manifest_rejects_non_mapping_project_entry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pytest as _pytest
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        '{"projects": {"abc": ["not", "an", "object"]}}',
+        encoding="utf-8",
+    )
+
+    with _pytest.raises(ContinuousRefactorError, match="project 'abc' must be a JSON object"):
+        load_manifest()
+
+
+def test_load_manifest_rejects_project_entry_missing_required_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pytest as _pytest
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        '{"projects": {"abc": {"uuid": "abc", "git_remote": null, "created_at": "x"}}}',
+        encoding="utf-8",
+    )
+
+    with _pytest.raises(ContinuousRefactorError, match="missing 'path'"):
+        load_manifest()
+
+
 def test_save_and_load_manifest_roundtrip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

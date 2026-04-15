@@ -55,7 +55,6 @@ from continuous_refactoring.migrations import (
     bump_last_touch,
     eligible_now,
     load_manifest,
-    parse_iso,
     save_manifest,
 )
 from continuous_refactoring.phases import (
@@ -138,7 +137,7 @@ def _enumerate_eligible_manifests(
         if not eligible_now(manifest, now):
             continue
         candidates.append((manifest, manifest_path))
-    candidates.sort(key=lambda pair: parse_iso(pair[0].created_at))
+    candidates.sort(key=lambda pair: datetime.fromisoformat(pair[0].created_at))
     return candidates
 
 

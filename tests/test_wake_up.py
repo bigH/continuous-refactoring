@@ -9,7 +9,6 @@ from continuous_refactoring.migrations import (
     PhaseSpec,
     bump_last_touch,
     eligible_now,
-    parse_iso,
 )
 
 NOW = datetime(2026, 4, 14, 12, 0, 0, tzinfo=timezone.utc)
@@ -99,11 +98,3 @@ def test_bump_last_touch_preserves_other_fields() -> None:
     assert bumped.phases == original.phases
     assert bumped.status == original.status
 
-
-# ---------------------------------------------------------------------------
-# parse_iso
-# ---------------------------------------------------------------------------
-
-def test_parse_iso_roundtrip() -> None:
-    ts = NOW.isoformat(timespec="milliseconds")
-    assert parse_iso(ts) == NOW

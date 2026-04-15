@@ -19,7 +19,6 @@ __all__ = [
     "intentional_skips_dir",
     "load_manifest",
     "migration_root",
-    "parse_iso",
     "phase_path",
     "save_manifest",
 ]
@@ -195,17 +194,13 @@ _COOLDOWN = timedelta(hours=6)
 _STALE = timedelta(days=7)
 
 
-def parse_iso(s: str) -> datetime:
-    return datetime.fromisoformat(s)
-
-
 def eligible_now(manifest: MigrationManifest, now: datetime) -> bool:
-    elapsed = now - parse_iso(manifest.last_touch)
+    elapsed = now - datetime.fromisoformat(manifest.last_touch)
     if elapsed < _COOLDOWN:
         return False
     if manifest.wake_up_on is None:
         return True
-    return parse_iso(manifest.wake_up_on) <= now or elapsed >= _STALE
+    return datetime.fromisoformat(manifest.wake_up_on) <= now or elapsed >= _STALE
 
 
 def bump_last_touch(manifest: MigrationManifest, now: datetime) -> MigrationManifest:

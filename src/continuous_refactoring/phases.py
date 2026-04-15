@@ -28,7 +28,10 @@ from continuous_refactoring.prompts import (
 
 ReadyVerdict = Literal["yes", "no", "unverifiable"]
 
-_READY_RE = re.compile(r"^ready:\s*(yes|no|unverifiable)\b", re.IGNORECASE)
+_READY_RE = re.compile(
+    r"^ready:\s*(?P<verdict>yes|no|unverifiable)\b(?P<reason>.*)$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -43,12 +46,15 @@ def _parse_ready_verdict(stdout: str) -> tuple[ReadyVerdict, str]:
         raise ContinuousRefactorError("Phase ready-check produced no output")
 
     for line in reversed(nonempty_lines):
-        stripped = line.strip()
-        match = _READY_RE.match(stripped)
-        if match:
-            verdict: ReadyVerdict = match.group(1).lower()  # type: ignore[assignment]
-            reason = stripped[match.end():].lstrip(" \u2014-").strip() or verdict
-            return verdict, reason
+        match = _READY_RE.match(line)
+        if not match:
+            continue
+        verdict = match.group("verdict").lower()  # type: ignore[assignment]
+        reason = match.group("reason")
+        if reason is None:
+            reason = ""
+        reason = reason.lstrip(" \u2014-").strip() or verdict
+        return verdict, reason
     raise ContinuousRefactorError(
         f"Phase ready-check produced unrecognised output: {nonempty_lines[-1]!r}"
     )

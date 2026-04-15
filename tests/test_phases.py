@@ -10,6 +10,7 @@ from continuous_refactoring.artifacts import (
     CommandCapture,
     RunArtifacts,
     create_run_artifacts,
+    ContinuousRefactorError,
 )
 from continuous_refactoring.migrations import (
     MigrationManifest,
@@ -195,6 +196,38 @@ def test_check_ready_yes_with_trailing_noise(
     )
     assert verdict == "yes"
     assert reason == "yes"
+
+
+def test_check_ready_rejects_no_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
+    (tmp_path / "tmpdir").mkdir()
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.maybe_run_agent",
+        _make_fake_agent("", tmp_path),
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="no output"):
+        check_phase_ready(
+            _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
+            agent="codex", model="fake", effort="low", timeout=None,
+        )
+
+
+def test_check_ready_rejects_unparseable_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
+    (tmp_path / "tmpdir").mkdir()
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.maybe_run_agent",
+        _make_fake_agent("analysis summary\nstatus: inconclusive\n", tmp_path),
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="unrecognised output"):
+        check_phase_ready(
+            _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
+            agent="codex", model="fake", effort="low", timeout=None,
+        )
 
 
 def test_check_ready_no(

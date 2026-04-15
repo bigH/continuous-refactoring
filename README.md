@@ -1,15 +1,40 @@
 # continuous-refactoring
 
-A CLI that hands your repo to a coding agent (Codex or Claude) and asks it to make small, safe cleanup commits — one at a time, on a fresh branch, gated by your test suite.
+Small, test-gated cleanup commits by an AI coding agent.
 
 Think of it as a supervised janitor loop: the agent proposes a cleanup, your tests decide if it stays.
 
+## Fastest way to get one refactor
+
+Once installed:
+
+```bash
+continuous-refactoring init
+continuous-refactoring run-once \
+  --with codex --model gpt-5 --effort high \
+  --extensions .py
+```
+
+That gives you one pass on a fresh branch. If validation passes, it leaves you with a local commit to inspect.
+
+## Got tokens to burn?
+
+```bash
+continuous-refactoring run \
+  --with codex --model gpt-5 --effort high \
+  --extensions .py \
+  --max-refactors 10 \
+  --max-attempts 2
+```
+
+That keeps sweeping targets until it runs out, hits your caps, or starts failing.
+
 ## What it does
 
-- Picks a target (a file, a glob, a random tracked file, or a scope you describe).
+- Resolves a target from `--targets`, `--globs`, `--extensions`, or `--paths`, with optional natural-language scoping via `--scope-instruction`.
 - Runs the agent with a refactoring prompt + your "taste" guidelines.
 - Runs your validation command (default: `uv run pytest`).
-- If green and there's a diff, commits and pushes. If red, reverts and moves on.
+- In `run`, if green and there's a diff, commits and pushes. In `run-once`, it commits locally and leaves the branch for you to inspect.
 - Repeats until it runs out of targets, hits the retry budget, or stacks too many failures.
 
 ## Requirements
@@ -46,6 +71,7 @@ continuous-refactoring run-once \
 continuous-refactoring run \
   --with claude --model claude-opus-4-6 --effort high \
   --globs 'src/**/*.py' \
+  --max-refactors 10 \
   --max-attempts 2
 ```
 
@@ -53,50 +79,63 @@ continuous-refactoring run \
 
 | Command | What it does |
 |---|---|
-| `init` | Registers this directory as a project; creates a default `taste.md`. |
-| `taste` | Prints the active taste file path. Add `--interview` to have an agent author it with you. `--global` targets the shared user-level file. |
-| `run-once` | Single pass on one target. No retry, no push. Leaves the branch for you to review. |
-| `run` | The loop. Iterates targets, retries on failure, commits and pushes greens. |
-| `upgrade` | Validates global config version; warns (but doesn't block) if taste is stale. |
+| `init` | Registers this directory as a project, creates a default `taste.md`, and can store `--live-migrations-dir`. |
+| `taste` | Prints the active taste file path. Add `--interview` to have an agent author it, `--upgrade` to refresh stale taste dimensions, `--global` for the shared file, and `--force` to overwrite custom content after writing a `.bak`. |
+| `run-once` | Single pass on one resolved target. No retry, no push. If there is a diff and validation passes, it commits locally and prints the branch + diffstat. |
+| `run` | The loop. Iterates targets, retries on failure, commits successful targets, and pushes unless `--no-push` is set. |
+| `upgrade` | Checks that the global config manifest is current, rewrites it idempotently, and warns if the global taste file is stale. |
 | `review list` | Lists migrations flagged for human review (`awaiting_human_review`). |
-| `review perform <migration>` | Starts an interactive agent session to resolve a flagged migration's review. |
+| `review perform <migration>` | Starts an interactive agent session to resolve a flagged migration's review. Requires `--with`, `--model`, and `--effort`. |
 
 ## Targeting / Useful flags
 
 ### Target selection
 
-Pick *one* of these to tell the tool what to clean up:
+Target resolution is first-match-wins:
+`--targets` > `--globs` > `--extensions` > `--paths`
+
+These flags are not mutually exclusive, but only the highest-priority populated source is used.
 
 - `--targets path/to/targets.jsonl` — explicit list; one JSON object per line with `description`, `files`, optional `scoping`, `model-override`, `effort-override`.
 - `--globs 'src/**/*.py:tests/**/*.py'` — colon-separated globs; each matched file becomes its own target.
-- `--extensions .py,.ts` — shorthand that expands to `**/*.py`, `**/*.ts`.
+- `--extensions .py,.ts` — shorthand that expands to `**/*.py`, `**/*.ts`; each matched file becomes its own target.
 - `--paths a.py:b.py` — literal paths, all treated as one target.
-- `--scope-instruction "clean up the auth module"` — free-text scope, no file list.
+- `--scope-instruction "clean up the auth module"` — extra free-text scoping. If file-based targeting resolves nothing, this becomes the useful fallback context.
 
-If none of these match any tracked files, you must provide `--scope-instruction` as a fallback.
+If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`, then `run` and `run-once` require `--scope-instruction`.
 
 ### Migrations & taste flags
 
 - `init --live-migrations-dir PATH` — enables the larger-refactoring workflow for this project. The path is stored repo-relative in the project registry and created if missing.
 - `taste --upgrade` — re-interviews for taste dimensions added since your last version. No-op when already current.
+- `taste --force` — allows `--interview` to overwrite a customized taste file after backing it up to `taste.md.bak`.
 
-### Common flags
+### Shared `run` / `run-once` flags
 
+- `--with`, `--model`, `--effort` — required agent backend/model/effort selection.
+- `--repo-root PATH` — repository root; defaults to the current directory.
+- `--use-branch NAME` — reuse an existing branch or create it from `main` / `master` instead of using a timestamped branch name.
 - `--validation-command` — defaults to `uv run pytest`. Swap it for whatever keeps your repo honest.
-- `--max-attempts N` — per-target retry budget. `1` = no retry, `0` = unlimited (⚠️ loops forever on broken targets).
-- `--max-refactors N` — cap the number of targets per run.
-- `--max-consecutive-failures N` — bail after N targets fail in a row. Default 3.
-- `--no-push` — keep commits local.
 - `--timeout` — per-agent-call timeout in seconds.
 - `--show-agent-logs` / `--show-command-logs` — mirror output to your terminal instead of just logging.
-- `--refactoring-prompt` / `--fix-prompt` — swap in your own prompt files.
+- `--refactoring-prompt` — override the default refactoring prompt.
+- `--fix-prompt` — override the retry amendment prompt. Useful for `run`; accepted by `run-once` for flag symmetry.
+
+### `run`-only flags
+
+- `--max-attempts N` — per-target retry budget. `1` = no retry, `0` = unlimited (which means permanently broken targets will never give up).
+- `--max-refactors N` — cap the number of targets per run. Required unless you use `--targets`.
+- `--max-consecutive-failures N` — bail after N targets fail in a row. Default 3.
+- `--no-push` — keep commits local.
+- `--push-remote NAME` — remote used when pushing. Default `origin`.
+- `--commit-message-prefix TEXT` — prefix for successful refactor or migration-plan commits. Default `continuous refactor`.
 
 ## Safety behaviors
 
 - Refuses to start with a dirty worktree.
-- Runs every pass on a fresh branch (`refactor-<timestamp>` or `cr/<timestamp>`).
-- Baselines your tests before touching anything — if the baseline is already red, it stops.
-- On a failed attempt: undoes the commit (if any) and hard-resets the workspace before retrying or moving on.
+- By default, runs on a fresh branch (`refactor-<timestamp>` or `cr/<timestamp>`). With `--use-branch`, it reuses or creates the named branch instead.
+- `run` baselines your validation command before touching anything. If the baseline is already red, it stops.
+- On a failed attempt, resets back to the pre-attempt HEAD and cleans workspace changes before retrying or moving on.
 - Watchdog kills any agent or test process that's been silent for 5 minutes.
 
 ## Where the artifacts live
@@ -168,7 +207,7 @@ Each migration moves through phases sequentially. Before executing a phase, a re
 
 - **ready: yes** — phase executes; on green tests, the phase is marked done and the migration advances.
 - **ready: no** — manifest is bumped with a future `wake_up_on`; the tick moves on.
-- **ready: unverifiable** — the migration is flagged `awaiting_human_review`. Use `review list` to find it and `review perform <migration>` to resolve it interactively.
+- **ready: unverifiable** — the migration is flagged `awaiting_human_review`. Use `review list` to find it and `review perform <migration> --with ... --model ... --effort ...` to resolve it interactively.
 
 ### What the CLI doesn't do
 

@@ -132,6 +132,38 @@ def test_classify_case_insensitive(
     assert result == "cohesive-cleanup"
 
 
+def test_classify_ignores_trailing_non_matching_lines(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
+    (tmp_path / "tmpdir").mkdir()
+
+    def fake_agent(**kwargs: object) -> CommandCapture:
+        Path(str(kwargs["stdout_path"])).parent.mkdir(parents=True, exist_ok=True)
+        Path(str(kwargs["stdout_path"])).write_text("", encoding="utf-8")
+        Path(str(kwargs["stderr_path"])).parent.mkdir(parents=True, exist_ok=True)
+        Path(str(kwargs["stderr_path"])).write_text("", encoding="utf-8")
+        return _fake_capture(
+            "\n".join(
+                [
+                    "analysis",
+                    "Decision: needs-plan \u2014 spread across systems",
+                    "tooling: wrote artifact summary",
+                ],
+            ),
+            tmp_path=tmp_path,
+        )
+
+    monkeypatch.setattr("continuous_refactoring.routing.maybe_run_agent", fake_agent)
+    artifacts = _make_artifacts(tmp_path)
+
+    result = classify_target(
+        _target(), _TASTE, tmp_path, artifacts,
+        agent="codex", model="fake", effort="low", timeout=None,
+    )
+    assert result == "needs-plan"
+
+
 # ---------------------------------------------------------------------------
 # Error paths
 # ---------------------------------------------------------------------------

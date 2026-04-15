@@ -22,17 +22,20 @@ _DECISION_RE = re.compile(
 
 
 def _parse_decision(stdout: str) -> ClassifierDecision:
+    last_output_line: str | None = None
     for line in reversed(stdout.splitlines()):
         stripped = line.strip()
         if not stripped:
             continue
+        last_output_line = stripped
         match = _DECISION_RE.match(stripped)
         if match:
             return match.group(1).lower()  # type: ignore[return-value]
-        raise ContinuousRefactorError(
-            f"Classifier produced unrecognised output: {stripped!r}"
-        )
-    raise ContinuousRefactorError("Classifier produced no output")
+    if last_output_line is None:
+        raise ContinuousRefactorError("Classifier produced no output")
+    raise ContinuousRefactorError(
+        f"Classifier produced unrecognised output: {last_output_line!r}"
+    )
 
 
 def classify_target(

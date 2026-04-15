@@ -36,6 +36,16 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _migrations_dir(run_once_env: Path) -> Path:
+    live_dir = run_once_env / ".migrations"
+    live_dir.mkdir()
+    return live_dir
+
+
+def _run_once(run_once_env: Path) -> int:
+    return continuous_refactoring.run_once(make_run_once_args(run_once_env))
+
+
 def _git_commit_all(repo_root: Path) -> None:
     continuous_refactoring.run_command(["git", "add", "-A"], cwd=repo_root)
     continuous_refactoring.run_command(
@@ -71,6 +81,28 @@ def _save(manifest: MigrationManifest, live_dir: Path) -> Path:
     return path
 
 
+def _seed_manifest(
+    run_once_env: Path,
+    *,
+    name: str,
+    last_touch: datetime,
+    wake_up_on: datetime | None = None,
+    created_at: datetime | None = None,
+    commit: bool = False,
+) -> tuple[Path, MigrationManifest, Path]:
+    live_dir = _migrations_dir(run_once_env)
+    manifest = _make_manifest(
+        name,
+        last_touch=last_touch,
+        wake_up_on=wake_up_on,
+        created_at=created_at,
+    )
+    path = _save(manifest, live_dir)
+    if commit:
+        _git_commit_all(run_once_env)
+    return live_dir, manifest, path
+
+
 def _patch_live_dir(
     monkeypatch: pytest.MonkeyPatch, live_dir: Path,
 ) -> None:
@@ -80,15 +112,26 @@ def _patch_live_dir(
     )
 
 
-def _patch_classifier_cohesive(monkeypatch: pytest.MonkeyPatch) -> list[int]:
-    calls: list[int] = []
+def _patch_classifier_cohesive(monkeypatch: pytest.MonkeyPatch) -> list[str]:
+    calls: list[str] = []
 
     def stub(*_a: object, **_k: object) -> str:
-        calls.append(1)
+        target = _a[0] if _a else None
+        if target is None:
+            calls.append("")
+        else:
+            calls.append(getattr(target, "description", ""))
         return "cohesive-cleanup"
 
     monkeypatch.setattr("continuous_refactoring.loop.classify_target", stub)
     return calls
+
+
+def _assert_fell_through(
+    classifier_calls: list[str], prompts: list[str],
+) -> None:
+    assert len(classifier_calls) == 1
+    assert len(prompts) == 1
 
 
 def _patch_classifier_trap(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -170,13 +213,13 @@ def _patch_one_shot(monkeypatch: pytest.MonkeyPatch) -> list[str]:
 def test_eligible_ready_migration_advances_phase(
     run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    live_dir = run_once_env / ".migrations"
-    live_dir.mkdir()
-
     now = _utc_now()
-    manifest = _make_manifest("rework-auth", last_touch=now - timedelta(hours=24))
-    manifest_path = _save(manifest, live_dir)
-    _git_commit_all(run_once_env)
+    live_dir, _, manifest_path = _seed_manifest(
+        run_once_env,
+        name="rework-auth",
+        last_touch=now - timedelta(hours=24),
+        commit=True,
+    )
 
     _patch_live_dir(monkeypatch, live_dir)
     _patch_classifier_trap(monkeypatch)
@@ -184,8 +227,7 @@ def test_eligible_ready_migration_advances_phase(
     exec_calls = _patch_execute_phase(monkeypatch, status="done")
     _patch_one_shot(monkeypatch)
 
-    args = make_run_once_args(run_once_env)
-    exit_code = continuous_refactoring.run_once(args)
+    exit_code = _run_once(run_once_env)
 
     assert exit_code == 0
     assert check_calls == ["setup"]
@@ -208,19 +250,16 @@ def test_eligible_ready_migration_advances_phase(
 def test_no_eligible_migrations_falls_through(
     run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    live_dir = run_once_env / ".migrations"
-    live_dir.mkdir()
+    live_dir = _migrations_dir(run_once_env)
 
     _patch_live_dir(monkeypatch, live_dir)
     classifier_calls = _patch_classifier_cohesive(monkeypatch)
     prompts = _patch_one_shot(monkeypatch)
 
-    args = make_run_once_args(run_once_env)
-    exit_code = continuous_refactoring.run_once(args)
+    exit_code = _run_once(run_once_env)
 
     assert exit_code == 0
-    assert len(classifier_calls) == 1
-    assert len(prompts) == 1
+    _assert_fell_through(classifier_calls, prompts)
 
 
 # ---------------------------------------------------------------------------
@@ -231,13 +270,13 @@ def test_no_eligible_migrations_falls_through(
 def test_eligible_not_ready_bumps_wake_up_on(
     run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    live_dir = run_once_env / ".migrations"
-    live_dir.mkdir()
-
     now = _utc_now()
-    manifest = _make_manifest("rework-auth", last_touch=now - timedelta(hours=24))
-    manifest_path = _save(manifest, live_dir)
-    _git_commit_all(run_once_env)
+    live_dir, manifest, manifest_path = _seed_manifest(
+        run_once_env,
+        name="rework-auth",
+        last_touch=now - timedelta(hours=24),
+        commit=True,
+    )
     assert load_manifest(manifest_path).wake_up_on is None
 
     _patch_live_dir(monkeypatch, live_dir)
@@ -246,8 +285,7 @@ def test_eligible_not_ready_bumps_wake_up_on(
     _patch_execute_phase_trap(monkeypatch)
     prompts = _patch_one_shot(monkeypatch)
 
-    args = make_run_once_args(run_once_env)
-    exit_code = continuous_refactoring.run_once(args)
+    exit_code = _run_once(run_once_env)
 
     assert exit_code == 0
 
@@ -256,8 +294,8 @@ def test_eligible_not_ready_bumps_wake_up_on(
     assert reloaded.phases[0].done is False
     assert reloaded.current_phase == 0
 
-    assert len(classifier_calls) == 1
-    assert len(prompts) == 1
+    _assert_fell_through(classifier_calls, prompts)
+    assert manifest.current_phase == 0
 
 
 # ---------------------------------------------------------------------------
@@ -268,17 +306,14 @@ def test_eligible_not_ready_bumps_wake_up_on(
 def test_6h_invariant_blocks_execution(
     run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    live_dir = run_once_env / ".migrations"
-    live_dir.mkdir()
-
     now = _utc_now()
-    manifest = _make_manifest(
-        "rework-auth",
+    live_dir, manifest, _ = _seed_manifest(
+        run_once_env,
+        name="rework-auth",
         last_touch=now - timedelta(hours=1),
         wake_up_on=now - timedelta(days=1),
+        commit=True,
     )
-    _save(manifest, live_dir)
-    _git_commit_all(run_once_env)
 
     assert not eligible_now(manifest, now)
 
@@ -287,9 +322,7 @@ def test_6h_invariant_blocks_execution(
     _patch_execute_phase_trap(monkeypatch)
     prompts = _patch_one_shot(monkeypatch)
 
-    args = make_run_once_args(run_once_env)
-    exit_code = continuous_refactoring.run_once(args)
+    exit_code = _run_once(run_once_env)
 
     assert exit_code == 0
-    assert len(classifier_calls) == 1
-    assert len(prompts) == 1
+    _assert_fell_through(classifier_calls, prompts)

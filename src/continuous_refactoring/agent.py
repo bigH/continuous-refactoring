@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import hashlib
-import os
 import signal
 import shlex
 import subprocess
@@ -46,7 +45,6 @@ def _build_claude_command(
     model: str,
     effort: str,
     prompt: str,
-    _repo_root: Path,
 ) -> list[str]:
     return [
         "claude",
@@ -80,7 +78,7 @@ def _build_interactive_command(
     _require_supported_agent(agent)
     if agent == "codex":
         return _build_codex_interactive_command(model, effort, prompt, repo_root)
-    return _build_claude_interactive_command(model, effort, prompt, repo_root)
+    return _build_claude_interactive_command(model, effort, prompt)
 
 
 def _build_codex_command(
@@ -129,7 +127,7 @@ def build_command(
             repo_root=repo_root,
             last_message_path=last_message_path,
         )
-    return _build_claude_command(model, effort, prompt, repo_root)
+    return _build_claude_command(model, effort, prompt)
 
 
 def _build_codex_interactive_command(
@@ -155,7 +153,6 @@ def _build_claude_interactive_command(
     model: str,
     effort: str,
     prompt: str,
-    _repo_root: Path,
 ) -> list[str]:
     return [
         "claude",
@@ -365,7 +362,6 @@ def run_agent_interactive_until_settled(
     poll_interval_seconds: float = 0.1,
 ) -> int:
     _require_agent_on_path(agent)
-    _require_supported_agent(agent)
 
     settle_path.parent.mkdir(parents=True, exist_ok=True)
     if settle_path.exists():

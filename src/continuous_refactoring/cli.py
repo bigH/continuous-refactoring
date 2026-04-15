@@ -284,6 +284,10 @@ def _resolve_taste_path(global_: bool) -> Path:
     return project.project_dir / "taste.md"
 
 
+def _taste_settle_path(path: Path) -> Path:
+    return path.with_name(path.name + ".done")
+
+
 def _active_taste_mode(args: argparse.Namespace) -> str | None:
     for mode in ("upgrade", "refine", "interview"):
         if getattr(args, mode, False):
@@ -322,7 +326,7 @@ def _run_taste_agent(
     prompt: str,
     path: Path,
 ) -> None:
-    settle_path = path.with_name(path.name + ".done")
+    settle_path = _taste_settle_path(path)
     try:
         returncode = run_agent_interactive_until_settled(
             args.agent,
@@ -416,7 +420,7 @@ def _handle_taste_interview(args: argparse.Namespace) -> None:
             existing = current
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    prompt = compose_interview_prompt(path, path.with_name(path.name + ".done"), existing)
+    prompt = compose_interview_prompt(path, _taste_settle_path(path), existing)
     _run_taste_agent(
         action="interview",
         args=args,
@@ -438,7 +442,7 @@ def _handle_taste_refine(args: argparse.Namespace) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     prompt = compose_taste_refine_prompt(
         path,
-        path.with_name(path.name + ".done"),
+        _taste_settle_path(path),
         starting_taste,
     )
     _run_taste_agent(
@@ -478,7 +482,7 @@ def _handle_taste_upgrade(args: argparse.Namespace) -> None:
 
     prompt = compose_taste_upgrade_prompt(
         path,
-        path.with_name(path.name + ".done"),
+        _taste_settle_path(path),
         existing,
         stored_version,
         TASTE_CURRENT_VERSION,

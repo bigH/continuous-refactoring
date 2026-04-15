@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -90,22 +91,44 @@ if __name__ == "__main__":
     return script
 
 
+def _write_if_path(path_obj: object, content: str) -> Path:
+    if path_obj is None:
+        return Path(os.devnull)
+    output_path = Path(path_obj)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(content, encoding="utf-8")
+    return output_path
+
+
+def _record_command(
+    *,
+    returncode: int,
+    stdout: str,
+    stderr: str,
+    stdout_path: object,
+    stderr_path: object,
+    command: tuple[str, ...] = ("pytest",),
+) -> CommandCapture:
+    return CommandCapture(
+        command=command,
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+        stdout_path=_write_if_path(stdout_path, stdout),
+        stderr_path=_write_if_path(stderr_path, stderr),
+    )
+
+
 def noop_agent(**kwargs: object) -> CommandCapture:
     stdout_path = kwargs.get("stdout_path")
     stderr_path = kwargs.get("stderr_path")
-    if stdout_path:
-        Path(stdout_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(stdout_path).write_text("noop\n", encoding="utf-8")
-    if stderr_path:
-        Path(stderr_path).parent.mkdir(parents=True, exist_ok=True)
-        Path(stderr_path).write_text("", encoding="utf-8")
-    return CommandCapture(
-        command=("fake",),
+    return _record_command(
         returncode=0,
         stdout="noop\n",
         stderr="",
-        stdout_path=Path(stdout_path) if stdout_path else Path("/dev/null"),
-        stderr_path=Path(stderr_path) if stderr_path else Path("/dev/null"),
+        command=("fake",),
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
     )
 
 
@@ -116,12 +139,7 @@ def noop_tests(
     stderr_path: Path,
     **kwargs: object,
 ) -> CommandCapture:
-    stdout_path.parent.mkdir(parents=True, exist_ok=True)
-    stderr_path.parent.mkdir(parents=True, exist_ok=True)
-    stdout_path.write_text("ok\n", encoding="utf-8")
-    stderr_path.write_text("", encoding="utf-8")
-    return CommandCapture(
-        command=("pytest",),
+    return _record_command(
         returncode=0,
         stdout="ok\n",
         stderr="",
@@ -137,12 +155,7 @@ def failing_tests(
     stderr_path: Path,
     **kwargs: object,
 ) -> CommandCapture:
-    stdout_path.parent.mkdir(parents=True, exist_ok=True)
-    stderr_path.parent.mkdir(parents=True, exist_ok=True)
-    stdout_path.write_text("FAILED\n", encoding="utf-8")
-    stderr_path.write_text("", encoding="utf-8")
-    return CommandCapture(
-        command=("pytest",),
+    return _record_command(
         returncode=1,
         stdout="FAILED\n",
         stderr="",
@@ -167,14 +180,16 @@ def make_run_once_args(
     paths: str | None = None,
     use_branch: str | None = None,
 ) -> argparse.Namespace:
-    test_script = repo_root.parent / "check_tests.py"
-    if not test_script.exists():
-        test_script.write_text("print('tests ok')\n", encoding="utf-8")
+    if validation_command is None:
+        test_script = repo_root.parent / "check_tests.py"
+        if not test_script.exists():
+            test_script.write_text("print('tests ok')\n", encoding="utf-8")
+        validation_command = f"{sys.executable} {test_script}"
     return argparse.Namespace(
         agent=agent,
         model=model,
         effort=effort,
-        validation_command=validation_command or f"{sys.executable} {test_script}",
+        validation_command=validation_command,
         extensions=extensions,
         globs=globs,
         targets=targets,

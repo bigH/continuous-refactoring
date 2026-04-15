@@ -127,6 +127,12 @@ def _fake_refine_writer(
     return fake
 
 
+def _assert_refined_taste_written(path: Path, expected: str) -> None:
+    assert path.read_text(encoding="utf-8") == expected
+    assert not path.with_name("taste.md.done").exists()
+    assert not path.with_name("taste.md.bak").exists()
+
+
 def test_refine_requires_agent_flags(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -158,52 +164,37 @@ def test_refine_rejects_force(
     assert "--force requires --interview" in err
 
 
-def test_refine_writes_existing_project_taste_in_place(
+@pytest.mark.parametrize(
+    ("global_", "existing", "expected"),
+    [
+        (False, "- keep names honest\n", "- keep names honest\n- delete dead branches fast\n"),
+        (True, "- keep tests readable\n", "- keep tests readable\n- use mocks sparingly\n"),
+    ],
+)
+def test_refine_writes_existing_taste_in_place(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    global_: bool,
+    existing: str,
+    expected: str,
 ) -> None:
-    taste_path = _init_taste_project(tmp_path, monkeypatch)
-    taste_path.write_text("- keep names honest\n", encoding="utf-8")
+    if global_:
+        monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+        taste_path = global_dir() / "taste.md"
+        taste_path.parent.mkdir(parents=True, exist_ok=True)
+    else:
+        taste_path = _init_taste_project(tmp_path, monkeypatch)
+
+    taste_path.write_text(existing, encoding="utf-8")
 
     monkeypatch.setattr(
         "continuous_refactoring.cli.run_agent_interactive_until_settled",
-        _fake_refine_writer("- keep names honest\n- delete dead branches fast\n"),
+        _fake_refine_writer(expected),
     )
-    _handle_taste(_refine_args())
+    _handle_taste(_refine_args(global_=global_))
 
-    assert (
-        taste_path.read_text(encoding="utf-8")
-        == "- keep names honest\n- delete dead branches fast\n"
-    )
-    assert not taste_path.with_name("taste.md.done").exists()
-    assert not taste_path.with_name("taste.md.bak").exists()
-    out = capsys.readouterr().out.strip()
-    assert out == str(taste_path)
-
-
-def test_refine_writes_existing_global_taste_in_place(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    taste_path = global_dir() / "taste.md"
-    taste_path.parent.mkdir(parents=True, exist_ok=True)
-    taste_path.write_text("- keep tests readable\n", encoding="utf-8")
-
-    monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive_until_settled",
-        _fake_refine_writer("- keep tests readable\n- use mocks sparingly\n"),
-    )
-    _handle_taste(_refine_args(global_=True))
-
-    assert (
-        taste_path.read_text(encoding="utf-8")
-        == "- keep tests readable\n- use mocks sparingly\n"
-    )
-    assert not taste_path.with_name("taste.md.done").exists()
-    assert not taste_path.with_name("taste.md.bak").exists()
+    _assert_refined_taste_written(taste_path, expected)
     out = capsys.readouterr().out.strip()
     assert out == str(taste_path)
 
@@ -217,31 +208,9 @@ def test_refine_uses_default_taste_as_starting_draft_when_missing(
         taste_path.unlink()
 
     captured: dict[str, str] = {}
-
-    def capture(
-        agent: str,
-        model: str,
-        effort: str,
-        prompt: str,
-        repo_root: Path,
-        *,
-        content_path: Path,
-        settle_path: Path,
-        **_: object,
-    ) -> int:
-        _ = (agent, model, effort, repo_root)
-        assert content_path.exists() is False
-        captured["prompt"] = prompt
-        content_path.write_text("- refined from default\n", encoding="utf-8")
-        settle_path.write_text(
-            f"sha256:{hashlib.sha256(b'- refined from default\n').hexdigest()}",
-            encoding="utf-8",
-        )
-        return 0
-
     monkeypatch.setattr(
         "continuous_refactoring.cli.run_agent_interactive_until_settled",
-        capture,
+        _fake_refine_writer("- refined from default\n", capture=captured),
     )
     _handle_taste(_refine_args())
 

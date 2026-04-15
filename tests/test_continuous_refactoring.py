@@ -455,6 +455,10 @@ def test_attempt_dir_rejects_retry_below_one(
         artifacts.attempt_dir(1, retry=0)
     with pytest.raises(ValueError, match="retry must be >= 1"):
         artifacts.attempt_dir(1, retry=-1)
+    with pytest.raises(ValueError, match="attempt must be >= 1"):
+        artifacts.attempt_dir(0)
+    with pytest.raises(ValueError, match="attempt must be >= 1"):
+        artifacts.attempt_dir(-1)
     # Sanity: retry=1 still works (default path).
     path = artifacts.attempt_dir(1)
     assert path.exists()

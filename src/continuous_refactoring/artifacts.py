@@ -86,6 +86,8 @@ class RunArtifacts:
     )
 
     def attempt_dir(self, attempt: int, retry: int = 1) -> Path:
+        if attempt < 1:
+            raise ValueError(f"attempt must be >= 1, got {attempt}")
         if retry < 1:
             raise ValueError(f"retry must be >= 1, got {retry}")
         base = self.root / f"attempt-{attempt:03d}"

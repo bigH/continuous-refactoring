@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import subprocess
 from pathlib import Path
 from collections.abc import Callable
 
 import pytest
+from conftest import extract_settle_path, make_taste_agent_writer
 
 from continuous_refactoring.cli import _handle_taste, build_parser
 from continuous_refactoring.config import (
@@ -70,33 +70,9 @@ def _make_taste_agent_stub(
     return_code: int = 0,
     captured: dict[str, str] | None = None,
 ) -> Callable[..., int]:
-    def fake(
-        agent: str,
-        model: str,
-        effort: str,
-        prompt: str,
-        repo_root: Path,
-        *,
-        content_path: Path,
-        settle_path: Path,
-        settle_window_seconds: float = 2.0,
-        poll_interval_seconds: float = 0.1,
-    ) -> int:
-        taste_path = _extract_taste_path(prompt)
-        assert content_path == taste_path
-        assert settle_path == _extract_settle_path(prompt)
-        _ = (agent, model, effort, repo_root, settle_window_seconds, poll_interval_seconds)
-        if captured is not None:
-            captured["prompt"] = prompt
-        if content is None:
-            return return_code
-        taste_path.write_text(content, encoding="utf-8")
-        settle_path.write_text(
-            f"sha256:{hashlib.sha256(content.encode('utf-8')).hexdigest()}",
-            encoding="utf-8",
-        )
-        return return_code
-    return fake
+    return make_taste_agent_writer(
+        content=content, return_code=return_code, captured=captured,
+    )
 
 
 def _record_taste_agent_calls(
@@ -115,20 +91,6 @@ def _record_taste_agent_calls(
         return 0
 
     return fake
-
-
-def _extract_taste_path(prompt: str) -> Path:
-    for line in prompt.splitlines():
-        if line.startswith("Taste file target:"):
-            return Path(line.split(":", 1)[1].strip())
-    raise AssertionError("Taste file target missing from prompt")
-
-
-def _extract_settle_path(prompt: str) -> Path:
-    for line in prompt.splitlines():
-        if line.startswith("Taste settle target:"):
-            return Path(line.split(":", 1)[1].strip())
-    raise AssertionError("Taste settle target missing from prompt")
 
 
 # ---------------------------------------------------------------------------
@@ -371,7 +333,7 @@ def test_interview_prompt_includes_existing_content(
     assert "starting draft" in prompt
     assert existing.strip() in prompt
     assert "Taste settle target" in prompt
-    assert _extract_settle_path(prompt) == taste_path.with_name("taste.md.done")
+    assert extract_settle_path(prompt) == taste_path.with_name("taste.md.done")
 
 
 # ---------------------------------------------------------------------------

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+from collections.abc import Callable
 import os
 import sys
 from pathlib import Path
@@ -15,6 +17,65 @@ from continuous_refactoring.artifacts import CommandCapture
 # ---------------------------------------------------------------------------
 # Shared test helpers
 # ---------------------------------------------------------------------------
+
+
+def _extract_prompt_field(prompt: str, label: str) -> Path:
+    prefix = f"{label}:"
+    for line in prompt.splitlines():
+        if line.startswith(prefix):
+            return Path(line.split(":", 1)[1].strip())
+    raise AssertionError(f"{label} missing from prompt")
+
+
+def extract_taste_path(prompt: str) -> Path:
+    return _extract_prompt_field(prompt, "Taste file target")
+
+
+def extract_settle_path(prompt: str) -> Path:
+    return _extract_prompt_field(prompt, "Taste settle target")
+
+
+def make_taste_agent_writer(
+    *,
+    content: str | None = None,
+    return_code: int = 0,
+    captured: dict[str, str] | None = None,
+) -> Callable[..., int]:
+    def fake(
+        agent: str,
+        model: str,
+        effort: str,
+        prompt: str,
+        repo_root: Path,
+        *,
+        content_path: Path,
+        settle_path: Path,
+        settle_window_seconds: float = 2.0,
+        poll_interval_seconds: float = 0.1,
+    ) -> int:
+        taste_path = extract_taste_path(prompt)
+        assert content_path == taste_path
+        assert settle_path == extract_settle_path(prompt)
+        _ = (
+            agent,
+            model,
+            effort,
+            repo_root,
+            settle_window_seconds,
+            poll_interval_seconds,
+        )
+        if captured is not None:
+            captured["prompt"] = prompt
+        if content is None:
+            return return_code
+        taste_path.write_text(content, encoding="utf-8")
+        settle_path.write_text(
+            f"sha256:{hashlib.sha256(content.encode('utf-8')).hexdigest()}",
+            encoding="utf-8",
+        )
+        return return_code
+
+    return fake
 
 
 def init_repo(path: Path) -> None:

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
+from conftest import extract_settle_path, make_taste_agent_writer
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -71,60 +71,12 @@ def _refine_args(
     )
 
 
-def _extract_taste_path(prompt: str) -> Path:
-    return Path(_extract_prompt_field(prompt, "Taste file target"))
-
-
-def _extract_settle_path(prompt: str) -> Path:
-    return Path(_extract_prompt_field(prompt, "Taste settle target"))
-
-
-def _extract_prompt_field(prompt: str, label: str) -> str:
-    prefix = f"{label}:"
-    for line in prompt.splitlines():
-        if line.startswith(prefix):
-            return line.split(":", 1)[1].strip()
-    raise AssertionError(f"{label} missing from prompt")
-
-
 def _fake_refine_writer(
     content: str,
     *,
     capture: dict[str, str] | None = None,
 ) -> Callable[..., int]:
-    def fake(
-        agent: str,
-        model: str,
-        effort: str,
-        prompt: str,
-        repo_root: Path,
-        *,
-        content_path: Path,
-        settle_path: Path,
-        settle_window_seconds: float = 2.0,
-        poll_interval_seconds: float = 0.1,
-    ) -> int:
-        taste_path = _extract_taste_path(prompt)
-        assert content_path == taste_path
-        assert settle_path == _extract_settle_path(prompt)
-        if capture is not None:
-            capture["prompt"] = prompt
-        _ = (
-            agent,
-            model,
-            effort,
-            repo_root,
-            settle_window_seconds,
-            poll_interval_seconds,
-        )
-        taste_path.write_text(content, encoding="utf-8")
-        settle_path.write_text(
-            f"sha256:{hashlib.sha256(content.encode('utf-8')).hexdigest()}",
-            encoding="utf-8",
-        )
-        return 0
-
-    return fake
+    return make_taste_agent_writer(content=content, captured=capture)
 
 
 def _assert_refined_taste_written(path: Path, expected: str) -> None:
@@ -242,7 +194,7 @@ def test_refine_prompt_allows_open_ended_improvement_and_explicit_write_handoff(
     assert "do not modify either file again" in prompt
     assert "Do not add one unless the user explicitly asks for it" in prompt
     assert "- Keep helpers honest." in prompt
-    assert _extract_settle_path(prompt) == taste_path.with_name("taste.md.done")
+    assert extract_settle_path(prompt) == taste_path.with_name("taste.md.done")
 
 
 def test_taste_subparser_accepts_refine_flags() -> None:

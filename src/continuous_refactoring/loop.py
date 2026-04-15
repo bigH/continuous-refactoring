@@ -279,6 +279,26 @@ def _resolve_fix_amendment_text(args: argparse.Namespace) -> str:
     return DEFAULT_FIX_AMENDMENT
 
 
+def _max_attempts_exhausted(
+    target: Target,
+    retry: int,
+    max_attempts: int | None,
+    *,
+    artifacts: RunArtifacts,
+    target_index: int,
+) -> bool:
+    if max_attempts is None or retry < max_attempts:
+        return False
+    artifacts.log(
+        "WARN",
+        f"Exhausted {max_attempts} attempts: {target.description}",
+        event="max_attempts_exhausted",
+        attempt=target_index,
+        retry=retry,
+    )
+    return True
+
+
 def run_once(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
     timeout = args.timeout or 900
@@ -570,18 +590,13 @@ def run_loop(args: argparse.Namespace) -> int:
                         attempt=target_index,
                         retry=retry,
                     )
-                    if (
-                        max_attempts_effective is not None
-                        and retry >= max_attempts_effective
+                    if _max_attempts_exhausted(
+                        target,
+                        retry,
+                        max_attempts_effective,
+                        artifacts=artifacts,
+                        target_index=target_index,
                     ):
-                        artifacts.log(
-                            "WARN",
-                            f"Exhausted {max_attempts_effective} attempts: "
-                            f"{target.description}",
-                            event="max_attempts_exhausted",
-                            attempt=target_index,
-                            retry=retry,
-                        )
                         break
                     previous_failure = summarize_output(agent_result)
                     continue
@@ -602,18 +617,13 @@ def run_loop(args: argparse.Namespace) -> int:
                         attempt=target_index,
                         retry=retry,
                     )
-                    if (
-                        max_attempts_effective is not None
-                        and retry >= max_attempts_effective
+                    if _max_attempts_exhausted(
+                        target,
+                        retry,
+                        max_attempts_effective,
+                        artifacts=artifacts,
+                        target_index=target_index,
                     ):
-                        artifacts.log(
-                            "WARN",
-                            f"Exhausted {max_attempts_effective} attempts: "
-                            f"{target.description}",
-                            event="max_attempts_exhausted",
-                            attempt=target_index,
-                            retry=retry,
-                        )
                         break
                     previous_failure = summarize_output(validation_result)
                     continue

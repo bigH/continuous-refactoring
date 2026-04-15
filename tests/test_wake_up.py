@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from continuous_refactoring.migrations import (
     MigrationManifest,
     PhaseSpec,
@@ -13,6 +15,14 @@ from continuous_refactoring.migrations import (
 NOW = datetime(2026, 4, 14, 12, 0, 0, tzinfo=timezone.utc)
 
 _PHASE = PhaseSpec(name="setup", file="phase-0-setup.md", done=False, ready_when="always")
+
+
+def _ago(**delta: float) -> datetime:
+    return NOW - timedelta(**delta)
+
+
+def _future(**delta: float) -> datetime:
+    return NOW + timedelta(**delta)
 
 
 def _manifest(
@@ -32,88 +42,38 @@ def _manifest(
     )
 
 
-# ---------------------------------------------------------------------------
-# Safety invariant: < 6h since last_touch → always ineligible
-# ---------------------------------------------------------------------------
-
-def test_fresh_migration_ineligible() -> None:
-    m = _manifest(last_touch=NOW - timedelta(hours=5, minutes=59))
-    assert not eligible_now(m, NOW)
-
-
-def test_fresh_migration_ineligible_even_with_wake_up_in_past() -> None:
-    m = _manifest(
-        last_touch=NOW - timedelta(hours=5, minutes=59),
-        wake_up_on=NOW - timedelta(days=30),
-    )
-    assert not eligible_now(m, NOW)
-
-
-def test_adversarial_far_past_wake_up_blocked_by_cooldown() -> None:
-    m = _manifest(
-        last_touch=NOW - timedelta(hours=1),
-        wake_up_on=NOW - timedelta(days=365),
-    )
-    assert not eligible_now(m, NOW)
-
-
-def test_just_under_6h_ineligible() -> None:
-    m = _manifest(last_touch=NOW - timedelta(hours=6) + timedelta(seconds=1))
-    assert not eligible_now(m, NOW)
-
-
-# ---------------------------------------------------------------------------
-# Eligible: wake_up_on elapsed AND ≥ 6h
-# ---------------------------------------------------------------------------
-
-def test_eligible_wake_up_elapsed_and_6h() -> None:
-    m = _manifest(
-        last_touch=NOW - timedelta(hours=6),
-        wake_up_on=NOW - timedelta(hours=1),
-    )
-    assert eligible_now(m, NOW)
-
-
-def test_eligible_wake_up_exactly_now() -> None:
-    m = _manifest(
-        last_touch=NOW - timedelta(hours=6),
-        wake_up_on=NOW,
-    )
-    assert eligible_now(m, NOW)
-
-
-def test_ineligible_wake_up_in_future_and_under_7d() -> None:
-    m = _manifest(
-        last_touch=NOW - timedelta(hours=7),
-        wake_up_on=NOW + timedelta(hours=1),
-    )
-    assert not eligible_now(m, NOW)
-
-
-# ---------------------------------------------------------------------------
-# Eligible: 7d stale (no wake_up_on or future wake_up_on overridden)
-# ---------------------------------------------------------------------------
-
-def test_eligible_7d_stale_no_wake_up() -> None:
-    m = _manifest(last_touch=NOW - timedelta(days=7))
-    assert eligible_now(m, NOW)
-
-
-def test_eligible_7d_stale_overrides_future_wake_up() -> None:
-    m = _manifest(
-        last_touch=NOW - timedelta(days=7),
-        wake_up_on=NOW + timedelta(days=1),
-    )
-    assert eligible_now(m, NOW)
-
-
-# ---------------------------------------------------------------------------
-# Eligible: no wake_up_on and ≥ 6h
-# ---------------------------------------------------------------------------
-
-def test_eligible_no_wake_up_and_6h() -> None:
-    m = _manifest(last_touch=NOW - timedelta(hours=6))
-    assert eligible_now(m, NOW)
+@pytest.mark.parametrize(
+    ("last_touch", "wake_up_on", "is_eligible"),
+    [
+        (_ago(hours=5, minutes=59), None, False),
+        (_ago(hours=5, minutes=59), _ago(days=30), False),
+        (_ago(hours=1), _ago(days=365), False),
+        (_ago(hours=5, minutes=59, seconds=59), None, False),
+        (_ago(hours=6), _ago(hours=1), True),
+        (_ago(hours=6), NOW, True),
+        (_ago(hours=7), _future(hours=1), False),
+        (_ago(days=7), None, True),
+        (_ago(days=7), _future(days=1), True),
+        (_ago(hours=6), None, True),
+    ],
+    ids=[
+        "ineligible_under_cooldown",
+        "ineligible_under_cooldown_even_with_past_wake",
+        "ineligible_under_cooldown_with_far_past_wake",
+        "ineligible_just_under_cooldown",
+        "eligible_when_cooldown_over_and_wake_elapsed",
+        "eligible_when_cooldown_over_and_wake_now",
+        "ineligible_future_wake_within_stale_window",
+        "eligible_stale_7d_with_no_wake",
+        "eligible_stale_7d_with_future_wake",
+        "eligible_no_wake_on_after_cooldown",
+    ],
+)
+def test_eligible_now(
+    last_touch: datetime, wake_up_on: datetime | None, is_eligible: bool
+) -> None:
+    manifest = _manifest(last_touch=last_touch, wake_up_on=wake_up_on)
+    assert eligible_now(manifest, NOW) is is_eligible
 
 
 # ---------------------------------------------------------------------------

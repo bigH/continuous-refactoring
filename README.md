@@ -59,8 +59,10 @@ That gives you the `continuous-refactoring` command.
 # 1. Register the repo (creates a project dir under ~/.local/share/continuous-refactoring)
 continuous-refactoring init
 
-# 2. (Optional) Write your refactoring taste — either edit the file or have an agent interview you
+# 2. (Optional) Write your refactoring taste — either edit the file, have an agent interview you,
+#    or refine an existing draft collaboratively
 continuous-refactoring taste --interview --with codex --model gpt-5 --effort high
+continuous-refactoring taste --refine --with codex --model gpt-5 --effort high
 
 # 3. Do one pass
 continuous-refactoring run-once \
@@ -80,7 +82,7 @@ continuous-refactoring run \
 | Command | What it does |
 |---|---|
 | `init` | Registers this directory as a project, creates a default `taste.md`, and can store `--live-migrations-dir`. |
-| `taste` | Prints the active taste file path. Add `--interview` to have an agent author it, `--upgrade` to refresh stale taste dimensions, `--global` for the shared file, and `--force` to overwrite custom content after writing a `.bak`. |
+| `taste` | Prints the active taste file path. Add `--interview` to have an agent author it, `--refine` to iteratively improve an existing taste doc, `--upgrade` to refresh stale taste dimensions, `--global` for the shared file, and `--force` to let `--interview` overwrite custom content after writing a `.bak`. |
 | `run-once` | Single pass on one resolved target. No retry, no push. If there is a diff and validation passes, it commits locally and prints the branch + diffstat. |
 | `run` | The loop. Iterates targets, retries on failure, commits successful targets, and pushes unless `--no-push` is set. |
 | `upgrade` | Checks that the global config manifest is current, rewrites it idempotently, and warns if the global taste file is stale. |
@@ -107,8 +109,9 @@ If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`, the
 ### Migrations & taste flags
 
 - `init --live-migrations-dir PATH` — enables the larger-refactoring workflow for this project. The path is stored repo-relative in the project registry and created if missing.
-- `taste --upgrade` — re-interviews for taste dimensions added since your last version. No-op when already current.
-- `taste --force` — allows `--interview` to overwrite a customized taste file after backing it up to `taste.md.bak`.
+- `taste --refine` — opens a collaborative editing session for the taste file. The agent keeps refining until you tell it to write, then the session ends automatically after the settled write.
+- `taste --upgrade` — re-interviews for taste dimensions added since your last version. No-op when already current; use `taste --refine` if you want to rework the doc anyway.
+- `taste --force` — only applies to `--interview`; it allows a customized taste file to be overwritten after backing it up to `taste.md.bak`.
 
 ### Shared `run` / `run-once` flags
 
@@ -156,7 +159,7 @@ The taste file is a short bullet list of your refactoring preferences. It gets i
 - Project taste: `~/.local/share/continuous-refactoring/projects/<uuid>/taste.md`
 - Global taste: `~/.local/share/continuous-refactoring/global/taste.md`
 
-Project taste wins over global. Use `taste --interview` to bootstrap one; edit the file directly any time.
+Project taste wins over global. Use `taste --interview` to bootstrap one, `taste --refine` to rework it with an agent, or edit the file directly any time.
 
 ## Larger refactorings
 

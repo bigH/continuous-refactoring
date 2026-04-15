@@ -130,7 +130,8 @@ def test_upgrade_noop_on_current_taste(
 
     assert calls == []
     out = capsys.readouterr().out.strip()
-    assert out == "taste already current"
+    assert "taste already current" in out
+    assert "taste --refine" in out
 
 
 def test_upgrade_noop_on_current_global_taste(
@@ -164,7 +165,8 @@ def test_upgrade_noop_on_current_global_taste(
 
     assert calls == []
     out = capsys.readouterr().out.strip()
-    assert out == "taste already current"
+    assert "taste already current" in out
+    assert "taste --refine" in out
 
 
 # ---------------------------------------------------------------------------
@@ -289,7 +291,8 @@ def test_upgrade_noop_skips_agent_flag_check(
     _handle_taste(_upgrade_args(agent=None, model=None, effort=None))
 
     out = capsys.readouterr().out.strip()
-    assert out == "taste already current"
+    assert "taste already current" in out
+    assert "taste --refine" in out
 
 
 # ---------------------------------------------------------------------------

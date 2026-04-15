@@ -22,6 +22,7 @@ __all__ = [
     "PlanningStage",
     "REQUIRED_PREAMBLE",
     "REVIEW_PERFORM_PROMPT",
+    "TASTE_REFINE_PROMPT_TEMPLATE",
     "TASTE_UPGRADE_PROMPT_TEMPLATE",
     "compose_classifier_prompt",
     "compose_full_prompt",
@@ -30,6 +31,7 @@ __all__ = [
     "compose_phase_ready_prompt",
     "compose_planning_prompt",
     "compose_review_perform_prompt",
+    "compose_taste_refine_prompt",
     "compose_taste_upgrade_prompt",
     "prompt_file_text",
 ]
@@ -186,6 +188,36 @@ Rules:
 """
 
 
+TASTE_REFINE_PROMPT_TEMPLATE = """\
+You are refining a refactoring taste file for continuous-refactoring.
+
+Taste file target: {taste_path}
+Taste settle target: {settle_path}
+
+Starting draft (treat this as the working draft, not a constraint):
+
+{starting_taste}
+
+Version-header policy:
+{version_policy}
+
+Rules:
+- Open by telling the user they can improve the taste doc however they like.
+- Tell the user to let you know when they want you to write the file.
+- Tell the user the session will be automatically ended after the taste file and
+  settle file are written.
+- Ask focused follow-up questions or make concrete suggestions only when useful.
+- Keep the process collaborative and open-ended; do not force a fixed interview.
+- Show updated draft text when it changes. Iterate until the user says to write it.
+- Wait to write until the user explicitly tells you to write the file.
+- Write the final content to {taste_path}. Overwrite any existing content.
+- After writing {taste_path}, compute its SHA-256 and write exactly
+  'sha256:<hex>' to {settle_path}.
+- After writing {settle_path}, do not modify either file again.
+- The host will end the session after both files settle.\
+"""
+
+
 TASTE_UPGRADE_PROMPT_TEMPLATE = """\
 You are upgrading a refactoring taste file for continuous-refactoring.
 
@@ -249,6 +281,33 @@ def compose_taste_upgrade_prompt(
         version_context=version_context,
         existing_block=existing_block,
         target_version=target_version,
+    )
+
+
+def compose_taste_refine_prompt(
+    taste_path: Path,
+    settle_path: Path,
+    starting_taste: str,
+) -> str:
+    from continuous_refactoring.config import parse_taste_version
+
+    stored_version = parse_taste_version(starting_taste)
+    if stored_version is None:
+        version_policy = (
+            "This starting draft has no 'taste-scoping-version:' header. "
+            "Do not add one unless the user explicitly asks for it."
+        )
+    else:
+        version_policy = (
+            "This starting draft already has "
+            f"'taste-scoping-version: {stored_version}'. Keep that header "
+            "unless the user explicitly asks to change it."
+        )
+    return TASTE_REFINE_PROMPT_TEMPLATE.format(
+        taste_path=str(taste_path),
+        settle_path=str(settle_path),
+        starting_taste=starting_taste,
+        version_policy=version_policy,
     )
 
 

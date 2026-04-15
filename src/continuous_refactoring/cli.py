@@ -113,27 +113,32 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Upgrade taste to current version (interview about new dimensions only).",
     )
+    taste_mode.add_argument(
+        "--refine",
+        action="store_true",
+        help="Open an editing session to refine the taste file in place.",
+    )
     taste_parser.add_argument(
         "--with",
         dest="agent",
         choices=("codex", "claude"),
         default=None,
-        help="Agent backend for --interview or --upgrade.",
+        help="Agent backend for --interview, --upgrade, or --refine.",
     )
     taste_parser.add_argument(
         "--model",
         default=None,
-        help="Model name for --interview or --upgrade.",
+        help="Model name for --interview, --upgrade, or --refine.",
     )
     taste_parser.add_argument(
         "--effort",
         default=None,
-        help="Effort level for --interview or --upgrade.",
+        help="Effort level for --interview, --upgrade, or --refine.",
     )
     taste_parser.add_argument(
         "--force",
         action="store_true",
-        help="Allow overwriting a taste file with custom content (backup at .bak).",
+        help="Allow --interview to overwrite a taste file with custom content (backup at .bak).",
     )
 
     run_once_parser = subparsers.add_parser(
@@ -338,19 +343,33 @@ def _run_taste_agent(
 def _handle_taste(args: argparse.Namespace) -> None:
     interview = getattr(args, "interview", False)
     upgrade = getattr(args, "upgrade", False)
+    refine = getattr(args, "refine", False)
     agent_flags_set = any(
         getattr(args, name, None) is not None for name in ("agent", "model", "effort")
     )
 
-    if not interview and not upgrade and agent_flags_set:
+    if not interview and not upgrade and not refine and agent_flags_set:
         print(
-            "Error: --with/--model/--effort require --interview or --upgrade.",
+            "Error: --with/--model/--effort require --interview, --upgrade, or --refine.",
             file=sys.stderr,
         )
         raise SystemExit(2)
 
+    if getattr(args, "force", False) and not interview:
+        print("Error: --force requires --interview.", file=sys.stderr)
+        raise SystemExit(2)
+
     if upgrade:
         return _handle_taste_upgrade(args)
+
+    if refine:
+        _require_taste_action_flags(
+            action="refine",
+            agent=getattr(args, "agent", None),
+            model=getattr(args, "model", None),
+            effort=getattr(args, "effort", None),
+        )
+        return _handle_taste_refine(args)
 
     if interview:
         _require_taste_action_flags(
@@ -401,6 +420,30 @@ def _handle_taste_interview(args: argparse.Namespace) -> None:
     print(str(path))
 
 
+def _handle_taste_refine(args: argparse.Namespace) -> None:
+    from continuous_refactoring.config import default_taste_text
+    from continuous_refactoring.prompts import compose_taste_refine_prompt
+
+    path = _resolve_taste_path(args.global_)
+    starting_taste = (
+        path.read_text(encoding="utf-8") if path.exists() else default_taste_text()
+    )
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    prompt = compose_taste_refine_prompt(
+        path,
+        path.with_name(path.name + ".done"),
+        starting_taste,
+    )
+    _run_taste_agent(
+        action="refine",
+        args=args,
+        prompt=prompt,
+        path=path,
+    )
+    print(str(path))
+
+
 def _handle_taste_upgrade(args: argparse.Namespace) -> None:
     from continuous_refactoring.config import (
         TASTE_CURRENT_VERSION,
@@ -417,7 +460,7 @@ def _handle_taste_upgrade(args: argparse.Namespace) -> None:
         stored_version = parse_taste_version(existing)
 
     if stored_version == TASTE_CURRENT_VERSION:
-        print("taste already current")
+        print("taste already current; use `taste --refine` to re-interview or refine it.")
         return
 
     _require_taste_action_flags(

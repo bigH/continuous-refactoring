@@ -133,7 +133,32 @@ def test_interview_rejects_agent_flags_without_interview(
         _handle_taste(args)
     assert exc_info.value.code == 2
     err = capsys.readouterr().err
-    assert "require --interview" in err
+    assert "require --interview, --upgrade, or --refine" in err
+
+
+def test_force_requires_interview(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    args = argparse.Namespace(
+        global_=False,
+        interview=False,
+        upgrade=False,
+        refine=False,
+        agent=None,
+        model=None,
+        effort=None,
+        force=True,
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_taste(args)
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "--force requires --interview" in err
 
 
 # ---------------------------------------------------------------------------

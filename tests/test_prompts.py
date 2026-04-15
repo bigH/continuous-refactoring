@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
+from continuous_refactoring.config import TASTE_CURRENT_VERSION, default_taste_text
 from continuous_refactoring.migrations import MigrationManifest, PhaseSpec
 from continuous_refactoring.prompts import (
     CLASSIFIER_PROMPT,
@@ -17,6 +20,7 @@ from continuous_refactoring.prompts import (
     compose_phase_execution_prompt,
     compose_phase_ready_prompt,
     compose_planning_prompt,
+    compose_taste_refine_prompt,
 )
 from continuous_refactoring.targeting import Target
 
@@ -204,6 +208,24 @@ def test_planning_contains_taste(stage: str) -> None:
 def test_planning_contains_context(stage: str) -> None:
     result = compose_planning_prompt(stage, "mig", _TASTE, "important context here")
     assert "important context here" in result
+
+
+def test_taste_refine_prompt_preserves_current_version_header_by_default() -> None:
+    taste_path = Path("/tmp/taste.md")
+    settle_path = Path("/tmp/taste.md.done")
+
+    result = compose_taste_refine_prompt(
+        taste_path=taste_path,
+        settle_path=settle_path,
+        starting_taste=default_taste_text(),
+    )
+
+    assert str(taste_path) in result
+    assert str(settle_path) in result
+    assert default_taste_text().strip() in result
+    assert f"'taste-scoping-version: {TASTE_CURRENT_VERSION}'" in result
+    assert "Keep that header unless the user explicitly asks to change it." in result
+    assert "Do not add one unless the user explicitly asks for it." not in result
 
 
 def test_planning_final_review_has_output_contract() -> None:

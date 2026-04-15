@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import tempfile
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
@@ -111,14 +110,16 @@ def save_manifest(manifest: MigrationManifest, path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = asdict(manifest)
     content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
-    fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
+    with tempfile.NamedTemporaryFile(
+        mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False
+    ) as tmp:
+        tmp.write(content)
+        tmp_path = Path(tmp.name)
+
     try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(content)
-        os.replace(tmp, str(path))
+        tmp_path.replace(path)
     except Exception:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
+        tmp_path.unlink(missing_ok=True)
         raise
 
 

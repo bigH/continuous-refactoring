@@ -77,12 +77,17 @@ def _review_has_findings(stdout: str) -> bool:
 
 
 def _discover_phase_files(mig_root: Path) -> tuple[PhaseSpec, ...]:
-    phase_files = sorted(mig_root.glob("phase-*-*.md"))
-    phases: list[PhaseSpec] = []
-    for pf in phase_files:
+    phase_files: list[tuple[int, Path]] = []
+    for pf in mig_root.glob("phase-*-*.md"):
         parts = pf.stem.split("-", 2)
-        if len(parts) < 3:
+        if len(parts) < 3 or not parts[1].isdigit():
             continue
+        phase_files.append((int(parts[1]), pf))
+
+    phase_files.sort(key=lambda item: item[0])
+    phases: list[PhaseSpec] = []
+    for _, pf in phase_files:
+        parts = pf.stem.split("-", 2)
         name = parts[2]
         content = pf.read_text(encoding="utf-8")
         ready_match = _READY_WHEN_RE.search(content)

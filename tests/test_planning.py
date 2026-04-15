@@ -18,6 +18,7 @@ from continuous_refactoring.migrations import (
 from continuous_refactoring.planning import (
     _parse_final_decision,
     _review_has_findings,
+    _discover_phase_files,
     PlanningOutcome,
     run_planning,
 )
@@ -321,3 +322,25 @@ def test_review_has_findings_prefers_no_findings_anywhere() -> None:
     assert _review_has_findings("1. issue list\nNo findings\n") is False
     assert _review_has_findings("analysis complete") is True
     assert _review_has_findings("   \n") is False
+
+
+def test_discover_phase_files_orders_by_numeric_phase_number(tmp_path: Path) -> None:
+    mig_root = tmp_path / "live" / "ordering"
+    mig_root.mkdir(parents=True)
+
+    (mig_root / "phase-10-final.md").write_text(
+        "Ready when: phase 10 complete\nFinal phase.",
+        encoding="utf-8",
+    )
+    (mig_root / "phase-2-middle.md").write_text(
+        "Ready when: phase 1 complete\nMiddle phase.",
+        encoding="utf-8",
+    )
+    (mig_root / "phase-1-start.md").write_text(
+        "Ready when: always\nStart phase.",
+        encoding="utf-8",
+    )
+
+    phases = _discover_phase_files(mig_root)
+
+    assert tuple(phase.name for phase in phases) == ("start", "middle", "final")

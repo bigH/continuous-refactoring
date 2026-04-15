@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -50,9 +51,27 @@ def _upgrade_args(
 
 
 def _fake_upgrade_writer(content: str) -> Callable[..., int]:
-    def fake(agent: str, model: str, effort: str, prompt: str, repo_root: Path) -> int:
+    def fake(
+        agent: str,
+        model: str,
+        effort: str,
+        prompt: str,
+        repo_root: Path,
+        *,
+        content_path: Path,
+        settle_path: Path,
+        settle_window_seconds: float = 2.0,
+        poll_interval_seconds: float = 0.1,
+    ) -> int:
         taste_path = _extract_taste_path(prompt)
+        assert content_path == taste_path
+        assert settle_path == _extract_settle_path(prompt)
+        _ = (agent, model, effort, repo_root, settle_window_seconds, poll_interval_seconds)
         taste_path.write_text(content, encoding="utf-8")
+        settle_path.write_text(
+            f"sha256:{hashlib.sha256(content.encode('utf-8')).hexdigest()}",
+            encoding="utf-8",
+        )
         return 0
     return fake
 
@@ -62,6 +81,13 @@ def _extract_taste_path(prompt: str) -> Path:
         if line.startswith("Taste file target:"):
             return Path(line.split(":", 1)[1].strip())
     raise AssertionError("Taste file target missing from prompt")
+
+
+def _extract_settle_path(prompt: str) -> Path:
+    for line in prompt.splitlines():
+        if line.startswith("Taste settle target:"):
+            return Path(line.split(":", 1)[1].strip())
+    raise AssertionError("Taste settle target missing from prompt")
 
 
 # ---------------------------------------------------------------------------
@@ -85,13 +111,20 @@ def test_upgrade_noop_on_current_taste(
     calls: list[tuple[str, ...]] = []
 
     def should_not_run(
-        agent: str, model: str, effort: str, prompt: str, repo_root: Path,
+        agent: str,
+        model: str,
+        effort: str,
+        prompt: str,
+        repo_root: Path,
+        **_: object,
     ) -> int:
+        _ = (prompt, repo_root)
         calls.append((agent, model, effort))
         return 0
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive", should_not_run,
+        "continuous_refactoring.cli.run_agent_interactive_until_settled",
+        should_not_run,
     )
     _handle_taste(_upgrade_args())
 
@@ -112,13 +145,20 @@ def test_upgrade_noop_on_current_global_taste(
     calls: list[tuple[str, ...]] = []
 
     def should_not_run(
-        agent: str, model: str, effort: str, prompt: str, repo_root: Path,
+        agent: str,
+        model: str,
+        effort: str,
+        prompt: str,
+        repo_root: Path,
+        **_: object,
     ) -> int:
+        _ = (prompt, repo_root)
         calls.append((agent, model, effort))
         return 0
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive", should_not_run,
+        "continuous_refactoring.cli.run_agent_interactive_until_settled",
+        should_not_run,
     )
     _handle_taste(_upgrade_args(global_=True))
 
@@ -147,7 +187,7 @@ def test_upgrade_forced_on_legacy_taste(
 
     upgraded = f"taste-scoping-version: {TASTE_CURRENT_VERSION}\n\n- Upgraded.\n"
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive",
+        "continuous_refactoring.cli.run_agent_interactive_until_settled",
         _fake_upgrade_writer(upgraded),
     )
     _handle_taste(_upgrade_args())
@@ -172,14 +212,27 @@ def test_upgrade_prompt_mentions_legacy_and_new_dimensions(
     captured: dict[str, str] = {}
 
     def capture(
-        agent: str, model: str, effort: str, prompt: str, repo_root: Path,
+        agent: str,
+        model: str,
+        effort: str,
+        prompt: str,
+        repo_root: Path,
+        *,
+        content_path: Path,
+        settle_path: Path,
+        **_: object,
     ) -> int:
+        _ = (agent, model, effort, repo_root)
         captured["prompt"] = prompt
-        Path(_extract_taste_path(prompt)).write_text("- upgraded\n", encoding="utf-8")
+        content_path.write_text("- upgraded\n", encoding="utf-8")
+        settle_path.write_text(
+            f"sha256:{hashlib.sha256(b'- upgraded\n').hexdigest()}",
+            encoding="utf-8",
+        )
         return 0
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive", capture,
+        "continuous_refactoring.cli.run_agent_interactive_until_settled", capture,
     )
     _handle_taste(_upgrade_args())
 
@@ -190,6 +243,8 @@ def test_upgrade_prompt_mentions_legacy_and_new_dimensions(
     assert "rollout style" in prompt
     assert f"taste-scoping-version: {TASTE_CURRENT_VERSION}" in prompt
     assert "Legacy rule" in prompt
+    assert "Taste settle target" in prompt
+    assert _extract_settle_path(prompt) == taste_path.with_name("taste.md.done")
 
 
 # ---------------------------------------------------------------------------

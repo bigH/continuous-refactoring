@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import os
 import re
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -41,6 +44,135 @@ def test_build_command_claude_streams_json_so_watchdog_sees_progress() -> None:
     assert "--include-partial-messages" in command
     fmt_index = command.index("--output-format")
     assert command[fmt_index + 1] == "stream-json"
+
+
+def test_run_agent_interactive_until_settled_kills_process_after_settle(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content_path = tmp_path / "taste.md"
+    settle_path = tmp_path / "taste.md.done"
+    pid_path = tmp_path / "pid.txt"
+    script_path = tmp_path / "writer.py"
+    script_path.write_text(
+        """
+import hashlib
+import os
+import sys
+import time
+from pathlib import Path
+
+content_path = Path(sys.argv[1])
+settle_path = Path(sys.argv[2])
+pid_path = Path(sys.argv[3])
+payload = "- settled\\n"
+pid_path.write_text(str(os.getpid()), encoding="utf-8")
+content_path.write_text(payload, encoding="utf-8")
+settle_path.write_text(
+    f"sha256:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}",
+    encoding="utf-8",
+)
+time.sleep(30)
+""".strip(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("continuous_refactoring.agent.which", lambda _: "/bin/fake")
+    monkeypatch.setattr(
+        "continuous_refactoring.agent._build_interactive_command",
+        lambda *args, **kwargs: [
+            sys.executable,
+            str(script_path),
+            str(content_path),
+            str(settle_path),
+            str(pid_path),
+        ],
+    )
+
+    started = time.monotonic()
+    returncode = continuous_refactoring.run_agent_interactive_until_settled(
+        "codex",
+        "gpt-test",
+        "high",
+        "prompt",
+        tmp_path,
+        content_path=content_path,
+        settle_path=settle_path,
+        settle_window_seconds=0.2,
+        poll_interval_seconds=0.05,
+    )
+    elapsed = time.monotonic() - started
+
+    assert returncode == 0
+    assert elapsed < 5
+    assert content_path.read_text(encoding="utf-8") == "- settled\n"
+
+    pid = int(pid_path.read_text(encoding="utf-8"))
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)
+
+
+def test_run_agent_interactive_until_settled_ignores_stale_settle_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    content_path = tmp_path / "taste.md"
+    settle_path = tmp_path / "taste.md.done"
+    script_path = tmp_path / "writer.py"
+    old_payload = "- old\n"
+    new_payload = "- new\n"
+    content_path.write_text("- old\n", encoding="utf-8")
+    settle_path.write_text(
+        f"sha256:{hashlib.sha256(old_payload.encode('utf-8')).hexdigest()}",
+        encoding="utf-8",
+    )
+    script_path.write_text(
+        """
+import hashlib
+import sys
+import time
+from pathlib import Path
+
+content_path = Path(sys.argv[1])
+settle_path = Path(sys.argv[2])
+payload = "- new\\n"
+time.sleep(0.4)
+content_path.write_text(payload, encoding="utf-8")
+settle_path.write_text(
+    f"sha256:{hashlib.sha256(payload.encode('utf-8')).hexdigest()}",
+    encoding="utf-8",
+)
+time.sleep(30)
+""".strip(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("continuous_refactoring.agent.which", lambda _: "/bin/fake")
+    monkeypatch.setattr(
+        "continuous_refactoring.agent._build_interactive_command",
+        lambda *args, **kwargs: [
+            sys.executable,
+            str(script_path),
+            str(content_path),
+            str(settle_path),
+        ],
+    )
+
+    started = time.monotonic()
+    returncode = continuous_refactoring.run_agent_interactive_until_settled(
+        "codex",
+        "gpt-test",
+        "high",
+        "prompt",
+        tmp_path,
+        content_path=content_path,
+        settle_path=settle_path,
+        settle_window_seconds=0.2,
+        poll_interval_seconds=0.05,
+    )
+    elapsed = time.monotonic() - started
+
+    assert returncode == 0
+    assert elapsed >= 0.5
+    assert content_path.read_text(encoding="utf-8") == new_payload
 
 
 def test_compose_full_prompt_orders_previous_failure_then_fix_amendment() -> None:
@@ -110,4 +242,3 @@ def test_attempt_dir_rejects_retry_below_one(
     # Sanity: retry=1 still works (default path).
     path = artifacts.attempt_dir(1)
     assert path.exists()
-

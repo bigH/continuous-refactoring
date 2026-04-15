@@ -10,7 +10,10 @@ __all__ = [
     "parse_max_attempts",
 ]
 
-from continuous_refactoring.agent import run_agent_interactive
+from continuous_refactoring.agent import (
+    run_agent_interactive,
+    run_agent_interactive_until_settled,
+)
 from continuous_refactoring.artifacts import ContinuousRefactorError
 from continuous_refactoring.loop import run_loop, run_once
 
@@ -301,9 +304,20 @@ def _run_taste_agent(
     prompt: str,
     path: Path,
 ) -> None:
-    returncode = run_agent_interactive(
-        args.agent, args.model, args.effort, prompt, Path.cwd().resolve(),
-    )
+    settle_path = path.with_name(path.name + ".done")
+    try:
+        returncode = run_agent_interactive_until_settled(
+            args.agent,
+            args.model,
+            args.effort,
+            prompt,
+            Path.cwd().resolve(),
+            content_path=path,
+            settle_path=settle_path,
+        )
+    except ContinuousRefactorError as error:
+        print(f"Error: {action} agent did not settle: {error}.", file=sys.stderr)
+        raise SystemExit(1) from error
     if returncode != 0:
         print(
             f"Error: {action} agent exited with code {returncode}.",
@@ -317,6 +331,8 @@ def _run_taste_agent(
             file=sys.stderr,
         )
         raise SystemExit(1)
+    if settle_path.exists():
+        settle_path.unlink()
 
 
 def _handle_taste(args: argparse.Namespace) -> None:
@@ -375,7 +391,7 @@ def _handle_taste_interview(args: argparse.Namespace) -> None:
             existing = current
 
     path.parent.mkdir(parents=True, exist_ok=True)
-    prompt = compose_interview_prompt(path, existing)
+    prompt = compose_interview_prompt(path, path.with_name(path.name + ".done"), existing)
     _run_taste_agent(
         action="interview",
         args=args,
@@ -412,7 +428,11 @@ def _handle_taste_upgrade(args: argparse.Namespace) -> None:
     )
 
     prompt = compose_taste_upgrade_prompt(
-        path, existing, stored_version, TASTE_CURRENT_VERSION,
+        path,
+        path.with_name(path.name + ".done"),
+        existing,
+        stored_version,
+        TASTE_CURRENT_VERSION,
     )
     _run_taste_agent(
         action="upgrade",

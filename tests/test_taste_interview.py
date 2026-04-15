@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import subprocess
 from pathlib import Path
 from collections.abc import Callable
@@ -62,9 +63,27 @@ def _interview_args(
 
 
 def _fake_writer(content: str) -> Callable[..., int]:
-    def fake(agent: str, model: str, effort: str, prompt: str, repo_root: Path) -> int:
+    def fake(
+        agent: str,
+        model: str,
+        effort: str,
+        prompt: str,
+        repo_root: Path,
+        *,
+        content_path: Path,
+        settle_path: Path,
+        settle_window_seconds: float = 2.0,
+        poll_interval_seconds: float = 0.1,
+    ) -> int:
         taste_path = _extract_taste_path(prompt)
+        assert content_path == taste_path
+        assert settle_path == _extract_settle_path(prompt)
+        _ = (agent, model, effort, repo_root, settle_window_seconds, poll_interval_seconds)
         taste_path.write_text(content, encoding="utf-8")
+        settle_path.write_text(
+            f"sha256:{hashlib.sha256(content.encode('utf-8')).hexdigest()}",
+            encoding="utf-8",
+        )
         return 0
     return fake
 
@@ -74,6 +93,13 @@ def _extract_taste_path(prompt: str) -> Path:
         if line.startswith("Taste file target:"):
             return Path(line.split(":", 1)[1].strip())
     raise AssertionError("Taste file target missing from prompt")
+
+
+def _extract_settle_path(prompt: str) -> Path:
+    for line in prompt.splitlines():
+        if line.startswith("Taste settle target:"):
+            return Path(line.split(":", 1)[1].strip())
+    raise AssertionError("Taste settle target missing from prompt")
 
 
 # ---------------------------------------------------------------------------
@@ -122,12 +148,13 @@ def test_interview_writes_taste_project_level(
     taste_path = _init_taste_project(tmp_path, monkeypatch)
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive",
+        "continuous_refactoring.cli.run_agent_interactive_until_settled",
         _fake_writer("- custom rule\n"),
     )
     _handle_taste(_interview_args())
 
     assert taste_path.read_text(encoding="utf-8") == "- custom rule\n"
+    assert not taste_path.with_name("taste.md.done").exists()
     out = capsys.readouterr().out.strip()
     assert out == str(taste_path)
 
@@ -140,12 +167,13 @@ def test_interview_writes_taste_global(
     expected = global_dir() / "taste.md"
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive",
+        "continuous_refactoring.cli.run_agent_interactive_until_settled",
         _fake_writer("- global rule\n"),
     )
     _handle_taste(_interview_args(global_=True))
 
     assert expected.read_text(encoding="utf-8") == "- global rule\n"
+    assert not expected.with_name("taste.md.done").exists()
     out = capsys.readouterr().out.strip()
     assert out == str(expected)
 
@@ -165,13 +193,20 @@ def test_interview_refuses_overwrite_without_force(
     calls: list[tuple[str, ...]] = []
 
     def should_not_run(
-        agent: str, model: str, effort: str, prompt: str, repo_root: Path,
+        agent: str,
+        model: str,
+        effort: str,
+        prompt: str,
+        repo_root: Path,
+        **_: object,
     ) -> int:
+        _ = (prompt, repo_root)
         calls.append((agent, model, effort))
         return 0
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive", should_not_run,
+        "continuous_refactoring.cli.run_agent_interactive_until_settled",
+        should_not_run,
     )
     with pytest.raises(SystemExit) as exc_info:
         _handle_taste(_interview_args())
@@ -190,7 +225,7 @@ def test_interview_allows_overwrite_on_default_content(
     taste_path.write_text(default_taste_text(), encoding="utf-8")
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive",
+        "continuous_refactoring.cli.run_agent_interactive_until_settled",
         _fake_writer("- overwritten\n"),
     )
     _handle_taste(_interview_args())  # no --force
@@ -206,7 +241,7 @@ def test_interview_backup_on_force(
     taste_path.write_text("original\n", encoding="utf-8")
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive",
+        "continuous_refactoring.cli.run_agent_interactive_until_settled",
         _fake_writer("- replacement\n"),
     )
     _handle_taste(_interview_args(force=True))
@@ -230,12 +265,18 @@ def test_interview_errors_if_agent_did_not_write(
         taste_path.unlink()
 
     def no_write(
-        agent: str, model: str, effort: str, prompt: str, repo_root: Path,
+        agent: str,
+        model: str,
+        effort: str,
+        prompt: str,
+        repo_root: Path,
+        **_: object,
     ) -> int:
+        _ = (agent, model, effort, prompt, repo_root)
         return 0
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive", no_write,
+        "continuous_refactoring.cli.run_agent_interactive_until_settled", no_write,
     )
     with pytest.raises(SystemExit) as exc_info:
         _handle_taste(_interview_args())
@@ -256,12 +297,18 @@ def test_interview_errors_on_agent_failure(
     register_project(repo)
 
     def fail(
-        agent: str, model: str, effort: str, prompt: str, repo_root: Path,
+        agent: str,
+        model: str,
+        effort: str,
+        prompt: str,
+        repo_root: Path,
+        **_: object,
     ) -> int:
+        _ = (agent, model, effort, prompt, repo_root)
         return 42
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive", fail,
+        "continuous_refactoring.cli.run_agent_interactive_until_settled", fail,
     )
     with pytest.raises(SystemExit) as exc_info:
         _handle_taste(_interview_args())
@@ -292,14 +339,27 @@ def test_interview_prompt_includes_existing_content(
     captured: dict[str, str] = {}
 
     def capture(
-        agent: str, model: str, effort: str, prompt: str, repo_root: Path,
+        agent: str,
+        model: str,
+        effort: str,
+        prompt: str,
+        repo_root: Path,
+        *,
+        content_path: Path,
+        settle_path: Path,
+        **_: object,
     ) -> int:
+        _ = (agent, model, effort, repo_root)
         captured["prompt"] = prompt
-        Path(_extract_taste_path(prompt)).write_text("- new\n", encoding="utf-8")
+        content_path.write_text("- new\n", encoding="utf-8")
+        settle_path.write_text(
+            f"sha256:{hashlib.sha256(b'- new\n').hexdigest()}",
+            encoding="utf-8",
+        )
         return 0
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive", capture,
+        "continuous_refactoring.cli.run_agent_interactive_until_settled", capture,
     )
     _handle_taste(_interview_args(force=True))
 
@@ -307,6 +367,8 @@ def test_interview_prompt_includes_existing_content(
     assert "Existing taste content" in prompt
     assert "starting draft" in prompt
     assert existing.strip() in prompt
+    assert "Taste settle target" in prompt
+    assert _extract_settle_path(prompt) == taste_path.with_name("taste.md.done")
 
 
 # ---------------------------------------------------------------------------

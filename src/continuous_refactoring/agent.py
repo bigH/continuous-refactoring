@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import shlex
 import subprocess
 import sys
@@ -16,6 +17,7 @@ __all__ = [
     "build_command",
     "maybe_run_agent",
     "run_agent_interactive",
+    "run_agent_interactive_until_settled",
     "run_observed_command",
     "run_tests",
     "summarize_output",
@@ -160,6 +162,116 @@ def run_agent_interactive(
         raise ContinuousRefactorError(f"Required command not found in PATH: {agent}")
     command = _build_interactive_command(agent, model, effort, prompt, repo_root)
     return subprocess.call(command, cwd=repo_root)
+
+
+def _read_sha256(path: Path) -> str | None:
+    try:
+        data = path.read_bytes()
+    except OSError:
+        return None
+    return hashlib.sha256(data).hexdigest()
+
+
+def _read_settle_digest(path: Path) -> str | None:
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    prefix = "sha256:"
+    if not text.startswith(prefix):
+        return None
+    digest = text[len(prefix):].strip().lower()
+    if len(digest) != 64:
+        return None
+    if any(char not in "0123456789abcdef" for char in digest):
+        return None
+    return digest
+
+
+def _interactive_settle_fingerprint(
+    content_path: Path,
+    settle_path: Path,
+) -> tuple[str, int, int, int, int] | None:
+    expected_digest = _read_settle_digest(settle_path)
+    if expected_digest is None:
+        return None
+    actual_digest = _read_sha256(content_path)
+    if actual_digest != expected_digest:
+        return None
+    try:
+        content_stat = content_path.stat()
+        settle_stat = settle_path.stat()
+    except OSError:
+        return None
+    return (
+        actual_digest,
+        content_stat.st_size,
+        content_stat.st_mtime_ns,
+        settle_stat.st_size,
+        settle_stat.st_mtime_ns,
+    )
+
+
+def _kill_process(process: subprocess.Popen[object]) -> None:
+    try:
+        process.kill()
+    except OSError:
+        pass
+
+
+def run_agent_interactive_until_settled(
+    agent: str,
+    model: str,
+    effort: str,
+    prompt: str,
+    repo_root: Path,
+    *,
+    content_path: Path,
+    settle_path: Path,
+    settle_window_seconds: float = 2.0,
+    poll_interval_seconds: float = 0.1,
+) -> int:
+    if which(agent) is None:
+        raise ContinuousRefactorError(f"Required command not found in PATH: {agent}")
+
+    settle_path.parent.mkdir(parents=True, exist_ok=True)
+    if settle_path.exists():
+        if settle_path.is_dir():
+            raise ContinuousRefactorError(f"Settle path is a directory: {settle_path}")
+        settle_path.unlink()
+
+    command = _build_interactive_command(agent, model, effort, prompt, repo_root)
+    process = subprocess.Popen(command, cwd=repo_root)
+    settled_since: float | None = None
+    last_fingerprint: tuple[str, int, int, int, int] | None = None
+
+    while True:
+        fingerprint = _interactive_settle_fingerprint(content_path, settle_path)
+        if fingerprint is None:
+            settled_since = None
+            last_fingerprint = None
+        elif fingerprint != last_fingerprint:
+            last_fingerprint = fingerprint
+            settled_since = time.monotonic()
+        elif settled_since is not None:
+            elapsed = time.monotonic() - settled_since
+            if elapsed >= settle_window_seconds:
+                returncode = process.poll()
+                if returncode is not None:
+                    return returncode
+                _kill_process(process)
+                process.wait()
+                return 0
+
+        returncode = process.poll()
+        if returncode is not None:
+            if fingerprint is not None:
+                return returncode
+            raise ContinuousRefactorError(
+                "interactive agent exited before the settled write was confirmed"
+            )
+
+        time.sleep(poll_interval_seconds)
 
 
 def maybe_run_agent(

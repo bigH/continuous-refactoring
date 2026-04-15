@@ -160,6 +160,7 @@ INTERVIEW_PROMPT_TEMPLATE = """\
 You are helping the user author their refactoring taste file for continuous-refactoring.
 
 Taste file target: {taste_path}
+Taste settle target: {settle_path}
 {existing_block}
 Your job: interview the user with 6-8 focused questions. Probe concrete preferences on:
 - error handling (translate, bubble, swallow)
@@ -177,8 +178,11 @@ Rules:
 - Synthesize into 5-10 concise bullet points in the style: "- Do/Prefer X. Avoid Y when Z."
 - Show the draft. Ask for corrections. Iterate until the user approves.
 - Write the final bullet list to {taste_path}. Overwrite any existing content.
+- After writing {taste_path}, compute its SHA-256 and write exactly
+  'sha256:<hex>' to {settle_path}.
+- After writing {settle_path}, do not modify either file again.
 - Do not add a header -- the file is consumed verbatim.
-- Exit cleanly after writing.\
+- The host will end the session after both files settle.\
 """
 
 
@@ -186,6 +190,7 @@ TASTE_UPGRADE_PROMPT_TEMPLATE = """\
 You are upgrading a refactoring taste file for continuous-refactoring.
 
 Taste file target: {taste_path}
+Taste settle target: {settle_path}
 
 {version_context}
 
@@ -206,12 +211,16 @@ Rules:
   followed by a blank line.
 - Show the draft. Ask for corrections. Iterate until the user approves.
 - Write the final content to {taste_path}. Overwrite any existing content.
-- Exit cleanly after writing.\
+- After writing {taste_path}, compute its SHA-256 and write exactly
+  'sha256:<hex>' to {settle_path}.
+- After writing {settle_path}, do not modify either file again.
+- The host will end the session after both files settle.\
 """
 
 
 def compose_taste_upgrade_prompt(
     taste_path: Path,
+    settle_path: Path,
     existing_taste: str | None,
     stored_version: int | None,
     target_version: int,
@@ -236,13 +245,18 @@ def compose_taste_upgrade_prompt(
         existing_block = ""
     return TASTE_UPGRADE_PROMPT_TEMPLATE.format(
         taste_path=str(taste_path),
+        settle_path=str(settle_path),
         version_context=version_context,
         existing_block=existing_block,
         target_version=target_version,
     )
 
 
-def compose_interview_prompt(taste_path: Path, existing_taste: str | None) -> str:
+def compose_interview_prompt(
+    taste_path: Path,
+    settle_path: Path,
+    existing_taste: str | None,
+) -> str:
     if existing_taste:
         existing_block = (
             "Existing taste content (treat as a starting draft, not a constraint):\n\n"
@@ -252,6 +266,7 @@ def compose_interview_prompt(taste_path: Path, existing_taste: str | None) -> st
         existing_block = ""
     return INTERVIEW_PROMPT_TEMPLATE.format(
         taste_path=str(taste_path),
+        settle_path=str(settle_path),
         existing_block=existing_block,
     )
 

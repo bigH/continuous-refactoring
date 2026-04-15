@@ -279,6 +279,26 @@ def _resolve_fix_amendment_text(args: argparse.Namespace) -> str:
     return DEFAULT_FIX_AMENDMENT
 
 
+def _parse_paths_arg(raw_paths: str | None) -> tuple[str, ...] | None:
+    if not raw_paths:
+        return None
+    parsed = tuple(path.strip() for path in raw_paths.split(":") if path.strip())
+    return parsed or None
+
+
+def _resolve_targets_from_args(
+    args: argparse.Namespace,
+    repo_root: Path,
+) -> list[Target]:
+    return resolve_targets(
+        extensions=args.extensions,
+        globs=args.globs,
+        targets_path=args.targets,
+        paths=_parse_paths_arg(args.paths),
+        repo_root=repo_root,
+    )
+
+
 def _max_attempts_exhausted(
     target: Target,
     retry: int,
@@ -304,14 +324,7 @@ def run_once(args: argparse.Namespace) -> int:
     timeout = args.timeout or 900
     taste = _load_taste_safe(repo_root)
 
-    paths = tuple(args.paths.split(":")) if args.paths else None
-    targets = resolve_targets(
-        extensions=args.extensions,
-        globs=args.globs,
-        targets_path=args.targets,
-        paths=paths,
-        repo_root=repo_root,
-    )
+    targets = _resolve_targets_from_args(args, repo_root)
     target = (
         random.choice(targets)
         if targets
@@ -443,14 +456,7 @@ def run_loop(args: argparse.Namespace) -> int:
     )
     taste = _load_taste_safe(repo_root)
 
-    paths = tuple(args.paths.split(":")) if args.paths else None
-    targets = resolve_targets(
-        extensions=args.extensions,
-        globs=args.globs,
-        targets_path=args.targets,
-        paths=paths,
-        repo_root=repo_root,
-    )
+    targets = _resolve_targets_from_args(args, repo_root)
 
     max_refactors = args.max_refactors
     if max_refactors is None and args.targets:

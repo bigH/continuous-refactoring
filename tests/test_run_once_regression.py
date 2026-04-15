@@ -80,6 +80,33 @@ def test_run_once_prompt_matches_compose_full_prompt(
     assert prompt_capture[0] == expected
 
 
+def test_run_once_paths_arg_trims_whitespace(
+    run_once_env: Path,
+    prompt_capture: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    src = run_once_env / "src"
+    src.mkdir()
+    (src / "foo.py").write_text("print('foo')\n", encoding="utf-8")
+    (src / "bar.py").write_text("print('bar')\n", encoding="utf-8")
+    continuous_refactoring.run_command(["git", "add", "src"], cwd=run_once_env)
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "add spaced paths"], cwd=run_once_env,
+    )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.loop.classify_target", _classifier_trap,
+    )
+    args = make_run_once_args(run_once_env, paths="src/foo.py: src/bar.py")
+    exit_code = continuous_refactoring.run_once(args)
+
+    assert exit_code == 0
+    assert len(prompt_capture) == 1
+    assert "- src/foo.py" in prompt_capture[0]
+    assert "- src/bar.py" in prompt_capture[0]
+    assert "-  src/bar.py" not in prompt_capture[0]
+
+
 # ---------------------------------------------------------------------------
 # Case B: run_once branch pattern + "Branch: cr/" output
 # ---------------------------------------------------------------------------

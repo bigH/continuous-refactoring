@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+from collections.abc import Callable
 
 import pytest
 
@@ -51,6 +52,30 @@ _SUBCOMMANDS: list[tuple[list[str], str]] = [
 ]
 
 
+def _run_cli_for_subcommand(
+    *,
+    xdg_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    argv: list[str],
+    handler: str,
+    write_taste: Callable[[Path], None],
+) -> None:
+    write_taste(xdg_root)
+    monkeypatch.setattr(sys, "argv", argv)
+    monkeypatch.setattr(f"continuous_refactoring.cli.{handler}", lambda _: None)
+    cli_main()
+
+
+@pytest.fixture
+def xdg_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    xdg = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
+    return xdg
+
+
 # ---------------------------------------------------------------------------
 # Warning fires for every subcommand with stale taste
 # ---------------------------------------------------------------------------
@@ -61,52 +86,34 @@ _SUBCOMMANDS: list[tuple[list[str], str]] = [
     _SUBCOMMANDS,
     ids=["init", "taste", "upgrade", "run-once", "run"],
 )
-def test_stale_warning_fires(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-    argv: list[str],
-    handler: str,
-) -> None:
-    xdg = tmp_path / "xdg"
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
-    _write_stale_taste(xdg)
-    monkeypatch.setattr(sys, "argv", argv)
-    monkeypatch.setattr(f"continuous_refactoring.cli.{handler}", lambda _: None)
-
-    cli_main()
-
-    err = capsys.readouterr().err
-    assert err.count(_WARNING) == 1
-
-
-# ---------------------------------------------------------------------------
-# No warning when taste is current
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
-    "argv,handler",
-    _SUBCOMMANDS,
-    ids=["init", "taste", "upgrade", "run-once", "run"],
+    "taste_writer,warns",
+    [(_write_stale_taste, True), (_write_current_taste, False)],
+    ids=["stale", "current"],
 )
-def test_no_warning_when_current(
+def test_taste_warning_behavior(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    xdg_root: Path,
     argv: list[str],
     handler: str,
+    taste_writer: Callable[[Path], None],
+    warns: bool,
 ) -> None:
-    xdg = tmp_path / "xdg"
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
-    _write_current_taste(xdg)
-    monkeypatch.setattr(sys, "argv", argv)
-    monkeypatch.setattr(f"continuous_refactoring.cli.{handler}", lambda _: None)
-
-    cli_main()
+    _run_cli_for_subcommand(
+        xdg_root=xdg_root,
+        monkeypatch=monkeypatch,
+        argv=argv,
+        handler=handler,
+        write_taste=taste_writer,
+    )
 
     err = capsys.readouterr().err
-    assert _WARNING not in err
+    if warns:
+        assert err.count(_WARNING) == 1
+    else:
+        assert _WARNING not in err
 
 
 # ---------------------------------------------------------------------------

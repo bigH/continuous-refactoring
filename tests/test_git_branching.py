@@ -14,6 +14,7 @@ from continuous_refactoring.agent import run_observed_command
 from continuous_refactoring.git import (
     create_branch,
     checkout_main,
+    branch_exists,
     generate_run_branch_name,
     generate_run_once_branch_name,
     get_head_sha,
@@ -181,6 +182,16 @@ def test_generate_branch_names() -> None:
 
     assert re.fullmatch(r"refactor-\d{8}T\d{6}", run_name)
     assert re.fullmatch(r"cr/\d{8}T\d{6}", once_name)
+
+
+def test_branch_exists_is_literal(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+
+    create_branch(repo, "feature-alpha")
+
+    assert branch_exists(repo, "feature-alpha")
+    assert not branch_exists(repo, "feature-*")
 
 
 # -----------------------------------------------------------------------

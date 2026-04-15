@@ -3,6 +3,7 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
+from datetime import datetime
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -124,12 +125,16 @@ def checkout_branch(repo_root: Path, branch_name: str) -> None:
 
 
 def branch_exists(repo_root: Path, branch_name: str) -> bool:
+    return _git_head_ref_exists(repo_root, "heads", branch_name)
+
+
+def _git_head_ref_exists(repo_root: Path, namespace: str, name: str) -> bool:
     result = run_command(
-        ["git", "branch", "--list", branch_name],
+        ["git", "show-ref", "--verify", "--quiet", f"refs/{namespace}/{name}"],
         cwd=repo_root,
         check=False,
     )
-    return bool(result.stdout.strip())
+    return result.returncode == 0
 
 
 def prepare_run_branch(
@@ -163,20 +168,9 @@ def checkout_main(repo_root: Path) -> None:
 
 
 def detect_main_branch(repo_root: Path) -> str:
-    result = run_command(
-        ["git", "branch", "--list", "main"],
-        cwd=repo_root,
-        check=False,
-    )
-    if result.stdout.strip():
-        return "main"
-    result = run_command(
-        ["git", "branch", "--list", "master"],
-        cwd=repo_root,
-        check=False,
-    )
-    if result.stdout.strip():
-        return "master"
+    for branch_name in ("main", "master"):
+        if _git_head_ref_exists(repo_root, "heads", branch_name):
+            return branch_name
     raise ContinuousRefactorError(
         "Cannot detect main branch (neither 'main' nor 'master' found)"
     )
@@ -209,6 +203,4 @@ def get_head_sha(repo_root: Path) -> str:
 
 
 def _local_timestamp() -> str:
-    from datetime import datetime
-
     return datetime.now().astimezone().strftime("%Y%m%dT%H%M%S")

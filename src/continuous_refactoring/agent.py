@@ -30,28 +30,9 @@ from continuous_refactoring.artifacts import (
 )
 
 
-def _build_codex_command(
-    model: str,
-    effort: str,
-    prompt: str,
-    repo_root: Path,
-    *,
-    last_message_path: Path,
-) -> list[str]:
-    return [
-        "codex",
-        "exec",
-        "--model",
-        model,
-        "--config",
-        f"model_reasoning_effort={effort}",
-        "--dangerously-bypass-approvals-and-sandbox",
-        "--output-last-message",
-        str(last_message_path),
-        "--cd",
-        str(repo_root),
-        prompt,
-    ]
+def _require_supported_agent(agent: str) -> None:
+    if agent not in {"codex", "claude"}:
+        raise ContinuousRefactorError(f"Unsupported agent backend: {agent}")
 
 
 def _build_claude_command(
@@ -77,6 +58,48 @@ def _build_claude_command(
     ]
 
 
+def _require_agent_on_path(agent: str) -> None:
+    if which(agent) is None:
+        raise ContinuousRefactorError(f"Required command not found in PATH: {agent}")
+
+
+def _build_interactive_command(
+    agent: str,
+    model: str,
+    effort: str,
+    prompt: str,
+    repo_root: Path,
+) -> list[str]:
+    _require_supported_agent(agent)
+    if agent == "codex":
+        return _build_codex_interactive_command(model, effort, prompt, repo_root)
+    return _build_claude_interactive_command(model, effort, prompt, repo_root)
+
+
+def _build_codex_command(
+    model: str,
+    effort: str,
+    prompt: str,
+    repo_root: Path,
+    *,
+    last_message_path: Path,
+) -> list[str]:
+    return [
+        "codex",
+        "exec",
+        "--model",
+        model,
+        "--config",
+        f"model_reasoning_effort={effort}",
+        "--dangerously-bypass-approvals-and-sandbox",
+        "--output-last-message",
+        str(last_message_path),
+        "--cd",
+        str(repo_root),
+        prompt,
+    ]
+
+
 def build_command(
     agent: str,
     model: str,
@@ -86,6 +109,7 @@ def build_command(
     *,
     last_message_path: Path | None = None,
 ) -> list[str]:
+    _require_supported_agent(agent)
     if agent == "codex":
         if last_message_path is None:
             raise ContinuousRefactorError(
@@ -138,18 +162,6 @@ def _build_claude_interactive_command(
     ]
 
 
-def _build_interactive_command(
-    agent: str,
-    model: str,
-    effort: str,
-    prompt: str,
-    repo_root: Path,
-) -> list[str]:
-    if agent == "codex":
-        return _build_codex_interactive_command(model, effort, prompt, repo_root)
-    return _build_claude_interactive_command(model, effort, prompt, repo_root)
-
-
 def run_agent_interactive(
     agent: str,
     model: str,
@@ -158,8 +170,7 @@ def run_agent_interactive(
     repo_root: Path,
 ) -> int:
     """Exec the agent attached to the user's terminal. Returns exit code."""
-    if which(agent) is None:
-        raise ContinuousRefactorError(f"Required command not found in PATH: {agent}")
+    _require_agent_on_path(agent)
     command = _build_interactive_command(agent, model, effort, prompt, repo_root)
     return subprocess.call(command, cwd=repo_root)
 
@@ -231,8 +242,8 @@ def run_agent_interactive_until_settled(
     settle_window_seconds: float = 2.0,
     poll_interval_seconds: float = 0.1,
 ) -> int:
-    if which(agent) is None:
-        raise ContinuousRefactorError(f"Required command not found in PATH: {agent}")
+    _require_agent_on_path(agent)
+    _require_supported_agent(agent)
 
     settle_path.parent.mkdir(parents=True, exist_ok=True)
     if settle_path.exists():

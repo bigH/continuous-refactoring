@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 
 import continuous_refactoring
-from continuous_refactoring.artifacts import create_run_artifacts
+from continuous_refactoring.artifacts import ContinuousRefactorError, create_run_artifacts
 from continuous_refactoring.targeting import Target
 
 
@@ -44,6 +44,17 @@ def test_build_command_claude_streams_json_so_watchdog_sees_progress() -> None:
     assert "--include-partial-messages" in command
     fmt_index = command.index("--output-format")
     assert command[fmt_index + 1] == "stream-json"
+
+
+def test_build_command_rejects_unknown_agent() -> None:
+    with pytest.raises(ContinuousRefactorError, match="Unsupported agent backend"):
+        continuous_refactoring.build_command(
+            "gemini",
+            "opus",
+            "medium",
+            "do the thing",
+            Path("/repo"),
+        )
 
 
 def test_run_agent_interactive_until_settled_kills_process_after_settle(

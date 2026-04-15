@@ -141,13 +141,15 @@ def prepare_run_branch(
         checkout_branch(repo_root, use_branch)
         return use_branch
     checkout_main(repo_root)
-    branch_name = use_branch or default_name
-    create_branch(repo_root, branch_name)
-    return branch_name
+    return _create_or_checkout_branch(repo_root, use_branch or default_name)
 
 
 def prepare_phase_branch(repo_root: Path, branch_name: str) -> str:
     checkout_main(repo_root)
+    return _create_or_checkout_branch(repo_root, branch_name)
+
+
+def _create_or_checkout_branch(repo_root: Path, branch_name: str) -> str:
     if branch_exists(repo_root, branch_name):
         checkout_branch(repo_root, branch_name)
     else:

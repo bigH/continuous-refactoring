@@ -17,7 +17,10 @@ from continuous_refactoring.git import (
     generate_run_branch_name,
     generate_run_once_branch_name,
     get_head_sha,
+    prepare_phase_branch,
+    prepare_run_branch,
     undo_last_commit,
+    run_command,
 )
 
 
@@ -96,6 +99,50 @@ def test_checkout_main_detects_master(tmp_path: Path) -> None:
 
     checkout_main(repo)
     assert _current_branch(repo) == "master"
+
+
+def test_prepare_run_branch_reuses_existing_branch(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+
+    create_branch(repo, "my-branch")
+    assert _current_branch(repo) == "my-branch"
+
+    result = prepare_run_branch(repo, "my-branch", "fallback")
+
+    assert result == "my-branch"
+    assert _current_branch(repo) == "my-branch"
+
+
+def test_prepare_phase_branch_reuses_existing_branch(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+
+    create_branch(repo, "phase-branch")
+    create_branch(repo, "work")
+    assert _current_branch(repo) == "work"
+
+    result = prepare_phase_branch(repo, "phase-branch")
+
+    assert result == "phase-branch"
+    assert _current_branch(repo) == "phase-branch"
+
+
+def test_prepare_phase_branch_starts_from_main(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    main_head = get_head_sha(repo)
+
+    create_branch(repo, "work")
+    (repo / "work.txt").write_text("work\n", encoding="utf-8")
+    run_command(["git", "add", "work.txt"], cwd=repo)
+    run_command(["git", "commit", "-m", "work change"], cwd=repo)
+
+    result = prepare_phase_branch(repo, "phase-fresh")
+
+    assert result == "phase-fresh"
+    assert _current_branch(repo) == "phase-fresh"
+    assert get_head_sha(repo) == main_head
 
 
 # -----------------------------------------------------------------------

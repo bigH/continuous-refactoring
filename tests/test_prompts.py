@@ -27,6 +27,40 @@ from continuous_refactoring.targeting import Target
 
 _TASTE = "- Prefer deletion over wrapping.\n- Fail fast at boundaries."
 
+_PLANNING_STAGES = (
+    "approaches",
+    "pick-best",
+    "expand",
+    "review",
+    "final-review",
+)
+
+_PLANNING_PROMPTS_THAT_MENTION_PLAN_MD = (
+    PLANNING_PICK_BEST_PROMPT,
+    PLANNING_EXPAND_PROMPT,
+    PLANNING_REVIEW_PROMPT,
+    PLANNING_FINAL_REVIEW_PROMPT,
+)
+
+_PLANNING_PROMPTS_THAT_MENTION_PHASE_FILES = _PLANNING_PROMPTS_THAT_MENTION_PLAN_MD
+
+_PLANNING_PROMPTS_THAT_MENTION_APPROACHES = (
+    PLANNING_EXPAND_PROMPT,
+    PLANNING_REVIEW_PROMPT,
+    PLANNING_FINAL_REVIEW_PROMPT,
+)
+
+_TASTE_INJECTED_PROMPTS = (
+    CLASSIFIER_PROMPT,
+    PLANNING_APPROACHES_PROMPT,
+    PLANNING_PICK_BEST_PROMPT,
+    PLANNING_EXPAND_PROMPT,
+    PLANNING_REVIEW_PROMPT,
+    PLANNING_FINAL_REVIEW_PROMPT,
+    PHASE_READY_CHECK_PROMPT,
+    PHASE_EXECUTION_PROMPT,
+)
+
 
 def _target() -> Target:
     return Target(
@@ -80,16 +114,7 @@ def test_ready_check_output_contract() -> None:
 # Taste injection mentions
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("prompt", [
-    CLASSIFIER_PROMPT,
-    PLANNING_APPROACHES_PROMPT,
-    PLANNING_PICK_BEST_PROMPT,
-    PLANNING_EXPAND_PROMPT,
-    PLANNING_REVIEW_PROMPT,
-    PLANNING_FINAL_REVIEW_PROMPT,
-    PHASE_READY_CHECK_PROMPT,
-    PHASE_EXECUTION_PROMPT,
-])
+@pytest.mark.parametrize("prompt", _TASTE_INJECTED_PROMPTS)
 def test_prompts_mention_taste_injection(prompt: str) -> None:
     lower = prompt.lower()
     assert "taste" in lower
@@ -100,44 +125,21 @@ def test_prompts_mention_taste_injection(prompt: str) -> None:
 # Artifact locations in planning prompts
 # ---------------------------------------------------------------------------
 
-_PLANNING_PROMPTS = [
-    PLANNING_APPROACHES_PROMPT,
-    PLANNING_PICK_BEST_PROMPT,
-    PLANNING_EXPAND_PROMPT,
-    PLANNING_REVIEW_PROMPT,
-    PLANNING_FINAL_REVIEW_PROMPT,
-]
-
-
 def test_approaches_prompt_mentions_approaches_dir() -> None:
     assert "approaches/<idea>.md" in PLANNING_APPROACHES_PROMPT
 
 
-@pytest.mark.parametrize("prompt", [
-    PLANNING_PICK_BEST_PROMPT,
-    PLANNING_EXPAND_PROMPT,
-    PLANNING_REVIEW_PROMPT,
-    PLANNING_FINAL_REVIEW_PROMPT,
-])
+@pytest.mark.parametrize("prompt", _PLANNING_PROMPTS_THAT_MENTION_PLAN_MD)
 def test_planning_prompts_mention_plan_md(prompt: str) -> None:
     assert "plan.md" in prompt
 
 
-@pytest.mark.parametrize("prompt", [
-    PLANNING_PICK_BEST_PROMPT,
-    PLANNING_EXPAND_PROMPT,
-    PLANNING_REVIEW_PROMPT,
-    PLANNING_FINAL_REVIEW_PROMPT,
-])
+@pytest.mark.parametrize("prompt", _PLANNING_PROMPTS_THAT_MENTION_PLAN_MD)
 def test_planning_prompts_mention_phase_files(prompt: str) -> None:
     assert "phase-<n>-<name>.md" in prompt
 
 
-@pytest.mark.parametrize("prompt", [
-    PLANNING_EXPAND_PROMPT,
-    PLANNING_REVIEW_PROMPT,
-    PLANNING_FINAL_REVIEW_PROMPT,
-])
+@pytest.mark.parametrize("prompt", _PLANNING_PROMPTS_THAT_MENTION_APPROACHES)
 def test_planning_prompts_mention_approaches(prompt: str) -> None:
     assert "approaches/" in prompt
 
@@ -186,25 +188,19 @@ def test_classifier_omits_scope_when_absent() -> None:
 # compose_planning_prompt
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("stage", [
-    "approaches", "pick-best", "expand", "review", "final-review",
-])
+@pytest.mark.parametrize("stage", _PLANNING_STAGES)
 def test_planning_contains_migration_name(stage: str) -> None:
     result = compose_planning_prompt(stage, "auth-cleanup", _TASTE, "some context")
     assert "auth-cleanup" in result
 
 
-@pytest.mark.parametrize("stage", [
-    "approaches", "pick-best", "expand", "review", "final-review",
-])
+@pytest.mark.parametrize("stage", _PLANNING_STAGES)
 def test_planning_contains_taste(stage: str) -> None:
     result = compose_planning_prompt(stage, "mig", _TASTE, "ctx")
     assert _TASTE in result
 
 
-@pytest.mark.parametrize("stage", [
-    "approaches", "pick-best", "expand", "review", "final-review",
-])
+@pytest.mark.parametrize("stage", _PLANNING_STAGES)
 def test_planning_contains_context(stage: str) -> None:
     result = compose_planning_prompt(stage, "mig", _TASTE, "important context here")
     assert "important context here" in result

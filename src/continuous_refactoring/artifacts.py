@@ -161,14 +161,15 @@ class RunArtifacts:
 
 
 def iso_timestamp() -> str:
-    return datetime.now().astimezone().isoformat(timespec="milliseconds")
+    return _now().isoformat(timespec="milliseconds")
+
+
+def _now() -> datetime:
+    return datetime.now().astimezone()
 
 
 def default_artifacts_root() -> Path:
-    tmpdir = os.environ.get("TMPDIR")
-    if tmpdir:
-        return Path(tmpdir)
-    return Path(tempfile.gettempdir())
+    return Path(os.environ.get("TMPDIR", tempfile.gettempdir()))
 
 
 def create_run_artifacts(
@@ -179,8 +180,9 @@ def create_run_artifacts(
     effort: str,
     test_command: str,
 ) -> RunArtifacts:
-    started_at = iso_timestamp()
-    run_id = datetime.now().astimezone().strftime("%Y%m%dT%H%M%S-%f")
+    started_at_dt = _now()
+    started_at = started_at_dt.isoformat(timespec="milliseconds")
+    run_id = started_at_dt.strftime("%Y%m%dT%H%M%S-%f")
     root = default_artifacts_root() / "continuous-refactoring" / run_id
     root.mkdir(parents=True, exist_ok=False)
     artifacts = RunArtifacts(

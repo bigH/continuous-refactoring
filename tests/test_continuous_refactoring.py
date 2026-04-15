@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import io
 import os
+from datetime import datetime, timezone
 import re
 import sys
 import time
@@ -11,6 +12,7 @@ from pathlib import Path
 import pytest
 
 import continuous_refactoring
+import continuous_refactoring.artifacts as artifacts
 from continuous_refactoring.artifacts import ContinuousRefactorError, create_run_artifacts
 from continuous_refactoring.targeting import Target
 
@@ -456,3 +458,48 @@ def test_attempt_dir_rejects_retry_below_one(
     # Sanity: retry=1 still works (default path).
     path = artifacts.attempt_dir(1)
     assert path.exists()
+
+
+def test_create_run_artifacts_uses_single_timestamp(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fixed_time = datetime(2026, 4, 15, 12, 34, 56, 123456, tzinfo=timezone.utc)
+
+    class _FrozenDateTime:
+        @staticmethod
+        def now() -> datetime:
+            return fixed_time
+
+    monkeypatch.setattr(artifacts, "datetime", _FrozenDateTime)
+    temp_root = tmp_path / "continuous-refactoring-time-test"
+    monkeypatch.setattr(artifacts, "default_artifacts_root", lambda: temp_root)
+    run = create_run_artifacts(
+        temp_root,
+        agent="codex",
+        model="fake-model",
+        effort="medium",
+        test_command="true",
+    )
+
+    frozen_local = fixed_time.astimezone()
+    assert run.run_id == frozen_local.strftime("%Y%m%dT%H%M%S-%f")
+    assert run.started_at == fixed_time.astimezone().isoformat(timespec="milliseconds")
+
+
+def test_default_artifacts_root_prefers_tmpdir(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+
+    assert artifacts.default_artifacts_root() == tmpdir_root
+
+
+def test_default_artifacts_root_falls_back_to_tempdir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.delenv("TMPDIR", raising=False)
+    monkeypatch.setattr(artifacts.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    assert artifacts.default_artifacts_root() == tmp_path

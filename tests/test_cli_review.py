@@ -128,6 +128,24 @@ def test_review_list_exits_1_when_no_live_migrations_dir(
     assert "live-migrations-dir" in err
 
 
+def test_review_perform_exits_2_when_project_not_initialized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    monkeypatch.chdir(repo)
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_review_perform(_make_perform_args("my-mig"))
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "project not initialized" in err
+
+
 def _make_perform_args(migration: str) -> argparse.Namespace:
     return argparse.Namespace(
         migration=migration,

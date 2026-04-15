@@ -515,11 +515,7 @@ def _handle_upgrade(args: argparse.Namespace) -> None:
                 file=sys.stderr,
             )
 
-def _resolve_review_context(
-    *,
-    project_error_code: int,
-    missing_live_dir_code: int,
-) -> Path:
+def _resolve_review_context(*, error_code: int) -> Path:
     from continuous_refactoring.config import resolve_live_migrations_dir, resolve_project
 
     try:
@@ -529,7 +525,7 @@ def _resolve_review_context(
             "Error: project not initialized; no live-migrations-dir available.",
             file=sys.stderr,
         )
-        raise SystemExit(project_error_code)
+        raise SystemExit(error_code)
 
     live_dir = resolve_live_migrations_dir(project)
     if live_dir is None:
@@ -537,7 +533,7 @@ def _resolve_review_context(
             "Error: no live-migrations-dir configured for this project.",
             file=sys.stderr,
         )
-        raise SystemExit(missing_live_dir_code)
+        raise SystemExit(error_code)
 
     return live_dir
 
@@ -569,8 +565,7 @@ def _handle_review_list() -> None:
     from continuous_refactoring.migrations import load_manifest as load_migration_manifest
 
     live_dir = _resolve_review_context(
-        project_error_code=1,
-        missing_live_dir_code=1,
+        error_code=1,
     )
 
     if not live_dir.is_dir():
@@ -595,8 +590,7 @@ def _handle_review_perform(args: argparse.Namespace) -> None:
     from continuous_refactoring.prompts import compose_review_perform_prompt
 
     live_dir = _resolve_review_context(
-        project_error_code=2,
-        missing_live_dir_code=2,
+        error_code=2,
     )
 
     migration_name: str = args.migration

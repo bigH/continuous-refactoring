@@ -102,6 +102,27 @@ def manifest_path() -> Path:
 # Manifest I/O
 # ---------------------------------------------------------------------------
 
+def _load_manifest_payload() -> dict[str, object]:
+    path = manifest_path()
+    if not path.exists():
+        return {}
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ContinuousRefactorError(
+            "Manifest file is malformed: expected a JSON object."
+        )
+    return raw
+
+
+def _load_manifest_projects(payload: dict[str, object]) -> dict[str, object]:
+    projects_raw = payload.get("projects", {})
+    if not isinstance(projects_raw, dict):
+        raise ContinuousRefactorError(
+            "Manifest file is malformed: 'projects' must be a JSON object."
+        )
+    return projects_raw
+
+
 def _entry_from_dict(data: dict[str, object]) -> ProjectEntry:
     return ProjectEntry(
         uuid=str(data["uuid"]),
@@ -113,13 +134,11 @@ def _entry_from_dict(data: dict[str, object]) -> ProjectEntry:
 
 
 def load_manifest() -> dict[str, ProjectEntry]:
-    path = manifest_path()
-    if not path.exists():
-        return {}
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    payload = _load_manifest_payload()
+    projects_raw = _load_manifest_projects(payload)
     return {
         uid: _entry_from_dict(entry)
-        for uid, entry in raw.get("projects", {}).items()
+        for uid, entry in projects_raw.items()
     }
 
 
@@ -143,11 +162,8 @@ def save_manifest(manifest: dict[str, ProjectEntry]) -> None:
 
 
 def load_config_version() -> int | None:
-    path = manifest_path()
-    if not path.exists():
-        return None
-    raw = json.loads(path.read_text(encoding="utf-8"))
-    version = raw.get("version")
+    payload = _load_manifest_payload()
+    version = payload.get("version")
     return version if isinstance(version, int) else None
 
 

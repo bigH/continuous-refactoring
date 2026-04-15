@@ -82,6 +82,34 @@ def test_load_manifest_empty(
     assert load_manifest() == {}
 
 
+def test_load_manifest_rejects_non_object_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pytest as _pytest
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text("[]", encoding="utf-8")
+
+    with _pytest.raises(ContinuousRefactorError, match="malformed"):
+        load_manifest()
+
+
+def test_load_manifest_rejects_non_mapping_projects(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import pytest as _pytest
+
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text('{"projects": []}', encoding="utf-8")
+
+    with _pytest.raises(ContinuousRefactorError, match="projects"):
+        load_manifest()
+
+
 def test_save_and_load_manifest_roundtrip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

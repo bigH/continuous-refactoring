@@ -362,6 +362,15 @@ def _scan_for_sentinel(text: str) -> tuple[bool, str] | None:
     return None
 
 
+def _verdict_from_source(source: str) -> tuple[bool, str] | None:
+    claude_final = _extract_claude_final_message(source)
+    if claude_final is not None:
+        verdict = _scan_for_sentinel(claude_final)
+        if verdict is not None:
+            return verdict
+    return _scan_for_sentinel(source)
+
+
 def _review_verdict(
     result: CommandCapture,
     last_message_path: Path | None = None,
@@ -383,12 +392,7 @@ def _review_verdict(
     sources.append(result.stderr)
 
     for source in sources:
-        claude_final = _extract_claude_final_message(source)
-        if claude_final is not None:
-            verdict = _scan_for_sentinel(claude_final)
-            if verdict is not None:
-                return verdict
-        verdict = _scan_for_sentinel(source)
+        verdict = _verdict_from_source(source)
         if verdict is not None:
             return verdict
     return False, "review agent emitted no REVIEW_OK/REVIEW_FAILED sentinel."

@@ -104,6 +104,13 @@ def test_plain_text_review_failed_still_works() -> None:
     assert reason == "criterion 3 not met"
 
 
+def test_json_result_preempts_plain_text_sentinel() -> None:
+    stdout = _claude_result_line("REVIEW_FAILED: stale review") + "\nREVIEW_OK\n"
+    ok, reason = rlrp._review_verdict(_capture(stdout=stdout))
+    assert ok is False
+    assert reason == "stale review"
+
+
 def test_missing_sentinel_returns_false() -> None:
     stdout = _claude_result_line("I am done but forgot the sentinel.") + "\n"
     ok, reason = rlrp._review_verdict(_capture(stdout=stdout))

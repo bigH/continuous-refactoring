@@ -29,6 +29,41 @@ _TARGET = "Rework auth module for clarity"
 _MIGRATION = "rework-auth"
 
 
+def _planning_context(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path]:
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
+    (tmp_path / "tmpdir").mkdir()
+
+    live_dir = tmp_path / "live"
+    live_dir.mkdir()
+    mig_root = migration_root(live_dir, _MIGRATION)
+    return live_dir, mig_root
+
+
+def _planning_decision_response(decision: str, reason: str) -> tuple[str, dict[str, str]]:
+    return f"final-decision: {decision} — {reason}\n", {}
+
+
+def _run_planning(
+    tmp_path: Path,
+    live_dir: Path,
+    responses: list[tuple[str, dict[str, str]]],
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[PlanningOutcome, _MockAgent, Path]:
+    mig_root = migration_root(live_dir, _MIGRATION)
+    mock = _MockAgent(mig_root, responses)
+    monkeypatch.setattr("continuous_refactoring.planning.maybe_run_agent", mock)
+
+    outcome = run_planning(
+        _MIGRATION, _TARGET, _TASTE, tmp_path, live_dir,
+        _make_artifacts(tmp_path),
+        agent="codex", model="fake", effort="low", timeout=None,
+    )
+    return outcome, mock, mig_root
+
+
 def _make_artifacts(tmp_path: Path) -> RunArtifacts:
     return create_run_artifacts(
         repo_root=tmp_path,
@@ -103,124 +138,63 @@ def _base_responses() -> list[tuple[str, dict[str, str]]]:
 
 
 # ---------------------------------------------------------------------------
-# approve-auto
+# initial decisions
 # ---------------------------------------------------------------------------
 
 
-def test_approve_auto(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("decision", "reason", "status", "awaiting", "phase_names", "should_skip"),
+    [
+        ("approve-auto", "plan is solid", "ready", False, ("setup", "migrate"), False),
+        (
+            "approve-needs-human",
+            "needs security audit",
+            "ready",
+            True,
+            ("setup", "migrate"),
+            False,
+        ),
+        ("reject", "fundamentally flawed approach", "skipped", False, (), True),
+    ],
+)
+def test_initial_decisions(
+    decision: str,
+    reason: str,
+    status: str,
+    awaiting: bool,
+    phase_names: tuple[str, ...],
+    should_skip: bool,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
-    live_dir = tmp_path / "live"
-    live_dir.mkdir()
-    mig_root = migration_root(live_dir, _MIGRATION)
-
-    responses = _base_responses() + [
-        ("final-decision: approve-auto \u2014 plan is solid\n", {}),
-    ]
-    mock = _MockAgent(mig_root, responses)
-    monkeypatch.setattr("continuous_refactoring.planning.maybe_run_agent", mock)
-
-    outcome = run_planning(
-        _MIGRATION, _TARGET, _TASTE, tmp_path, live_dir,
-        _make_artifacts(tmp_path),
-        agent="codex", model="fake", effort="low", timeout=None,
+    live_dir, mig_root = _planning_context(tmp_path, monkeypatch)
+    outcome, mock, _ = _run_planning(
+        tmp_path,
+        live_dir,
+        _base_responses() + [_planning_decision_response(decision, reason)],
+        monkeypatch,
     )
 
-    assert outcome == PlanningOutcome(status="ready", reason="plan is solid")
+    assert outcome == PlanningOutcome(status=status, reason=reason)
 
     manifest = load_manifest(mig_root / "manifest.json")
-    assert manifest.status == "ready"
-    assert manifest.awaiting_human_review is False
-    assert len(manifest.phases) == 2
-    assert manifest.phases[0].name == "setup"
-    assert manifest.phases[0].ready_when == "always"
-    assert manifest.phases[1].name == "migrate"
+    assert manifest.status == status
+    assert manifest.awaiting_human_review is awaiting
 
-    assert (mig_root / "plan.md").exists()
-    assert (mig_root / "approaches" / "incremental.md").exists()
-    assert (mig_root / "phase-0-setup.md").exists()
-    assert (mig_root / "phase-1-migrate.md").exists()
-    assert mock.call_count == 5
-
-
-# ---------------------------------------------------------------------------
-# approve-needs-human
-# ---------------------------------------------------------------------------
-
-
-def test_approve_needs_human(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
-    live_dir = tmp_path / "live"
-    live_dir.mkdir()
-    mig_root = migration_root(live_dir, _MIGRATION)
-
-    responses = _base_responses() + [
-        ("final-decision: approve-needs-human \u2014 needs security audit\n", {}),
-    ]
-    mock = _MockAgent(mig_root, responses)
-    monkeypatch.setattr("continuous_refactoring.planning.maybe_run_agent", mock)
-
-    outcome = run_planning(
-        _MIGRATION, _TARGET, _TASTE, tmp_path, live_dir,
-        _make_artifacts(tmp_path),
-        agent="codex", model="fake", effort="low", timeout=None,
-    )
-
-    assert outcome == PlanningOutcome(status="ready", reason="needs security audit")
-
-    manifest = load_manifest(mig_root / "manifest.json")
-    assert manifest.status == "ready"
-    assert manifest.awaiting_human_review is True
-    assert len(manifest.phases) == 2
-    assert mock.call_count == 5
-
-
-# ---------------------------------------------------------------------------
-# reject
-# ---------------------------------------------------------------------------
-
-
-def test_reject_writes_skip_file(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
-    live_dir = tmp_path / "live"
-    live_dir.mkdir()
-    mig_root = migration_root(live_dir, _MIGRATION)
-
-    responses = _base_responses() + [
-        ("final-decision: reject \u2014 fundamentally flawed approach\n", {}),
-    ]
-    mock = _MockAgent(mig_root, responses)
-    monkeypatch.setattr("continuous_refactoring.planning.maybe_run_agent", mock)
-
-    outcome = run_planning(
-        _MIGRATION, _TARGET, _TASTE, tmp_path, live_dir,
-        _make_artifacts(tmp_path),
-        agent="codex", model="fake", effort="low", timeout=None,
-    )
-
-    assert outcome == PlanningOutcome(
-        status="skipped", reason="fundamentally flawed approach",
-    )
-
-    manifest = load_manifest(mig_root / "manifest.json")
-    assert manifest.status == "skipped"
-
-    skip_file = intentional_skips_dir(live_dir) / f"{_MIGRATION}.md"
-    assert skip_file.exists()
-    skip_content = skip_file.read_text(encoding="utf-8")
-    assert _TARGET in skip_content
-    assert "fundamentally flawed approach" in skip_content
+    if should_skip:
+        skip_file = intentional_skips_dir(live_dir) / f"{_MIGRATION}.md"
+        assert skip_file.exists()
+        skip_content = skip_file.read_text(encoding="utf-8")
+        assert _TARGET in skip_content
+        assert reason in skip_content
+    else:
+        assert len(manifest.phases) == 2
+        assert tuple(phase.name for phase in manifest.phases) == phase_names
+        assert manifest.phases[0].ready_when == "always"
+        assert (mig_root / "plan.md").exists()
+        assert (mig_root / "approaches" / "incremental.md").exists()
+        assert (mig_root / "phase-0-setup.md").exists()
+        assert (mig_root / "phase-1-migrate.md").exists()
 
     assert mock.call_count == 5
 

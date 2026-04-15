@@ -186,6 +186,12 @@ def test_classifier_omits_scope_when_absent() -> None:
     assert "## Scope" not in result
 
 
+def test_classifier_omits_blank_scope_text() -> None:
+    target = Target(description="test", files=(), scoping="   ")
+    result = compose_classifier_prompt(target, _TASTE)
+    assert "## Scope" not in result
+
+
 # ---------------------------------------------------------------------------
 # compose_planning_prompt
 # ---------------------------------------------------------------------------
@@ -284,6 +290,27 @@ def test_full_prompt_prefers_target_scope_over_scope_instruction() -> None:
     assert "## Scope\nscope instruction fallback" not in result
 
 
+def test_full_prompt_uses_scope_instruction_when_target_scope_is_blank() -> None:
+    target = Target(
+        description="foo",
+        files=("src/foo.py",),
+        scoping="   ",
+        model_override=None,
+        effort_override=None,
+    )
+    result = compose_full_prompt(
+        base_prompt="BASE-PROMPT",
+        taste="taste",
+        target=target,
+        scope_instruction="scope instruction fallback",
+        validation_command="uv run pytest",
+        attempt=1,
+    )
+
+    assert "## Scope\nscope instruction fallback" in result
+    assert "## Scope\n   " not in result
+
+
 def test_full_prompt_omits_scope_section_without_scoping_or_instruction() -> None:
     target = Target(
         description="foo",
@@ -302,6 +329,27 @@ def test_full_prompt_omits_scope_section_without_scoping_or_instruction() -> Non
     )
 
     assert "## Scope" not in result
+
+
+def test_full_prompt_omits_blank_target_files() -> None:
+    target = Target(
+        description="foo",
+        files=("   ", "src/foo.py"),
+        scoping=None,
+        model_override=None,
+        effort_override=None,
+    )
+    result = compose_full_prompt(
+        base_prompt="BASE-PROMPT",
+        taste="taste",
+        target=target,
+        scope_instruction=None,
+        validation_command="uv run pytest",
+        attempt=1,
+    )
+
+    assert "## Target Files\n-    " not in result
+    assert "## Target Files\n- src/foo.py" in result
 
 
 # ---------------------------------------------------------------------------

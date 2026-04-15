@@ -37,21 +37,37 @@ __all__ = [
 ]
 
 
+def _strip_or_none(value: str | None) -> str | None:
+    if value is None:
+        return None
+    value = value.strip()
+    return value or None
+
+
+def _heading_section(header: str, body: str) -> str:
+    return f"## {header}\n{body}"
+
+
 def _join_sections(*sections: str | None) -> str:
     return "\n\n".join(section for section in sections if section)
 
 
 def _format_target_files(files: tuple[str, ...]) -> str | None:
-    if not files:
+    file_lines: list[str] = []
+    for file_path in files:
+        clean_file = _strip_or_none(file_path)
+        if clean_file:
+            file_lines.append(f"- {clean_file}")
+    if not file_lines:
         return None
-    files_text = "\n".join(f"- {f}" for f in files)
-    return f"## Target Files\n{files_text}"
+    return _heading_section("Target Files", "\n".join(file_lines))
 
 
 def _first_scope(*scopes: str | None) -> str | None:
     for scope in scopes:
-        if scope:
-            return f"## Scope\n{scope}"
+        scope_text = _strip_or_none(scope)
+        if scope_text:
+            return _heading_section("Scope", scope_text)
     return None
 
 

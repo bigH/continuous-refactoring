@@ -15,6 +15,8 @@ from continuous_refactoring.config import (
     register_project,
 )
 
+_AGENT_RUNNER_PATH = "continuous_refactoring.cli.run_agent_interactive_until_settled"
+
 
 def _init_repo(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
@@ -62,7 +64,12 @@ def _interview_args(
     )
 
 
-def _fake_writer(content: str) -> Callable[..., int]:
+def _make_taste_agent_stub(
+    *,
+    content: str | None = None,
+    return_code: int = 0,
+    captured: dict[str, str] | None = None,
+) -> Callable[..., int]:
     def fake(
         agent: str,
         model: str,
@@ -79,12 +86,34 @@ def _fake_writer(content: str) -> Callable[..., int]:
         assert content_path == taste_path
         assert settle_path == _extract_settle_path(prompt)
         _ = (agent, model, effort, repo_root, settle_window_seconds, poll_interval_seconds)
+        if captured is not None:
+            captured["prompt"] = prompt
+        if content is None:
+            return return_code
         taste_path.write_text(content, encoding="utf-8")
         settle_path.write_text(
             f"sha256:{hashlib.sha256(content.encode('utf-8')).hexdigest()}",
             encoding="utf-8",
         )
+        return return_code
+    return fake
+
+
+def _record_taste_agent_calls(
+    calls: list[tuple[str, str, str]],
+) -> Callable[..., int]:
+    def fake(
+        agent: str,
+        model: str,
+        effort: str,
+        prompt: str,
+        repo_root: Path,
+        **_: object,
+    ) -> int:
+        _ = (prompt, repo_root)
+        calls.append((agent, model, effort))
         return 0
+
     return fake
 
 
@@ -173,8 +202,8 @@ def test_interview_writes_taste_project_level(
     taste_path = _init_taste_project(tmp_path, monkeypatch)
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive_until_settled",
-        _fake_writer("- custom rule\n"),
+        _AGENT_RUNNER_PATH,
+        _make_taste_agent_stub(content="- custom rule\n"),
     )
     _handle_taste(_interview_args())
 
@@ -192,8 +221,8 @@ def test_interview_writes_taste_global(
     expected = global_dir() / "taste.md"
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive_until_settled",
-        _fake_writer("- global rule\n"),
+        _AGENT_RUNNER_PATH,
+        _make_taste_agent_stub(content="- global rule\n"),
     )
     _handle_taste(_interview_args(global_=True))
 
@@ -217,21 +246,9 @@ def test_interview_refuses_overwrite_without_force(
 
     calls: list[tuple[str, ...]] = []
 
-    def should_not_run(
-        agent: str,
-        model: str,
-        effort: str,
-        prompt: str,
-        repo_root: Path,
-        **_: object,
-    ) -> int:
-        _ = (prompt, repo_root)
-        calls.append((agent, model, effort))
-        return 0
-
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive_until_settled",
-        should_not_run,
+        _AGENT_RUNNER_PATH,
+        _record_taste_agent_calls(calls),
     )
     with pytest.raises(SystemExit) as exc_info:
         _handle_taste(_interview_args())
@@ -250,8 +267,8 @@ def test_interview_allows_overwrite_on_default_content(
     taste_path.write_text(default_taste_text(), encoding="utf-8")
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive_until_settled",
-        _fake_writer("- overwritten\n"),
+        _AGENT_RUNNER_PATH,
+        _make_taste_agent_stub(content="- overwritten\n"),
     )
     _handle_taste(_interview_args())  # no --force
 
@@ -266,8 +283,8 @@ def test_interview_backup_on_force(
     taste_path.write_text("original\n", encoding="utf-8")
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive_until_settled",
-        _fake_writer("- replacement\n"),
+        _AGENT_RUNNER_PATH,
+        _make_taste_agent_stub(content="- replacement\n"),
     )
     _handle_taste(_interview_args(force=True))
 
@@ -289,19 +306,9 @@ def test_interview_errors_if_agent_did_not_write(
     if taste_path.exists():
         taste_path.unlink()
 
-    def no_write(
-        agent: str,
-        model: str,
-        effort: str,
-        prompt: str,
-        repo_root: Path,
-        **_: object,
-    ) -> int:
-        _ = (agent, model, effort, prompt, repo_root)
-        return 0
-
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive_until_settled", no_write,
+        _AGENT_RUNNER_PATH,
+        _make_taste_agent_stub(),
     )
     with pytest.raises(SystemExit) as exc_info:
         _handle_taste(_interview_args())
@@ -321,19 +328,9 @@ def test_interview_errors_on_agent_failure(
     monkeypatch.chdir(repo)
     register_project(repo)
 
-    def fail(
-        agent: str,
-        model: str,
-        effort: str,
-        prompt: str,
-        repo_root: Path,
-        **_: object,
-    ) -> int:
-        _ = (agent, model, effort, prompt, repo_root)
-        return 42
-
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive_until_settled", fail,
+        _AGENT_RUNNER_PATH,
+        _make_taste_agent_stub(return_code=42),
     )
     with pytest.raises(SystemExit) as exc_info:
         _handle_taste(_interview_args())
@@ -363,28 +360,9 @@ def test_interview_prompt_includes_existing_content(
 
     captured: dict[str, str] = {}
 
-    def capture(
-        agent: str,
-        model: str,
-        effort: str,
-        prompt: str,
-        repo_root: Path,
-        *,
-        content_path: Path,
-        settle_path: Path,
-        **_: object,
-    ) -> int:
-        _ = (agent, model, effort, repo_root)
-        captured["prompt"] = prompt
-        content_path.write_text("- new\n", encoding="utf-8")
-        settle_path.write_text(
-            f"sha256:{hashlib.sha256(b'- new\n').hexdigest()}",
-            encoding="utf-8",
-        )
-        return 0
-
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive_until_settled", capture,
+        _AGENT_RUNNER_PATH,
+        _make_taste_agent_stub(content="- new\n", captured=captured),
     )
     _handle_taste(_interview_args(force=True))
 

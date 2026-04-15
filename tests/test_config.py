@@ -4,10 +4,8 @@ import random
 import subprocess
 import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
 from continuous_refactoring.config import (
@@ -52,6 +50,10 @@ def _init_repo(path: Path) -> None:
     )
 
 
+@pytest.fixture(autouse=True)
+def _xdg_data_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+
 # ---------------------------------------------------------------------------
 # XDG helpers
 # ---------------------------------------------------------------------------
@@ -79,44 +81,37 @@ def test_xdg_data_home_falls_back(
 def test_load_manifest_empty(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     assert load_manifest() == {}
 
 
 def test_load_manifest_rejects_non_object_payload(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import pytest as _pytest
 
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text("[]", encoding="utf-8")
 
-    with _pytest.raises(ContinuousRefactorError, match="malformed"):
+    with pytest.raises(ContinuousRefactorError, match="malformed"):
         load_manifest()
 
 
 def test_load_manifest_rejects_non_mapping_projects(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import pytest as _pytest
 
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text('{"projects": []}', encoding="utf-8")
 
-    with _pytest.raises(ContinuousRefactorError, match="projects"):
+    with pytest.raises(ContinuousRefactorError, match="projects"):
         load_manifest()
 
 
 def test_load_manifest_rejects_non_mapping_project_entry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import pytest as _pytest
 
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text(
@@ -124,16 +119,14 @@ def test_load_manifest_rejects_non_mapping_project_entry(
         encoding="utf-8",
     )
 
-    with _pytest.raises(ContinuousRefactorError, match="project 'abc' must be a JSON object"):
+    with pytest.raises(ContinuousRefactorError, match="project 'abc' must be a JSON object"):
         load_manifest()
 
 
 def test_load_manifest_rejects_project_entry_missing_required_fields(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import pytest as _pytest
 
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text(
@@ -141,14 +134,13 @@ def test_load_manifest_rejects_project_entry_missing_required_fields(
         encoding="utf-8",
     )
 
-    with _pytest.raises(ContinuousRefactorError, match="missing 'path'"):
+    with pytest.raises(ContinuousRefactorError, match="missing 'path'"):
         load_manifest()
 
 
 def test_save_and_load_manifest_roundtrip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
 
     entry_a = ProjectEntry(
         uuid=str(uuid.uuid4()),
@@ -177,7 +169,6 @@ def test_save_and_load_manifest_roundtrip(
 def test_register_project_creates_uuid_and_dirs(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     project_path = tmp_path / "my-project"
     _init_repo(project_path)
 
@@ -198,7 +189,6 @@ def test_register_project_creates_uuid_and_dirs(
 def test_register_project_idempotent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     project_path = tmp_path / "my-project"
     _init_repo(project_path)
 
@@ -214,7 +204,6 @@ def test_register_project_idempotent(
 def test_register_project_recreates_missing_project_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     project_path = tmp_path / "my-project"
     _init_repo(project_path)
 
@@ -230,7 +219,6 @@ def test_register_project_recreates_missing_project_dir(
 def test_register_project_detects_git_remote(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     project_path = tmp_path / "with-remote"
     _init_repo(project_path)
     remote_url = "https://example.com/test/repo.git"
@@ -246,7 +234,6 @@ def test_register_project_detects_git_remote(
 def test_register_project_no_remote(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     project_path = tmp_path / "no-remote"
     _init_repo(project_path)
 
@@ -257,7 +244,6 @@ def test_register_project_no_remote(
 def test_find_project_resolves_path(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     project_path = tmp_path / "findme"
     _init_repo(project_path)
 
@@ -277,7 +263,6 @@ def test_find_project_resolves_path(
 def test_load_taste_project_level(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     project_path = tmp_path / "taste-proj"
     _init_repo(project_path)
 
@@ -291,7 +276,6 @@ def test_load_taste_project_level(
 def test_load_taste_global_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     project_path = tmp_path / "taste-global"
     _init_repo(project_path)
 
@@ -308,7 +292,6 @@ def test_load_taste_global_fallback(
 def test_load_taste_builtin_default(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     project_path = tmp_path / "taste-default"
     _init_repo(project_path)
 
@@ -319,7 +302,6 @@ def test_load_taste_builtin_default(
 def test_load_taste_project_overrides_global(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     project_path = tmp_path / "taste-override"
     _init_repo(project_path)
 
@@ -339,7 +321,6 @@ def test_load_taste_project_overrides_global(
 def test_ensure_taste_file_creates_template(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     target = tmp_path / "xdg" / "continuous-refactoring" / "global" / "taste.md"
 
     result = ensure_taste_file(target)
@@ -352,7 +333,6 @@ def test_ensure_taste_file_creates_template(
 def test_ensure_taste_file_preserves_existing(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     target = tmp_path / "xdg" / "continuous-refactoring" / "global" / "taste.md"
     target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -370,7 +350,6 @@ def test_ensure_taste_file_preserves_existing(
 def test_manifest_roundtrip_property(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
 
     rng = random.Random(42)
     entries: dict[str, ProjectEntry] = {}
@@ -404,7 +383,6 @@ def test_manifest_roundtrip_property(
 def test_entry_roundtrip_with_live_migrations_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
 
     entry = ProjectEntry(
         uuid=str(uuid.uuid4()),
@@ -422,7 +400,6 @@ def test_entry_roundtrip_with_live_migrations_dir(
 def test_entry_roundtrip_without_live_migrations_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
 
     entry = ProjectEntry(
         uuid=str(uuid.uuid4()),
@@ -439,7 +416,6 @@ def test_entry_roundtrip_without_live_migrations_dir(
 def test_legacy_manifest_without_live_migrations_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     import json
 
     mpath = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
@@ -465,10 +441,8 @@ def test_legacy_manifest_without_live_migrations_dir(
 def test_set_live_migrations_dir_rejects_unknown_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    import pytest as _pytest
 
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    with _pytest.raises(ContinuousRefactorError, match="Project not registered"):
+    with pytest.raises(ContinuousRefactorError, match="Project not registered"):
         set_live_migrations_dir("missing", ".migrations")
 
 
@@ -511,8 +485,7 @@ def test_resolve_live_migrations_dir_rejects_escape(
         live_migrations_dir="../elsewhere",
     )
     project = ResolvedProject(entry=entry, project_dir=tmp_path / "data")
-    import pytest as _pytest
-    with _pytest.raises(ContinuousRefactorError, match="escapes repo"):
+    with pytest.raises(ContinuousRefactorError, match="escapes repo"):
         resolve_live_migrations_dir(project)
 
 

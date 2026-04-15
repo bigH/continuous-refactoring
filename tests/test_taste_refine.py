@@ -72,20 +72,26 @@ def _refine_args(
 
 
 def _extract_taste_path(prompt: str) -> Path:
-    for line in prompt.splitlines():
-        if line.startswith("Taste file target:"):
-            return Path(line.split(":", 1)[1].strip())
-    raise AssertionError("Taste file target missing from prompt")
+    return Path(_extract_prompt_field(prompt, "Taste file target"))
 
 
 def _extract_settle_path(prompt: str) -> Path:
+    return Path(_extract_prompt_field(prompt, "Taste settle target"))
+
+
+def _extract_prompt_field(prompt: str, label: str) -> str:
+    prefix = f"{label}:"
     for line in prompt.splitlines():
-        if line.startswith("Taste settle target:"):
-            return Path(line.split(":", 1)[1].strip())
-    raise AssertionError("Taste settle target missing from prompt")
+        if line.startswith(prefix):
+            return line.split(":", 1)[1].strip()
+    raise AssertionError(f"{label} missing from prompt")
 
 
-def _fake_refine_writer(content: str) -> Callable[..., int]:
+def _fake_refine_writer(
+    content: str,
+    *,
+    capture: dict[str, str] | None = None,
+) -> Callable[..., int]:
     def fake(
         agent: str,
         model: str,
@@ -101,6 +107,8 @@ def _fake_refine_writer(content: str) -> Callable[..., int]:
         taste_path = _extract_taste_path(prompt)
         assert content_path == taste_path
         assert settle_path == _extract_settle_path(prompt)
+        if capture is not None:
+            capture["prompt"] = prompt
         _ = (
             agent,
             model,
@@ -250,30 +258,9 @@ def test_refine_prompt_allows_open_ended_improvement_and_explicit_write_handoff(
     taste_path.write_text("- Keep helpers honest.\n", encoding="utf-8")
 
     captured: dict[str, str] = {}
-
-    def capture(
-        agent: str,
-        model: str,
-        effort: str,
-        prompt: str,
-        repo_root: Path,
-        *,
-        content_path: Path,
-        settle_path: Path,
-        **_: object,
-    ) -> int:
-        _ = (agent, model, effort, repo_root)
-        captured["prompt"] = prompt
-        content_path.write_text("- refined\n", encoding="utf-8")
-        settle_path.write_text(
-            f"sha256:{hashlib.sha256(b'- refined\n').hexdigest()}",
-            encoding="utf-8",
-        )
-        return 0
-
     monkeypatch.setattr(
         "continuous_refactoring.cli.run_agent_interactive_until_settled",
-        capture,
+        _fake_refine_writer("- refined\n", capture=captured),
     )
     _handle_taste(_refine_args())
 

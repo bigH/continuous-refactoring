@@ -10,10 +10,39 @@ from conftest import init_repo as _init_repo
 
 from continuous_refactoring.cli import _handle_init, _handle_taste
 from continuous_refactoring.config import (
+    ProjectEntry,
     default_taste_text,
     load_manifest,
     register_project,
 )
+
+
+def _init_repo_with_temp_home(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    repo_name: str = "project",
+) -> tuple[Path, Path]:
+    xdg_path = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_path))
+    repo = tmp_path / repo_name
+    _init_repo(repo)
+    return repo, xdg_path
+
+
+def _project_dir(xdg_path: Path, entry_uuid: str) -> Path:
+    return xdg_path / "continuous-refactoring" / "projects" / entry_uuid
+
+
+def _taste_path(xdg_path: Path, entry_uuid: str) -> Path:
+    return _project_dir(xdg_path, entry_uuid) / "taste.md"
+
+
+def _single_manifest_entry() -> ProjectEntry:
+    manifest = load_manifest()
+    assert len(manifest) == 1
+    return next(iter(manifest.values()))
+
+
 # ---------------------------------------------------------------------------
 # init subcommand
 # ---------------------------------------------------------------------------
@@ -22,52 +51,39 @@ from continuous_refactoring.config import (
 def test_init_creates_manifest_entry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
+    repo, _ = _init_repo_with_temp_home(tmp_path, monkeypatch)
 
     args = argparse.Namespace(path=repo)
     _handle_init(args)
 
-    manifest = load_manifest()
-    assert len(manifest) == 1
-    entry = next(iter(manifest.values()))
+    entry = _single_manifest_entry()
+    assert entry is not None
     assert entry.path == str(repo.resolve())
 
 
 def test_init_creates_project_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
+    repo, xdg_path = _init_repo_with_temp_home(tmp_path, monkeypatch)
 
     args = argparse.Namespace(path=repo)
     _handle_init(args)
 
-    manifest = load_manifest()
-    entry = next(iter(manifest.values()))
-    project_dir = (
-        tmp_path / "xdg" / "continuous-refactoring" / "projects" / entry.uuid
-    )
+    entry = _single_manifest_entry()
+    project_dir = _project_dir(xdg_path, entry.uuid)
     assert project_dir.is_dir()
 
 
 def test_init_creates_taste_template(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
+    repo, xdg_path = _init_repo_with_temp_home(tmp_path, monkeypatch)
 
     args = argparse.Namespace(path=repo)
     _handle_init(args)
 
-    manifest = load_manifest()
-    entry = next(iter(manifest.values()))
-    taste = (
-        tmp_path / "xdg" / "continuous-refactoring" / "projects" / entry.uuid / "taste.md"
-    )
+    entry = _single_manifest_entry()
+    taste = _taste_path(xdg_path, entry.uuid)
     assert taste.exists()
     assert taste.read_text(encoding="utf-8") == default_taste_text()
 
@@ -75,9 +91,7 @@ def test_init_creates_taste_template(
 def test_init_idempotent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
+    repo, _ = _init_repo_with_temp_home(tmp_path, monkeypatch)
 
     first = register_project(repo)
     taste_path = first.project_dir / "taste.md"
@@ -95,17 +109,18 @@ def test_init_with_explicit_path(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "explicit-project"
-    _init_repo(repo)
+    repo, xdg_path = _init_repo_with_temp_home(
+        tmp_path,
+        monkeypatch,
+        repo_name="explicit-project",
+    )
 
     # cwd is NOT the repo -- explicit --path should win
     monkeypatch.chdir(tmp_path)
     args = argparse.Namespace(path=repo)
     _handle_init(args)
 
-    manifest = load_manifest()
-    entry = next(iter(manifest.values()))
+    entry = _single_manifest_entry()
     assert entry.path == str(repo.resolve())
 
     out = capsys.readouterr().out
@@ -115,9 +130,7 @@ def test_init_with_explicit_path(
 def test_init_detects_git_remote(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "with-remote"
-    _init_repo(repo)
+    repo, xdg_path = _init_repo_with_temp_home(tmp_path, monkeypatch, repo_name="with-remote")
     remote_url = "https://example.com/org/repo.git"
     subprocess.run(
         ["git", "remote", "add", "origin", remote_url],
@@ -127,8 +140,8 @@ def test_init_detects_git_remote(
     args = argparse.Namespace(path=repo)
     _handle_init(args)
 
-    manifest = load_manifest()
-    entry = next(iter(manifest.values()))
+    assert xdg_path.is_dir()
+    entry = _single_manifest_entry()
     assert entry.git_remote == remote_url
 
 
@@ -137,15 +150,12 @@ def test_init_live_migrations_dir_creates_and_stores(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
+    repo, xdg_path = _init_repo_with_temp_home(tmp_path, monkeypatch)
 
     args = argparse.Namespace(path=repo, live_migrations_dir=Path(".migrations"))
     _handle_init(args)
 
-    manifest = load_manifest()
-    entry = next(iter(manifest.values()))
+    entry = _single_manifest_entry()
     assert entry.live_migrations_dir == ".migrations"
     assert (repo / ".migrations").is_dir()
 
@@ -157,9 +167,7 @@ def test_init_live_migrations_dir_creates_and_stores(
     args2 = argparse.Namespace(path=repo, live_migrations_dir=Path("other-dir"))
     _handle_init(args2)
 
-    manifest2 = load_manifest()
-    assert len(manifest2) == 1
-    entry2 = next(iter(manifest2.values()))
+    entry2 = _single_manifest_entry()
     assert entry2.uuid == entry.uuid
     assert entry2.live_migrations_dir == "other-dir"
     assert (repo / "other-dir").is_dir()
@@ -170,9 +178,7 @@ def test_init_live_migrations_dir_rejects_outside_repo(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
+    repo, _ = _init_repo_with_temp_home(tmp_path, monkeypatch)
 
     args = argparse.Namespace(path=repo, live_migrations_dir=Path("../outside"))
     with pytest.raises(SystemExit) as exc_info:
@@ -193,9 +199,7 @@ def test_taste_prints_project_path(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
+    repo, _ = _init_repo_with_temp_home(tmp_path, monkeypatch)
     monkeypatch.chdir(repo)
 
     register_project(repo)
@@ -213,14 +217,12 @@ def test_taste_creates_file_if_missing(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
+    repo, _ = _init_repo_with_temp_home(tmp_path, monkeypatch)
     monkeypatch.chdir(repo)
 
     project = register_project(repo)
-    taste_path = project.project_dir / "taste.md"
     # Ensure it exists first, then remove it
+    taste_path = project.project_dir / "taste.md"
     if taste_path.exists():
         taste_path.unlink()
     assert not taste_path.exists()
@@ -238,13 +240,13 @@ def test_taste_global_flag(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    _, xdg_path = _init_repo_with_temp_home(tmp_path, monkeypatch, repo_name="project")
 
     args = argparse.Namespace(global_=True)
     _handle_taste(args)
 
     out = capsys.readouterr().out.strip()
-    expected = tmp_path / "xdg" / "continuous-refactoring" / "global" / "taste.md"
+    expected = xdg_path / "continuous-refactoring" / "global" / "taste.md"
     assert out == str(expected)
     assert expected.exists()
     assert expected.read_text(encoding="utf-8") == default_taste_text()

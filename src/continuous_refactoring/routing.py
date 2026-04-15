@@ -30,7 +30,10 @@ def _parse_decision(stdout: str) -> ClassifierDecision:
         last_output_line = stripped
         match = _DECISION_RE.match(stripped)
         if match:
-            return match.group(1).lower()  # type: ignore[return-value]
+            match_text = match.group(1).lower()
+            if match_text == "cohesive-cleanup":
+                return "cohesive-cleanup"
+            return "needs-plan"
     if last_output_line is None:
         raise ContinuousRefactorError("Classifier produced no output")
     raise ContinuousRefactorError(

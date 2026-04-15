@@ -49,6 +49,39 @@ def _fake_capture(
     )
 
 
+def _run_with_fake_agent(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    stdout: str,
+    *,
+    returncode: int = 0,
+) -> str:
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
+    (tmp_path / "tmpdir").mkdir()
+    artifacts = _make_artifacts(tmp_path)
+
+    def fake_agent(**kwargs: object) -> CommandCapture:
+        stdout_path = Path(str(kwargs["stdout_path"]))
+        stderr_path = Path(str(kwargs["stderr_path"]))
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text("", encoding="utf-8")
+        stderr_path.parent.mkdir(parents=True, exist_ok=True)
+        stderr_path.write_text("", encoding="utf-8")
+        return _fake_capture(stdout, returncode=returncode, tmp_path=tmp_path)
+
+    monkeypatch.setattr("continuous_refactoring.routing.maybe_run_agent", fake_agent)
+    return classify_target(
+        _target(),
+        _TASTE,
+        tmp_path,
+        artifacts,
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+    )
+
+
 # ---------------------------------------------------------------------------
 # Happy paths
 # ---------------------------------------------------------------------------
@@ -57,93 +90,49 @@ def _fake_capture(
 def test_classify_cohesive_cleanup(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
-    def fake_agent(**kwargs: object) -> CommandCapture:
-        Path(str(kwargs["stdout_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stdout_path"])).write_text("", encoding="utf-8")
-        Path(str(kwargs["stderr_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stderr_path"])).write_text("", encoding="utf-8")
-        return _fake_capture(
+    assert (
+        _run_with_fake_agent(
+            tmp_path,
+            monkeypatch,
             "analysis...\ndecision: cohesive-cleanup \u2014 fits one session\n",
-            tmp_path=tmp_path,
         )
-
-    monkeypatch.setattr("continuous_refactoring.routing.maybe_run_agent", fake_agent)
-    artifacts = _make_artifacts(tmp_path)
-
-    result = classify_target(
-        _target(), _TASTE, tmp_path, artifacts,
-        agent="codex", model="fake", effort="low", timeout=None,
+        == "cohesive-cleanup"
     )
-    assert result == "cohesive-cleanup"
 
 
 def test_classify_needs_plan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
-    def fake_agent(**kwargs: object) -> CommandCapture:
-        Path(str(kwargs["stdout_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stdout_path"])).write_text("", encoding="utf-8")
-        Path(str(kwargs["stderr_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stderr_path"])).write_text("", encoding="utf-8")
-        return _fake_capture(
+    assert (
+        _run_with_fake_agent(
+            tmp_path,
+            monkeypatch,
             "thinking...\nDecision: needs-plan \u2014 spans multiple clusters\n",
-            tmp_path=tmp_path,
         )
-
-    monkeypatch.setattr("continuous_refactoring.routing.maybe_run_agent", fake_agent)
-    artifacts = _make_artifacts(tmp_path)
-
-    result = classify_target(
-        _target(), _TASTE, tmp_path, artifacts,
-        agent="codex", model="fake", effort="low", timeout=None,
+        == "needs-plan"
     )
-    assert result == "needs-plan"
 
 
 def test_classify_case_insensitive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
-    def fake_agent(**kwargs: object) -> CommandCapture:
-        Path(str(kwargs["stdout_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stdout_path"])).write_text("", encoding="utf-8")
-        Path(str(kwargs["stderr_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stderr_path"])).write_text("", encoding="utf-8")
-        return _fake_capture(
+    assert (
+        _run_with_fake_agent(
+            tmp_path,
+            monkeypatch,
             "DECISION: COHESIVE-CLEANUP \u2014 small scope\n",
-            tmp_path=tmp_path,
         )
-
-    monkeypatch.setattr("continuous_refactoring.routing.maybe_run_agent", fake_agent)
-    artifacts = _make_artifacts(tmp_path)
-
-    result = classify_target(
-        _target(), _TASTE, tmp_path, artifacts,
-        agent="codex", model="fake", effort="low", timeout=None,
+        == "cohesive-cleanup"
     )
-    assert result == "cohesive-cleanup"
 
 
 def test_classify_ignores_trailing_non_matching_lines(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
-    def fake_agent(**kwargs: object) -> CommandCapture:
-        Path(str(kwargs["stdout_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stdout_path"])).write_text("", encoding="utf-8")
-        Path(str(kwargs["stderr_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stderr_path"])).write_text("", encoding="utf-8")
-        return _fake_capture(
+    assert (
+        _run_with_fake_agent(
+            tmp_path,
+            monkeypatch,
             "\n".join(
                 [
                     "analysis",
@@ -151,17 +140,9 @@ def test_classify_ignores_trailing_non_matching_lines(
                     "tooling: wrote artifact summary",
                 ],
             ),
-            tmp_path=tmp_path,
         )
-
-    monkeypatch.setattr("continuous_refactoring.routing.maybe_run_agent", fake_agent)
-    artifacts = _make_artifacts(tmp_path)
-
-    result = classify_target(
-        _target(), _TASTE, tmp_path, artifacts,
-        agent="codex", model="fake", effort="low", timeout=None,
+        == "needs-plan"
     )
-    assert result == "needs-plan"
 
 
 # ---------------------------------------------------------------------------
@@ -172,71 +153,24 @@ def test_classify_ignores_trailing_non_matching_lines(
 def test_classify_malformed_output_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
-    def fake_agent(**kwargs: object) -> CommandCapture:
-        Path(str(kwargs["stdout_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stdout_path"])).write_text("", encoding="utf-8")
-        Path(str(kwargs["stderr_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stderr_path"])).write_text("", encoding="utf-8")
-        return _fake_capture("I don't know what to do\n", tmp_path=tmp_path)
-
-    monkeypatch.setattr("continuous_refactoring.routing.maybe_run_agent", fake_agent)
-    artifacts = _make_artifacts(tmp_path)
-
     with pytest.raises(ContinuousRefactorError, match="unrecognised output"):
-        classify_target(
-            _target(), _TASTE, tmp_path, artifacts,
-            agent="codex", model="fake", effort="low", timeout=None,
-        )
+        _run_with_fake_agent(tmp_path, monkeypatch, "I don't know what to do\n")
 
 
 def test_classify_empty_output_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
-    def fake_agent(**kwargs: object) -> CommandCapture:
-        Path(str(kwargs["stdout_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stdout_path"])).write_text("", encoding="utf-8")
-        Path(str(kwargs["stderr_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stderr_path"])).write_text("", encoding="utf-8")
-        return _fake_capture("", tmp_path=tmp_path)
-
-    monkeypatch.setattr("continuous_refactoring.routing.maybe_run_agent", fake_agent)
-    artifacts = _make_artifacts(tmp_path)
-
     with pytest.raises(ContinuousRefactorError, match="no output"):
-        classify_target(
-            _target(), _TASTE, tmp_path, artifacts,
-            agent="codex", model="fake", effort="low", timeout=None,
-        )
+        _run_with_fake_agent(tmp_path, monkeypatch, "")
 
 
 def test_classify_nonzero_exit_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
-    def fake_agent(**kwargs: object) -> CommandCapture:
-        Path(str(kwargs["stdout_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stdout_path"])).write_text("", encoding="utf-8")
-        Path(str(kwargs["stderr_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stderr_path"])).write_text("", encoding="utf-8")
-        return _fake_capture(
+    with pytest.raises(ContinuousRefactorError, match="exit code 1"):
+        _run_with_fake_agent(
+            tmp_path,
+            monkeypatch,
             "decision: cohesive-cleanup\n",
             returncode=1,
-            tmp_path=tmp_path,
-        )
-
-    monkeypatch.setattr("continuous_refactoring.routing.maybe_run_agent", fake_agent)
-    artifacts = _make_artifacts(tmp_path)
-
-    with pytest.raises(ContinuousRefactorError, match="exit code 1"):
-        classify_target(
-            _target(), _TASTE, tmp_path, artifacts,
-            agent="codex", model="fake", effort="low", timeout=None,
         )

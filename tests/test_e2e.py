@@ -24,6 +24,27 @@ from conftest import make_run_once_args, noop_agent, noop_tests, write_fake_code
 # ---------------------------------------------------------------------------
 
 
+def _read_single_run_summary(tmp_path: Path) -> dict[str, object]:
+    run_root = tmp_path / "tmpdir" / "continuous-refactoring"
+    run_dirs = list(run_root.iterdir())
+    assert len(run_dirs) == 1
+    summary_path = run_dirs[0] / "summary.json"
+    assert summary_path.exists()
+    return json.loads(summary_path.read_text(encoding="utf-8"))
+
+
+def _assert_final_status(tmp_path: Path, expected_status: str) -> None:
+    summary = _read_single_run_summary(tmp_path)
+    assert summary["final_status"] == expected_status
+
+
+def _assert_single_prompt(prompt_capture: list[str], *needles: str) -> None:
+    assert len(prompt_capture) == 1
+    prompt = prompt_capture[0]
+    for needle in needles:
+        assert needle in prompt
+
+
 def test_e2e_init_then_run_once(
     run_once_env: Path,
     tmp_path: Path,
@@ -54,14 +75,7 @@ def test_e2e_init_then_run_once(
     ).stdout
     assert "continuous refactor" in log_output
 
-    tmpdir_root = tmp_path / "tmpdir"
-    run_root = tmpdir_root / "continuous-refactoring"
-    run_dirs = list(run_root.iterdir())
-    assert len(run_dirs) == 1
-    summary_path = run_dirs[0] / "summary.json"
-    assert summary_path.exists()
-    summary = json.loads(summary_path.read_text(encoding="utf-8"))
-    assert summary["final_status"] == "completed"
+    _assert_final_status(tmp_path, "completed")
 
 
 def test_e2e_init_then_run_with_failures(
@@ -169,8 +183,7 @@ def test_e2e_taste_flows_through(
     args = make_run_once_args(run_once_env)
     continuous_refactoring.run_once(args)
 
-    assert len(prompt_capture) == 1
-    assert "Never use print statements in production code" in prompt_capture[0]
+    _assert_single_prompt(prompt_capture, "Never use print statements in production code")
 
 
 def test_e2e_targets_jsonl_flow(
@@ -194,11 +207,12 @@ def test_e2e_targets_jsonl_flow(
     args = make_run_once_args(run_once_env, targets=targets_file, scope_instruction=None)
     continuous_refactoring.run_once(args)
 
-    assert len(prompt_capture) == 1
-    prompt = prompt_capture[0]
-    assert "src/errors.py" in prompt
-    assert "src/handlers.py" in prompt
-    assert "focus on exception translation" in prompt
+    _assert_single_prompt(
+        prompt_capture,
+        "src/errors.py",
+        "src/handlers.py",
+        "focus on exception translation",
+    )
 
 
 def test_e2e_ctrl_c_cleanup(
@@ -223,14 +237,7 @@ def test_e2e_ctrl_c_cleanup(
     captured = capsys.readouterr()
     assert "Artifact logs:" in captured.err
 
-    tmpdir_root = tmp_path / "tmpdir"
-    run_root = tmpdir_root / "continuous-refactoring"
-    run_dirs = list(run_root.iterdir())
-    assert len(run_dirs) == 1
-    summary = json.loads(
-        (run_dirs[0] / "summary.json").read_text(encoding="utf-8")
-    )
-    assert summary["final_status"] == "interrupted"
+    _assert_final_status(tmp_path, "interrupted")
 
 
 def test_e2e_without_init_uses_default_taste(
@@ -245,13 +252,9 @@ def test_e2e_without_init_uses_default_taste(
 
     assert exit_code == 0
 
-    assert len(prompt_capture) == 1
+    _assert_single_prompt(prompt_capture)
     builtin_taste = default_taste_text()
-    for line in builtin_taste.strip().splitlines():
+    for line in builtin_taste.splitlines():
         line = line.strip()
-        if line and not line.startswith("-"):
-            continue
-        if line:
-            assert line.lstrip("- ") in prompt_capture[0], (
-                f"Default taste line missing from prompt: {line}"
-            )
+        if line.startswith("-"):
+            _assert_single_prompt(prompt_capture, line.lstrip("- "))

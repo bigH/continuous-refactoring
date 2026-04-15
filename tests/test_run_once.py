@@ -17,55 +17,61 @@ from conftest import (
 )
 
 
+def _install_noop_driver(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+
+
+def _run_once_with_noop(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, **kwargs: object
+) -> int:
+    _install_noop_driver(monkeypatch)
+    return continuous_refactoring.run_once(make_run_once_args(run_once_env, **kwargs))
+
+
+def _run_once_prompt_capture(
+    run_once_env: Path, prompt_capture: list[str], **kwargs: object
+) -> str:
+    args = make_run_once_args(run_once_env, **kwargs)
+    continuous_refactoring.run_once(args)
+    assert len(prompt_capture) == 1
+    return prompt_capture[0]
+
+
 def test_run_once_creates_branch(
     run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
-
-    args = make_run_once_args(run_once_env)
-    exit_code = continuous_refactoring.run_once(args)
+    exit_code = _run_once_with_noop(run_once_env, monkeypatch)
 
     assert exit_code == 0
     branch = continuous_refactoring.current_branch(run_once_env)
     assert re.match(r"^cr/\d{8}T\d{6}$", branch)
 
 
-def test_run_once_composes_prompt_with_taste(
+@pytest.mark.parametrize(
+    ("kwargs", "needles"),
+    [
+        ({}, ("## Refactoring Taste",)),
+        (
+            {"paths": "src/foo.py:src/bar.py"},
+            ("## Target Files", "src/foo.py", "src/bar.py"),
+        ),
+        (
+            {"scope_instruction": "focus on error handling"},
+            ("## Scope", "focus on error handling"),
+        ),
+    ],
+)
+def test_run_once_prompt_composition(
     run_once_env: Path,
     prompt_capture: list[str],
+    kwargs: dict[str, object],
+    needles: tuple[str, ...],
 ) -> None:
-    args = make_run_once_args(run_once_env)
-    continuous_refactoring.run_once(args)
-
-    assert len(prompt_capture) == 1
-    assert "## Refactoring Taste" in prompt_capture[0]
-
-
-def test_run_once_composes_prompt_with_target(
-    run_once_env: Path,
-    prompt_capture: list[str],
-) -> None:
-    args = make_run_once_args(run_once_env, paths="src/foo.py:src/bar.py")
-    continuous_refactoring.run_once(args)
-
-    assert len(prompt_capture) == 1
-    assert "## Target Files" in prompt_capture[0]
-    assert "src/foo.py" in prompt_capture[0]
-    assert "src/bar.py" in prompt_capture[0]
-
-
-def test_run_once_composes_prompt_with_scope(
-    run_once_env: Path,
-    prompt_capture: list[str],
-) -> None:
-    args = make_run_once_args(run_once_env, scope_instruction="focus on error handling")
-    continuous_refactoring.run_once(args)
-
-    assert len(prompt_capture) == 1
-    assert "## Scope" in prompt_capture[0]
-    assert "focus on error handling" in prompt_capture[0]
+    prompt = _run_once_prompt_capture(run_once_env, prompt_capture, **kwargs)
+    for needle in needles:
+        assert needle in prompt
 
 
 def test_run_once_validation_gate(
@@ -120,11 +126,7 @@ def test_run_once_prints_branch_and_diff(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
-
-    args = make_run_once_args(run_once_env)
-    exit_code = continuous_refactoring.run_once(args)
+    exit_code = _run_once_with_noop(run_once_env, monkeypatch)
 
     assert exit_code == 0
     output = capsys.readouterr().out
@@ -178,8 +180,7 @@ def test_run_once_use_branch_creates_when_absent(
     run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+    _install_noop_driver(monkeypatch)
 
     args = make_run_once_args(run_once_env, use_branch="my-cleanup")
     exit_code = continuous_refactoring.run_once(args)
@@ -205,8 +206,7 @@ def test_run_once_use_branch_reuses_existing(
     ).stdout.strip()
     continuous_refactoring.run_command(["git", "checkout", "main"], cwd=run_once_env)
 
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+    _install_noop_driver(monkeypatch)
 
     args = make_run_once_args(run_once_env, use_branch="my-cleanup")
     exit_code = continuous_refactoring.run_once(args)

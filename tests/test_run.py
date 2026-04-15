@@ -2,9 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import re
-import sys
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -16,59 +14,13 @@ import continuous_refactoring.loop
 from continuous_refactoring.artifacts import CommandCapture, ContinuousRefactorError
 from continuous_refactoring.targeting import Target
 
-from conftest import failing_tests, init_repo, noop_agent, noop_tests
-
-
-def _make_run_args(
-    repo_root: Path,
-    *,
-    agent: str = "codex",
-    model: str = "fake-model",
-    effort: str = "xhigh",
-    validation_command: str | None = None,
-    scope_instruction: str | None = "general cleanup",
-    timeout: int | None = None,
-    refactoring_prompt: Path | None = None,
-    fix_prompt: Path | None = None,
-    extensions: str | None = None,
-    globs: str | None = None,
-    targets: Path | None = None,
-    paths: str | None = None,
-    max_attempts: int | None = None,
-    max_refactors: int | None = None,
-    no_push: bool = True,
-    push_remote: str = "origin",
-    commit_message_prefix: str = "continuous refactor",
-    max_consecutive_failures: int = 3,
-    use_branch: str | None = None,
-) -> argparse.Namespace:
-    test_script = repo_root.parent / "check_tests.py"
-    if not test_script.exists():
-        test_script.write_text("print('tests ok')\n", encoding="utf-8")
-    return argparse.Namespace(
-        agent=agent,
-        model=model,
-        effort=effort,
-        validation_command=validation_command or f"{sys.executable} {test_script}",
-        extensions=extensions,
-        globs=globs,
-        targets=targets,
-        paths=paths,
-        scope_instruction=scope_instruction,
-        timeout=timeout,
-        refactoring_prompt=refactoring_prompt,
-        fix_prompt=fix_prompt,
-        show_agent_logs=False,
-        show_command_logs=False,
-        repo_root=repo_root,
-        max_attempts=max_attempts,
-        max_refactors=max_refactors,
-        no_push=no_push,
-        push_remote=push_remote,
-        commit_message_prefix=commit_message_prefix,
-        max_consecutive_failures=max_consecutive_failures,
-        use_branch=use_branch,
-    )
+from conftest import (
+    failing_tests,
+    init_repo,
+    make_run_loop_args,
+    noop_agent,
+    noop_tests,
+)
 
 
 def _failing_agent(**kwargs: object) -> CommandCapture:
@@ -106,7 +58,7 @@ def test_run_creates_branch(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
-    args = _make_run_args(repo_root, max_refactors=1)
+    args = make_run_loop_args(repo_root, max_refactors=1)
     exit_code = continuous_refactoring.run_loop(args)
 
     assert exit_code == 0
@@ -142,7 +94,7 @@ def test_run_pushes_after_commit(
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
     monkeypatch.setattr("continuous_refactoring.loop.git_push", tracking_push)
 
-    args = _make_run_args(repo_root, max_refactors=1, no_push=False)
+    args = make_run_loop_args(repo_root, max_refactors=1, no_push=False)
     exit_code = continuous_refactoring.run_loop(args)
 
     assert exit_code == 0
@@ -178,7 +130,7 @@ def test_run_no_push_flag(
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
     monkeypatch.setattr("continuous_refactoring.loop.git_push", tracking_push)
 
-    args = _make_run_args(repo_root, max_refactors=1, no_push=True)
+    args = make_run_loop_args(repo_root, max_refactors=1, no_push=True)
     exit_code = continuous_refactoring.run_loop(args)
 
     assert exit_code == 0
@@ -215,7 +167,7 @@ def test_run_stops_after_max_consecutive_failures(
         }))
     targets_file.write_text("\n".join(lines), encoding="utf-8")
 
-    args = _make_run_args(
+    args = make_run_loop_args(
         repo_root,
         targets=targets_file,
         max_consecutive_failures=3,
@@ -268,7 +220,7 @@ def test_run_resets_consecutive_counter_on_success(
         }))
     targets_file.write_text("\n".join(lines), encoding="utf-8")
 
-    args = _make_run_args(
+    args = make_run_loop_args(
         repo_root,
         targets=targets_file,
         max_consecutive_failures=3,
@@ -314,7 +266,7 @@ def test_run_target_overrides(
         encoding="utf-8",
     )
 
-    args = _make_run_args(
+    args = make_run_loop_args(
         repo_root,
         targets=targets_file,
         model="default-model",
@@ -371,7 +323,7 @@ def test_run_undo_commit_on_validation_failure(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", committing_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", baseline_passes_then_fails)
 
-    args = _make_run_args(repo_root, max_refactors=1, max_consecutive_failures=1)
+    args = make_run_loop_args(repo_root, max_refactors=1, max_consecutive_failures=1)
     import pytest
     with pytest.raises(ContinuousRefactorError, match="consecutive failures"):
         continuous_refactoring.run_loop(args)
@@ -420,7 +372,7 @@ def test_run_extensions_targeting(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
-    args = _make_run_args(repo_root, extensions=".py", max_refactors=1)
+    args = make_run_loop_args(repo_root, extensions=".py", max_refactors=1)
     continuous_refactoring.run_loop(args)
 
     assert len(captured_prompts) == 1
@@ -453,7 +405,7 @@ def test_run_extensions_expands_to_multiple_targets(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
-    args = _make_run_args(repo_root, extensions=".py", max_refactors=99)
+    args = make_run_loop_args(repo_root, extensions=".py", max_refactors=99)
     continuous_refactoring.run_loop(args)
 
     assert len(captured_prompts) == len(tracked)
@@ -484,7 +436,7 @@ def test_run_globs_targeting(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
-    args = _make_run_args(repo_root, globs="src/**/*.py", max_refactors=1)
+    args = make_run_loop_args(repo_root, globs="src/**/*.py", max_refactors=1)
     continuous_refactoring.run_loop(args)
 
     assert len(captured_prompts) == 1
@@ -526,7 +478,7 @@ def test_run_max_refactors_samples_from_extensions(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", counting_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
-    args = _make_run_args(repo_root, extensions=".py", max_refactors=3)
+    args = make_run_loop_args(repo_root, extensions=".py", max_refactors=3)
     continuous_refactoring.run_loop(args)
 
     assert agent_calls == 3
@@ -613,7 +565,7 @@ def test_run_random_fallback_targeting(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
-    args = _make_run_args(repo_root, max_refactors=1, scope_instruction=None)
+    args = make_run_loop_args(repo_root, max_refactors=1, scope_instruction=None)
     # With no targeting args and no scope_instruction, resolve_targets falls back to
     # random files from git ls-files
     continuous_refactoring.run_loop(args)
@@ -644,7 +596,7 @@ def test_run_ctrl_c_discards_and_summarizes(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", interrupting_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
-    args = _make_run_args(repo_root, max_refactors=1)
+    args = make_run_loop_args(repo_root, max_refactors=1)
     exit_code = continuous_refactoring.run_loop(args)
 
     assert exit_code == 130
@@ -726,7 +678,7 @@ def test_run_samples_targets_when_max_refactors_lt_total(
         }))
     targets_file.write_text("\n".join(lines), encoding="utf-8")
 
-    args = _make_run_args(
+    args = make_run_loop_args(
         repo_root,
         targets=targets_file,
         max_refactors=3,
@@ -785,7 +737,7 @@ def test_run_retries_on_validation_failure_and_succeeds(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", tests_fail_then_pass)
 
-    args = _make_run_args(repo_root, max_refactors=1, max_attempts=3)
+    args = make_run_loop_args(repo_root, max_refactors=1, max_attempts=3)
     exit_code = continuous_refactoring.run_loop(args)
 
     assert exit_code == 0
@@ -839,7 +791,7 @@ def test_run_exhausts_max_attempts_on_persistent_validation_failure(
         "continuous_refactoring.loop.run_tests", baseline_pass_validation_fail,
     )
 
-    args = _make_run_args(
+    args = make_run_loop_args(
         repo_root,
         max_refactors=1,
         max_attempts=3,
@@ -894,7 +846,7 @@ def test_run_exhausts_max_attempts_on_persistent_agent_failure(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", failing_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", counting_tests)
 
-    args = _make_run_args(
+    args = make_run_loop_args(
         repo_root,
         max_refactors=1,
         max_attempts=3,
@@ -975,7 +927,7 @@ def test_run_retry_prompt_includes_previous_failure(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", tests_fail_then_pass)
 
-    args = _make_run_args(repo_root, max_refactors=1, max_attempts=3)
+    args = make_run_loop_args(repo_root, max_refactors=1, max_attempts=3)
     exit_code = continuous_refactoring.run_loop(args)
 
     assert exit_code == 0
@@ -1024,7 +976,7 @@ def test_run_retry_prompt_includes_fix_amendment(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", tests_fail_then_pass)
 
-    args = _make_run_args(repo_root, max_refactors=1, max_attempts=3)
+    args = make_run_loop_args(repo_root, max_refactors=1, max_attempts=3)
     exit_code = continuous_refactoring.run_loop(args)
 
     assert exit_code == 0
@@ -1079,7 +1031,7 @@ def test_run_max_attempts_zero_is_unlimited_until_success(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", fail_five_then_pass)
 
-    args = _make_run_args(repo_root, max_refactors=1, max_attempts=0)
+    args = make_run_loop_args(repo_root, max_refactors=1, max_attempts=0)
     exit_code = continuous_refactoring.run_loop(args)
 
     assert exit_code == 0
@@ -1135,7 +1087,7 @@ def test_run_custom_fix_prompt_file(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", tests_fail_then_pass)
 
-    args = _make_run_args(
+    args = make_run_loop_args(
         repo_root,
         max_refactors=1,
         max_attempts=3,
@@ -1202,7 +1154,7 @@ def test_run_undo_commit_between_retries(
     )
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", fail_then_pass)
 
-    args = _make_run_args(repo_root, max_refactors=1, max_attempts=3)
+    args = make_run_loop_args(repo_root, max_refactors=1, max_attempts=3)
     exit_code = continuous_refactoring.run_loop(args)
 
     assert exit_code == 0
@@ -1267,7 +1219,7 @@ def test_run_agent_failure_undoes_commit_before_retry(
     )
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
-    args = _make_run_args(repo_root, max_refactors=1, max_attempts=3)
+    args = make_run_loop_args(repo_root, max_refactors=1, max_attempts=3)
     exit_code = continuous_refactoring.run_loop(args)
 
     assert exit_code == 0
@@ -1300,7 +1252,7 @@ def test_run_use_branch_creates_when_absent(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
-    args = _make_run_args(repo_root, max_refactors=1, use_branch="long-lived-refactor")
+    args = make_run_loop_args(repo_root, max_refactors=1, use_branch="long-lived-refactor")
     exit_code = continuous_refactoring.run_loop(args)
 
     assert exit_code == 0
@@ -1340,7 +1292,7 @@ def test_run_use_branch_reuses_existing(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
-    args = _make_run_args(
+    args = make_run_loop_args(
         repo_root, max_refactors=1, use_branch="long-lived-refactor",
     )
     exit_code = continuous_refactoring.run_loop(args)

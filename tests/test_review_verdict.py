@@ -67,6 +67,22 @@ def test_claude_stream_json_with_review_failed() -> None:
     assert reason == "missing test for unknown status"
 
 
+def test_claude_stream_json_with_result_type_after_other_fields() -> None:
+    event = json.dumps(
+        {
+            "subtype": "success",
+            "is_error": False,
+            "result": "REVIEW_OK",
+            "type": "result",
+        },
+        separators=(",", ":"),
+    )
+    stdout = f"[2026-04-14T00:04:03.441-07:00] {event}\n"
+    ok, reason = rlrp._review_verdict(_capture(stdout=stdout))
+    assert ok is True
+    assert reason == ""
+
+
 def test_claude_stream_json_without_timestamp_prefix() -> None:
     final = "All good.\nREVIEW_OK"
     stdout = _claude_result_line(final, timestamp_prefix=False) + "\n"

@@ -335,12 +335,14 @@ def _extract_claude_final_message(source: str) -> str | None:
     scanner sees plain text rather than JSON-wrapped events.
     """
     for raw_line in reversed(source.splitlines()):
-        idx = raw_line.find('{"type":"result"')
+        idx = raw_line.find("{")
         if idx < 0:
             continue
         try:
             event = json.loads(raw_line[idx:])
         except json.JSONDecodeError:
+            continue
+        if event.get("type") != "result":
             continue
         text = event.get("result")
         return text if isinstance(text, str) else None

@@ -44,8 +44,6 @@ _PLANNING_PROMPTS_THAT_MENTION_PLAN_MD = (
     PLANNING_FINAL_REVIEW_PROMPT,
 )
 
-_PLANNING_PROMPTS_THAT_MENTION_PHASE_FILES = _PLANNING_PROMPTS_THAT_MENTION_PLAN_MD
-
 _PLANNING_PROMPTS_THAT_MENTION_APPROACHES = (
     PLANNING_EXPAND_PROMPT,
     PLANNING_REVIEW_PROMPT,
@@ -132,13 +130,9 @@ def test_approaches_prompt_mentions_approaches_dir() -> None:
 
 
 @pytest.mark.parametrize("prompt", _PLANNING_PROMPTS_THAT_MENTION_PLAN_MD)
-def test_planning_prompts_mention_plan_md(prompt: str) -> None:
-    assert "plan.md" in prompt
-
-
-@pytest.mark.parametrize("prompt", _PLANNING_PROMPTS_THAT_MENTION_PLAN_MD)
-def test_planning_prompts_mention_phase_files(prompt: str) -> None:
-    assert "phase-<n>-<name>.md" in prompt
+@pytest.mark.parametrize("fragment", ("plan.md", "phase-<n>-<name>.md"))
+def test_planning_prompts_reference_plan_artifacts(prompt: str, fragment: str) -> None:
+    assert fragment in prompt
 
 
 @pytest.mark.parametrize("prompt", _PLANNING_PROMPTS_THAT_MENTION_APPROACHES)

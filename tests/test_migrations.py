@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import random
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
 
@@ -12,18 +11,13 @@ from continuous_refactoring.migrations import (
     MigrationManifest,
     PhaseSpec,
     approaches_dir,
+    MIGRATION_STATUSES,
     intentional_skips_dir,
     load_manifest,
     migration_root,
     phase_path,
     save_manifest,
 )
-
-if TYPE_CHECKING:
-    pass
-
-_VALID_STATUSES = ("planning", "ready", "in-progress", "skipped", "done")
-
 
 def _random_phase(rng: random.Random, index: int) -> PhaseSpec:
     name = "".join(rng.choices("abcdefghijklmnop", k=rng.randint(3, 10)))
@@ -44,7 +38,7 @@ def _random_manifest(rng: random.Random) -> MigrationManifest:
         last_touch=f"2025-{rng.randint(1,12):02d}-{rng.randint(1,28):02d}T12:00:00.000+00:00",
         wake_up_on=rng.choice([None, "2025-06-01T00:00:00.000+00:00"]),
         awaiting_human_review=rng.choice([True, False]),
-        status=rng.choice(_VALID_STATUSES),
+        status=rng.choice(MIGRATION_STATUSES),
         current_phase=rng.randint(0, num_phases - 1),
         phases=phases,
     )

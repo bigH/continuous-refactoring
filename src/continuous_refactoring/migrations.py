@@ -5,13 +5,14 @@ import tempfile
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Literal, cast
+from typing import Literal, cast, get_args
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
 
 __all__ = [
     "MigrationManifest",
     "PhaseSpec",
+    "MIGRATION_STATUSES",
     "approaches_dir",
     "bump_last_touch",
     "eligible_now",
@@ -24,8 +25,11 @@ __all__ = [
 ]
 
 MigrationStatus = Literal["planning", "ready", "in-progress", "skipped", "done"]
+MIGRATION_STATUSES = cast(
+    tuple[MigrationStatus, ...], get_args(MigrationStatus)
+)
 _VALID_STATUSES: frozenset[str] = frozenset(
-    {"planning", "ready", "in-progress", "skipped", "done"}
+    cast(tuple[str, ...], MIGRATION_STATUSES)
 )
 
 

@@ -23,23 +23,12 @@ _GLOBAL_TASTE_WARNING = (
     "warning: global taste is out of date — "
     "run 'continuous-refactoring taste --upgrade' to update."
 )
+_REVIEW_USAGE = "Usage: continuous-refactoring review {list,perform}"
 
 def _command_handler(command: str | None) -> Callable[[argparse.Namespace], None] | None:
     if command is None:
         return None
-    if command == "init":
-        return _handle_init
-    if command == "taste":
-        return _handle_taste
-    if command == "upgrade":
-        return _handle_upgrade
-    if command == "review":
-        return _handle_review
-    if command == "run-once":
-        return _handle_run_once
-    if command == "run":
-        return _handle_run
-    return None
+    return _COMMAND_HANDLERS.get(command)
 
 
 def parse_max_attempts(value: str) -> int:
@@ -402,11 +391,7 @@ def _handle_taste(args: argparse.Namespace) -> None:
             model=getattr(args, "model", None),
             effort=getattr(args, "effort", None),
         )
-        handlers = {
-            "interview": _handle_taste_interview,
-            "refine": _handle_taste_refine,
-        }
-        return handlers[mode](args)
+        return _TASTE_MODE_HANDLERS[mode](args)
 
     from continuous_refactoring.config import ensure_taste_file
 
@@ -658,17 +643,11 @@ def _handle_review_perform(args: argparse.Namespace) -> None:
 
 def _handle_review(args: argparse.Namespace) -> None:
     review_command = getattr(args, "review_command", None)
-    if review_command == "list":
-        return _handle_review_list()
-    if review_command == "perform":
-        return _handle_review_perform(args)
-
-    if review_command is None:
-        print("Usage: continuous-refactoring review {list,perform}", file=sys.stderr)
+    review_handler = _REVIEW_COMMAND_HANDLERS.get(review_command)
+    if review_handler is None:
+        print(_REVIEW_USAGE, file=sys.stderr)
         raise SystemExit(2)
-
-    print("Usage: continuous-refactoring review {list,perform}", file=sys.stderr)
-    raise SystemExit(2)
+    return review_handler(args)
 
 
 def _run_with_loop_errors(
@@ -708,3 +687,23 @@ def cli_main() -> None:
         raise SystemExit(1)
 
     return handler(args)
+
+
+_COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], None]] = {
+    "init": lambda args: _handle_init(args),
+    "taste": lambda args: _handle_taste(args),
+    "upgrade": lambda args: _handle_upgrade(args),
+    "review": lambda args: _handle_review(args),
+    "run-once": lambda args: _handle_run_once(args),
+    "run": lambda args: _handle_run(args),
+}
+
+_TASTE_MODE_HANDLERS: dict[str, Callable[[argparse.Namespace], None]] = {
+    "interview": lambda args: _handle_taste_interview(args),
+    "refine": lambda args: _handle_taste_refine(args),
+}
+
+_REVIEW_COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], None]] = {
+    "list": lambda args: _handle_review_list(),
+    "perform": _handle_review_perform,
+}

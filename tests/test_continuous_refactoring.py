@@ -79,6 +79,104 @@ def test_build_command_rejects_unknown_agent() -> None:
         )
 
 
+class _FakeInteractiveProcess:
+    def __init__(
+        self,
+        *,
+        exit_on_signal: int | None = None,
+        returncode: int | None = None,
+    ) -> None:
+        self.exit_on_signal = exit_on_signal
+        self.returncode = returncode
+        self.signals: list[int] = []
+        self.wait_timeouts: list[float | None] = []
+        self.kill_calls = 0
+
+    def poll(self) -> int | None:
+        return self.returncode
+
+    def send_signal(self, signal_to_send: int) -> None:
+        self.signals.append(signal_to_send)
+        if signal_to_send == self.exit_on_signal:
+            self.returncode = 0
+
+    def wait(self, timeout: float | None = None) -> int:
+        self.wait_timeouts.append(timeout)
+        if self.returncode is None:
+            raise continuous_refactoring.agent.subprocess.TimeoutExpired(
+                cmd="fake-agent",
+                timeout=timeout,
+            )
+        return self.returncode
+
+    def kill(self) -> None:
+        self.kill_calls += 1
+        self.returncode = -9
+
+
+def test_gracefully_stop_interactive_process_skips_finished_process() -> None:
+    process = _FakeInteractiveProcess(returncode=0)
+
+    continuous_refactoring.agent._gracefully_stop_interactive_process(process)
+
+    assert process.signals == []
+    assert process.wait_timeouts == []
+    assert process.kill_calls == 0
+
+
+def test_gracefully_stop_interactive_process_stops_after_sigint_exit() -> None:
+    process = _FakeInteractiveProcess(
+        exit_on_signal=continuous_refactoring.agent.signal.SIGINT,
+    )
+
+    continuous_refactoring.agent._gracefully_stop_interactive_process(
+        process,
+        interrupt_timeout=1.5,
+        terminate_timeout=2.5,
+    )
+
+    assert process.signals == [continuous_refactoring.agent.signal.SIGINT]
+    assert process.wait_timeouts == [1.5]
+    assert process.kill_calls == 0
+
+
+def test_gracefully_stop_interactive_process_escalates_to_sigterm() -> None:
+    process = _FakeInteractiveProcess(
+        exit_on_signal=continuous_refactoring.agent.signal.SIGTERM,
+    )
+
+    continuous_refactoring.agent._gracefully_stop_interactive_process(
+        process,
+        interrupt_timeout=1.0,
+        terminate_timeout=2.0,
+    )
+
+    assert process.signals == [
+        continuous_refactoring.agent.signal.SIGINT,
+        continuous_refactoring.agent.signal.SIGTERM,
+    ]
+    assert process.wait_timeouts == [1.0, 2.0]
+    assert process.kill_calls == 0
+
+
+def test_gracefully_stop_interactive_process_kills_after_signal_timeouts() -> None:
+    process = _FakeInteractiveProcess()
+
+    continuous_refactoring.agent._gracefully_stop_interactive_process(
+        process,
+        interrupt_timeout=1.0,
+        terminate_timeout=2.0,
+    )
+
+    assert process.signals == [
+        continuous_refactoring.agent.signal.SIGINT,
+        continuous_refactoring.agent.signal.SIGTERM,
+    ]
+    assert process.wait_timeouts == [1.0, 2.0, None]
+    assert process.kill_calls == 1
+    assert process.returncode == -9
+
+
 def test_run_agent_interactive_until_settled_requests_graceful_exit_after_settle(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

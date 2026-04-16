@@ -232,11 +232,25 @@ def _interactive_settle_fingerprint(
     )
 
 
-def _kill_process(process: subprocess.Popen[object]) -> None:
+def _send_signal_and_wait_for_exit(
+    process: subprocess.Popen[object],
+    signal_to_send: int,
+    *,
+    timeout: float,
+) -> bool:
+    if process.poll() is not None:
+        return True
+
     try:
-        process.kill()
-    except OSError:
-        pass
+        process.send_signal(signal_to_send)
+    except (OSError, ValueError):
+        return process.poll() is not None
+
+    try:
+        process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        return process.poll() is not None
+    return True
 
 
 def _terminal_control_fd() -> int | None:
@@ -314,35 +328,24 @@ def _gracefully_stop_interactive_process(
     interrupt_timeout: float = 1.0,
     terminate_timeout: float = 2.0,
 ) -> None:
-    if process.poll() is not None:
+    if _send_signal_and_wait_for_exit(
+        process,
+        signal.SIGINT,
+        timeout=interrupt_timeout,
+    ):
+        return
+
+    if _send_signal_and_wait_for_exit(
+        process,
+        signal.SIGTERM,
+        timeout=terminate_timeout,
+    ):
         return
 
     try:
-        process.send_signal(signal.SIGINT)
-    except (OSError, ValueError):
+        process.kill()
+    except OSError:
         pass
-    else:
-        try:
-            process.wait(timeout=interrupt_timeout)
-            return
-        except subprocess.TimeoutExpired:
-            pass
-
-    if process.poll() is not None:
-        return
-
-    try:
-        process.send_signal(signal.SIGTERM)
-    except (OSError, ValueError):
-        pass
-    else:
-        try:
-            process.wait(timeout=terminate_timeout)
-            return
-        except subprocess.TimeoutExpired:
-            pass
-
-    _kill_process(process)
     try:
         process.wait()
     except OSError:

@@ -1,0 +1,29 @@
+{
+  "awaiting_human_review": true,
+  "created_at": "2026-04-16T00:18:50.157-07:00",
+  "current_phase": 0,
+  "last_touch": "2026-04-16T00:24:31.981-07:00",
+  "name": "src-continuous-refactoring-artifacts-py-20260416T001850",
+  "phases": [
+    {
+      "done": false,
+      "file": "phase-1-artifacts-contract-boundary.md",
+      "name": "artifacts-contract-boundary",
+      "ready_when": "phase 1 prerequisites met"
+    },
+    {
+      "done": false,
+      "file": "phase-2-loop-status-alignment.md",
+      "name": "loop-status-alignment",
+      "ready_when": "phase 2 prerequisites met"
+    },
+    {
+      "done": false,
+      "file": "phase-3-cli-config-git-targeting-boundaries.md",
+      "name": "cli-config-git-targeting-boundaries",
+      "ready_when": "phase 3 prerequisites met"
+    }
+  ],
+  "status": "ready",
+  "wake_up_on": null
+}

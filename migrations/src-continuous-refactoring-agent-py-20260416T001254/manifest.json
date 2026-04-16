@@ -1,0 +1,35 @@
+{
+  "awaiting_human_review": true,
+  "created_at": "2026-04-16T00:12:54.510-07:00",
+  "current_phase": 0,
+  "last_touch": "2026-04-16T00:18:09.793-07:00",
+  "name": "src-continuous-refactoring-agent-py-20260416T001254",
+  "phases": [
+    {
+      "done": false,
+      "file": "phase-0-export-boundary.md",
+      "name": "export-boundary",
+      "ready_when": "phase 0 prerequisites met"
+    },
+    {
+      "done": false,
+      "file": "phase-1-config-boundaries.md",
+      "name": "config-boundaries",
+      "ready_when": "phase 1 prerequisites met"
+    },
+    {
+      "done": false,
+      "file": "phase-2-cli-boundaries.md",
+      "name": "cli-boundaries",
+      "ready_when": "phase 2 prerequisites met"
+    },
+    {
+      "done": false,
+      "file": "phase-3-pure-prompts-and-phases.md",
+      "name": "pure-prompts-and-phases",
+      "ready_when": "phase 3 prerequisites met"
+    }
+  ],
+  "status": "ready",
+  "wake_up_on": null
+}

@@ -123,6 +123,18 @@ def test_prepare_phase_branch_starts_from_main(tmp_path: Path) -> None:
     assert get_head_sha(repo) == main_head
 
 
+def test_prepare_run_branch_prefers_requested_name_if_missing(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    main_head = get_head_sha(repo)
+
+    result = prepare_run_branch(repo, "does-not-exist", "fallback")
+
+    assert result == "does-not-exist"
+    assert current_branch(repo) == "does-not-exist"
+    assert get_head_sha(repo) == main_head
+
+
 # -----------------------------------------------------------------------
 # Undo last commit
 # -----------------------------------------------------------------------

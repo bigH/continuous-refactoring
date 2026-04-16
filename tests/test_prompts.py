@@ -8,6 +8,8 @@ from continuous_refactoring.config import TASTE_CURRENT_VERSION, default_taste_t
 from continuous_refactoring.migrations import MigrationManifest, PhaseSpec
 from continuous_refactoring.prompts import (
     CLASSIFIER_PROMPT,
+    CONTINUOUS_REFACTORING_STATUS_BEGIN,
+    CONTINUOUS_REFACTORING_STATUS_END,
     DEFAULT_REFACTORING_PROMPT,
     PHASE_EXECUTION_PROMPT,
     PHASE_READY_CHECK_PROMPT,
@@ -102,6 +104,16 @@ def test_classifier_output_contract() -> None:
 def test_refactoring_prompt_defers_commit_to_driver() -> None:
     assert "Do not create git commits yourself." in DEFAULT_REFACTORING_PROMPT
     assert "commit it immediately" not in DEFAULT_REFACTORING_PROMPT
+
+
+def test_refactoring_prompt_has_status_block_contract() -> None:
+    assert CONTINUOUS_REFACTORING_STATUS_BEGIN in DEFAULT_REFACTORING_PROMPT
+    assert CONTINUOUS_REFACTORING_STATUS_END in DEFAULT_REFACTORING_PROMPT
+
+
+def test_phase_execution_prompt_has_status_block_contract() -> None:
+    assert CONTINUOUS_REFACTORING_STATUS_BEGIN in PHASE_EXECUTION_PROMPT
+    assert CONTINUOUS_REFACTORING_STATUS_END in PHASE_EXECUTION_PROMPT
 
 
 def test_final_review_output_contract() -> None:
@@ -262,6 +274,21 @@ def test_planning_final_review_has_output_contract() -> None:
     assert "final-decision: approve-auto" in result
     assert "final-decision: approve-needs-human" in result
     assert "final-decision: reject" in result
+
+
+def test_compose_full_prompt_includes_retry_context_heading() -> None:
+    result = compose_full_prompt(
+        base_prompt="base",
+        taste=_TASTE,
+        target=_target(),
+        scope_instruction=None,
+        validation_command="uv run pytest",
+        attempt=2,
+        retry_context="- Summary: validation failed after refactor",
+    )
+
+    assert "## Retry Context" in result
+    assert "validation failed after refactor" in result
 
 
 def test_planning_approaches_mentions_artifacts() -> None:

@@ -13,11 +13,13 @@ from continuous_refactoring.config import (
     app_data_dir,
     default_taste_text,
     ensure_taste_file,
+    failure_snapshots_dir,
     find_project,
     global_dir,
     load_manifest,
     load_taste,
     parse_taste_version,
+    reason_for_failure_path,
     register_project,
     resolve_live_migrations_dir,
     resolve_project,
@@ -214,6 +216,23 @@ def test_register_project_recreates_missing_project_dir(
     re_registered = register_project(project_path)
     assert re_registered.entry.uuid == registered.entry.uuid
     assert re_registered.project_dir.exists()
+
+
+def test_reason_for_failure_path_uses_project_scoped_xdg_dir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    project_path = tmp_path / "my-project"
+    _init_repo(project_path)
+
+    reason_path = reason_for_failure_path(project_path)
+
+    assert reason_path.parent.parent.name == "projects"
+    assert reason_path.name == "reason-for-failure.md"
+    assert str(reason_path).startswith(str(tmp_path / "xdg" / "continuous-refactoring"))
+
+    snapshots_dir = failure_snapshots_dir(project_path)
+    assert snapshots_dir.parent == reason_path.parent
+    assert snapshots_dir.name == "failures"
 
 
 def test_register_project_detects_git_remote(

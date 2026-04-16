@@ -37,6 +37,50 @@ def test_run_observed_command_writes_timestamped_logs(tmp_path: Path) -> None:
     assert "<no output>" in stderr_path.read_text(encoding="utf-8")
 
 
+def test_run_observed_command_timeout_hides_full_command_text(tmp_path: Path) -> None:
+    stdout_path = tmp_path / "out.log"
+    stderr_path = tmp_path / "err.log"
+    secret = "VERY-HUGE-PROMPT-TEXT"
+
+    with pytest.raises(ContinuousRefactorError) as error:
+        continuous_refactoring.run_observed_command(
+            [sys.executable, "-c", "import time; time.sleep(60)", secret],
+            cwd=tmp_path,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            mirror_to_terminal=False,
+            timeout=1,
+        )
+
+    message = str(error.value)
+    assert "timed out" in message
+    assert secret not in message
+    assert "python" in message
+
+
+def test_run_observed_command_stuck_hides_full_command_text(tmp_path: Path) -> None:
+    stdout_path = tmp_path / "out.log"
+    stderr_path = tmp_path / "err.log"
+    secret = "VERY-HUGE-PROMPT-TEXT"
+    script = "import sys, time; print('hello'); sys.stdout.flush(); time.sleep(60)"
+
+    with pytest.raises(ContinuousRefactorError) as error:
+        continuous_refactoring.run_observed_command(
+            [sys.executable, "-c", script, secret],
+            cwd=tmp_path,
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+            mirror_to_terminal=False,
+            stuck_interval=1,
+            stuck_timeout=2,
+        )
+
+    message = str(error.value)
+    assert "produced no output" in message
+    assert secret not in message
+    assert "python" in message
+
+
 def test_package_exports_are_stable() -> None:
     assert isinstance(continuous_refactoring.__all__, tuple)
     assert len(continuous_refactoring.__all__) == len(set(continuous_refactoring.__all__))

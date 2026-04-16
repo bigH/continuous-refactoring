@@ -134,11 +134,14 @@ def _write_skip_file(
 def _run_stage(
     stage: PlanningStage,
     migration_name: str,
+    target: str,
     taste: str,
     context: str,
     repo_root: Path,
     artifacts: RunArtifacts,
     *,
+    attempt: int,
+    retry: int,
     agent: str,
     model: str,
     effort: str,
@@ -147,29 +150,67 @@ def _run_stage(
 ) -> str:
     prompt = compose_planning_prompt(stage, migration_name, taste, context)
     label = stage_label or stage
+    call_role = f"planning.{label}"
     stage_dir = artifacts.root / "planning" / label
     stage_dir.mkdir(parents=True, exist_ok=True)
 
-    result = maybe_run_agent(
-        agent=agent,
-        model=model,
-        effort=effort,
-        prompt=prompt,
-        repo_root=repo_root,
-        stdout_path=stage_dir / "agent.stdout.log",
-        stderr_path=stage_dir / "agent.stderr.log",
-        last_message_path=(
-            stage_dir / "agent-last-message.md" if agent == "codex" else None
-        ),
-        mirror_to_terminal=False,
-        timeout=timeout,
+    artifacts.log_call_started(
+        attempt=attempt,
+        retry=retry,
+        target=target,
+        call_role=call_role,
     )
 
+    try:
+        result = maybe_run_agent(
+            agent=agent,
+            model=model,
+            effort=effort,
+            prompt=prompt,
+            repo_root=repo_root,
+            stdout_path=stage_dir / "agent.stdout.log",
+            stderr_path=stage_dir / "agent.stderr.log",
+            last_message_path=(
+                stage_dir / "agent-last-message.md" if agent == "codex" else None
+            ),
+            mirror_to_terminal=False,
+            timeout=timeout,
+        )
+    except ContinuousRefactorError as error:
+        artifacts.log_call_finished(
+            attempt=attempt,
+            retry=retry,
+            target=target,
+            call_role=call_role,
+            status="failed",
+            level="WARN",
+            summary=str(error),
+        )
+        raise ContinuousRefactorError(f"{call_role} failed: {error}") from error
+
     if result.returncode != 0:
+        artifacts.log_call_finished(
+            attempt=attempt,
+            retry=retry,
+            target=target,
+            call_role=call_role,
+            status="failed",
+            level="WARN",
+            returncode=result.returncode,
+            summary=f"{agent} exited with code {result.returncode}",
+        )
         raise ContinuousRefactorError(
-            f"Planning stage '{label}' failed with exit code {result.returncode}"
+            f"{call_role} failed: {agent} exited with code {result.returncode}"
         )
 
+    artifacts.log_call_finished(
+        attempt=attempt,
+        retry=retry,
+        target=target,
+        call_role=call_role,
+        status="finished",
+        returncode=result.returncode,
+    )
     return result.stdout
 
 
@@ -230,6 +271,8 @@ def run_planning(
     live_dir: Path,
     artifacts: RunArtifacts,
     *,
+    attempt: int = 1,
+    retry: int = 1,
     agent: str,
     model: str,
     effort: str,
@@ -258,54 +301,54 @@ def run_planning(
 
     # Stage 1: approaches
     _run_stage(
-        "approaches", migration_name, taste,
+        "approaches", migration_name, target, taste,
         _build_context(target, mig_relative, extra_context),
-        repo_root, artifacts, **agent_kw,
+        repo_root, artifacts, attempt=attempt, retry=retry, **agent_kw,
     )
     manifest = _touch_manifest(manifest, manifest_path)
 
     # Stage 2: pick-best
     approach_listing = _approach_listing(live_dir, migration_name)
     pick_stdout = _run_stage(
-        "pick-best", migration_name, taste,
+        "pick-best", migration_name, target, taste,
         _build_context(
             target,
             mig_relative,
             _join_nonempty(extra_context, f"Approaches:\n{approach_listing}"),
         ),
-        repo_root, artifacts, **agent_kw,
+        repo_root, artifacts, attempt=attempt, retry=retry, **agent_kw,
     )
     manifest = _touch_manifest(manifest, manifest_path)
 
     # Stage 3: expand
     _run_stage(
-        "expand", migration_name, taste,
+        "expand", migration_name, target, taste,
         _build_context(
             target,
             mig_relative,
             _join_nonempty(extra_context, f"Chosen approach:\n{pick_stdout}"),
         ),
-        repo_root, artifacts, **agent_kw,
+        repo_root, artifacts, attempt=attempt, retry=retry, **agent_kw,
     )
     manifest = _touch_manifest(manifest, manifest_path, mig_root=mig_root)
 
     # Stage 4: review
     plan_path = mig_root / "plan.md"
     review_stdout = _run_stage(
-        "review", migration_name, taste,
+        "review", migration_name, target, taste,
         _build_context(
             target,
             mig_relative,
             _join_nonempty(extra_context, f"Plan:\n{_plan_text(plan_path)}"),
         ),
-        repo_root, artifacts, **agent_kw,
+        repo_root, artifacts, attempt=attempt, retry=retry, **agent_kw,
     )
     manifest = _touch_manifest(manifest, manifest_path)
 
     # Stage 5: revise + review again (only if first review had findings)
     if _review_has_findings(review_stdout):
         _run_stage(
-            "expand", migration_name, taste,
+            "expand", migration_name, target, taste,
             _build_context(
                 target,
                 mig_relative,
@@ -314,12 +357,17 @@ def run_planning(
                     f"Review findings to address:\n{review_stdout}",
                 ),
             ),
-            repo_root, artifacts, stage_label="revise", **agent_kw,
+            repo_root,
+            artifacts,
+            attempt=attempt,
+            retry=retry,
+            stage_label="revise",
+            **agent_kw,
         )
         manifest = _touch_manifest(manifest, manifest_path, mig_root=mig_root)
 
         _run_stage(
-            "review", migration_name, taste,
+            "review", migration_name, target, taste,
             _build_context(
                 target,
                 mig_relative,
@@ -328,22 +376,32 @@ def run_planning(
                     f"Plan (revised):\n{_plan_text(plan_path)}",
                 ),
             ),
-            repo_root, artifacts, stage_label="review-2", **agent_kw,
+            repo_root,
+            artifacts,
+            attempt=attempt,
+            retry=retry,
+            stage_label="review-2",
+            **agent_kw,
         )
         manifest = _touch_manifest(manifest, manifest_path)
 
     # Stage 6: final-review
     final_stdout = _run_stage(
-        "final-review", migration_name, taste,
+        "final-review", migration_name, target, taste,
         _build_context(
             target,
             mig_relative,
             _join_nonempty(extra_context, f"Plan:\n{_plan_text(plan_path)}"),
         ),
-        repo_root, artifacts, **agent_kw,
+        repo_root, artifacts, attempt=attempt, retry=retry, **agent_kw,
     )
 
-    decision, reason = _parse_final_decision(final_stdout)
+    try:
+        decision, reason = _parse_final_decision(final_stdout)
+    except ContinuousRefactorError as error:
+        raise ContinuousRefactorError(
+            f"planning.final-review failed: {error}"
+        ) from error
     manifest = _touch_manifest(manifest, manifest_path)
 
     if decision == "approve-auto":

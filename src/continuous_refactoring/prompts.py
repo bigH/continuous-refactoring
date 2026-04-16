@@ -9,6 +9,8 @@ if TYPE_CHECKING:
     from continuous_refactoring.targeting import Target
 
 __all__ = [
+    "CONTINUOUS_REFACTORING_STATUS_BEGIN",
+    "CONTINUOUS_REFACTORING_STATUS_END",
     "CLASSIFIER_PROMPT",
     "DEFAULT_FIX_AMENDMENT",
     "DEFAULT_REFACTORING_PROMPT",
@@ -97,7 +99,24 @@ REQUIRED_PREAMBLE = (
     "Do not finish unless the repository is green after your refactor."
 )
 
-DEFAULT_REFACTORING_PROMPT = """\
+CONTINUOUS_REFACTORING_STATUS_BEGIN = "BEGIN_CONTINUOUS_REFACTORING_STATUS"
+CONTINUOUS_REFACTORING_STATUS_END = "END_CONTINUOUS_REFACTORING_STATUS"
+
+_CONTINUOUS_REFACTORING_STATUS_BLOCK = f"""\
+{CONTINUOUS_REFACTORING_STATUS_BEGIN}
+phase_reached: refactor
+decision: commit
+retry_recommendation: none
+failure_kind: none
+summary: Ready to commit.
+next_retry_focus: none
+tests_run: <short command or none>
+evidence:
+  - <relative artifact path>
+{CONTINUOUS_REFACTORING_STATUS_END}\
+"""
+
+DEFAULT_REFACTORING_PROMPT = f"""\
 You are a continuous refactoring agent. Start cold. Assume no memory from prior runs and no operator context beyond this prompt and current repository state.
 
 Mission:
@@ -185,9 +204,17 @@ Output:
 - `tests_run`
 - `broad_validation`
 - `failure_triage` when non-empty
-- `decision` (`commit`, `revert`, or `blocked`)
+- `decision` (`commit`, `retry`, `abandon`, or `blocked`)
 - `blocked_reason` when blocked
-- `next_candidate`\
+- `next_candidate`
+- Append a short machine-readable status block to your final message exactly in
+  this shape:
+  {_CONTINUOUS_REFACTORING_STATUS_BLOCK}
+- Use only `commit`, `retry`, `abandon`, or `blocked` for `decision`.
+- Use only `same-target`, `new-target`, `none`, or `human-review` for
+  `retry_recommendation`.
+- Keep `summary` and `next_retry_focus` short. Do not include raw stdout/stderr,
+  full commands, or large log blobs in the status block.\
 """
 
 DEFAULT_FIX_AMENDMENT = """\
@@ -383,9 +410,13 @@ def compose_full_prompt(
     scope_instruction: str | None,
     validation_command: str,
     attempt: int,
+    retry_context: str | None = None,
     previous_failure: str | None = None,
     fix_amendment: str | None = None,
 ) -> str:
+    sanitized_retry_context = _strip_or_none(retry_context) or _strip_or_none(
+        previous_failure
+    )
     sections: list[str] = [
         f"Attempt {attempt}",
         base_prompt,
@@ -395,14 +426,11 @@ def compose_full_prompt(
         _first_scope(target.scoping, scope_instruction),
         f"## Validation\nRun: `{validation_command}`",
     ]
-    if previous_failure:
-        # previous_failure is summarize_output's tail (40 lines of validation command
-        # or agent stdout+stderr). Verbatim input; trusted but not sanitized.
+    if sanitized_retry_context:
         sections.extend([
-            "Previous attempt failed tests with this output:\n",
-            previous_failure,
-            "Use this as context only if it helps; do not copy test output into code.",
-            "Only fix failures introduced by this refactoring pass.",
+            "## Retry Context",
+            sanitized_retry_context,
+            "Use this as focused context only. Do not copy raw failure text into code.",
         ])
     if fix_amendment:
         sections.append(fix_amendment)
@@ -555,7 +583,11 @@ Execute the work described in the phase file. Follow the plan exactly.
 All changes must keep the project in a state where all tests pass.
 Do not modify files outside the scope defined in the phase plan.
 
-Refactoring taste is injected by the caller. Respect it in all code changes.\
+Refactoring taste is injected by the caller. Respect it in all code changes.
+
+Append a short machine-readable status block to your final message exactly in
+this shape:
+""" + _CONTINUOUS_REFACTORING_STATUS_BLOCK + """\
 """
 
 _PLANNING_STAGE_PROMPTS: dict[str, str] = {

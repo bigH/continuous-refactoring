@@ -47,6 +47,8 @@ def classify_target(
     repo_root: Path,
     artifacts: RunArtifacts,
     *,
+    attempt: int = 1,
+    retry: int = 1,
     agent: str,
     model: str,
     effort: str,
@@ -55,25 +57,63 @@ def classify_target(
     prompt = compose_classifier_prompt(target, taste)
     classify_dir = artifacts.root / "classify"
     classify_dir.mkdir(parents=True, exist_ok=True)
+    call_role = "classify"
 
-    result = maybe_run_agent(
-        agent=agent,
-        model=model,
-        effort=effort,
-        prompt=prompt,
-        repo_root=repo_root,
-        stdout_path=classify_dir / "agent.stdout.log",
-        stderr_path=classify_dir / "agent.stderr.log",
-        last_message_path=(
-            classify_dir / "agent-last-message.md" if agent == "codex" else None
-        ),
-        mirror_to_terminal=False,
-        timeout=timeout,
+    artifacts.log_call_started(
+        attempt=attempt,
+        retry=retry,
+        target=target.description,
+        call_role=call_role,
     )
 
+    try:
+        result = maybe_run_agent(
+            agent=agent,
+            model=model,
+            effort=effort,
+            prompt=prompt,
+            repo_root=repo_root,
+            stdout_path=classify_dir / "agent.stdout.log",
+            stderr_path=classify_dir / "agent.stderr.log",
+            last_message_path=(
+                classify_dir / "agent-last-message.md" if agent == "codex" else None
+            ),
+            mirror_to_terminal=False,
+            timeout=timeout,
+        )
+    except ContinuousRefactorError as error:
+        artifacts.log_call_finished(
+            attempt=attempt,
+            retry=retry,
+            target=target.description,
+            call_role=call_role,
+            status="failed",
+            level="WARN",
+            summary=str(error),
+        )
+        raise
+
     if result.returncode != 0:
+        artifacts.log_call_finished(
+            attempt=attempt,
+            retry=retry,
+            target=target.description,
+            call_role=call_role,
+            status="failed",
+            level="WARN",
+            returncode=result.returncode,
+            summary=f"{agent} exited with code {result.returncode}",
+        )
         raise ContinuousRefactorError(
             f"Classifier agent failed with exit code {result.returncode}"
         )
 
+    artifacts.log_call_finished(
+        attempt=attempt,
+        retry=retry,
+        target=target.description,
+        call_role=call_role,
+        status="finished",
+        returncode=result.returncode,
+    )
     return _parse_decision(result.stdout)

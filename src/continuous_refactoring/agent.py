@@ -483,6 +483,10 @@ def _terminate_process(process: subprocess.Popen[str]) -> None:
         pass
 
 
+def _command_display_name(command: Sequence[str]) -> str:
+    return Path(command[0]).name or str(command[0])
+
+
 def run_observed_command(
     command: Sequence[str],
     cwd: Path,
@@ -506,8 +510,9 @@ def run_observed_command(
         bufsize=1,
     )
     if process.stdout is None or process.stderr is None:
+        command_name = _command_display_name(command)
         raise ContinuousRefactorError(
-            f"Failed to capture process output for command: {' '.join(command)}"
+            f"Failed to capture process output for {command_name}"
         )
 
     stdout_chunks: list[str] = []
@@ -581,12 +586,14 @@ def run_observed_command(
             _write_timestamped_line(stderr_handle, "<no output>")
 
     if timed_out:
+        command_name = _command_display_name(command)
         raise ContinuousRefactorError(
-            f"Command timed out after {timeout}s: {' '.join(command)}"
+            f"{command_name} timed out after {timeout}s"
         )
     if was_stuck:
+        command_name = _command_display_name(command)
         raise ContinuousRefactorError(
-            f"Command killed: no output for {stuck_timeout}s: {' '.join(command)}"
+            f"{command_name} produced no output for {stuck_timeout}s"
         )
 
     return CommandCapture(

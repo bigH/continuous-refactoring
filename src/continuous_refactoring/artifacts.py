@@ -23,6 +23,9 @@ class ContinuousRefactorError(RuntimeError):
     pass
 
 
+_UNSET = object()
+
+
 @dataclass(frozen=True)
 class CommandCapture:
     command: tuple[str, ...]
@@ -36,6 +39,15 @@ class CommandCapture:
 @dataclass
 class AttemptStats:
     attempt: int
+    target: str | None = None
+    retry: int | None = None
+    call_role: str | None = None
+    phase_reached: str | None = None
+    decision: str | None = None
+    retry_recommendation: str | None = None
+    failure_kind: str | None = None
+    failure_summary: str | None = None
+    reason_doc_path: str | None = None
     refactor_target: str | None = None
     refactor_outcome: str | None = None
     refactor_agent_returncode: int | None = None
@@ -105,6 +117,43 @@ class RunArtifacts:
             self.attempts[attempt] = AttemptStats(attempt=attempt)
         return self.attempts[attempt]
 
+    def update_attempt(
+        self,
+        attempt: int,
+        *,
+        target: str | None | object = _UNSET,
+        retry: int | None | object = _UNSET,
+        call_role: str | None | object = _UNSET,
+        phase_reached: str | None | object = _UNSET,
+        decision: str | None | object = _UNSET,
+        retry_recommendation: str | None | object = _UNSET,
+        failure_kind: str | None | object = _UNSET,
+        failure_summary: str | None | object = _UNSET,
+        reason_doc_path: Path | None | object = _UNSET,
+    ) -> None:
+        stats = self.ensure_attempt(attempt)
+        if target is not _UNSET:
+            stats.target = target
+        if retry is not _UNSET:
+            stats.retry = retry
+        if call_role is not _UNSET:
+            stats.call_role = call_role
+        if phase_reached is not _UNSET:
+            stats.phase_reached = phase_reached
+        if decision is not _UNSET:
+            stats.decision = decision
+        if retry_recommendation is not _UNSET:
+            stats.retry_recommendation = retry_recommendation
+        if failure_kind is not _UNSET:
+            stats.failure_kind = failure_kind
+        if failure_summary is not _UNSET:
+            stats.failure_summary = failure_summary
+        if reason_doc_path is not _UNSET:
+            stats.reason_doc_path = (
+                str(reason_doc_path) if reason_doc_path is not None else None
+            )
+        self.write_summary()
+
     def log(self, level: str, message: str, **fields: object) -> None:
         timestamp = iso_timestamp()
         line = f"[{level}] {message}"
@@ -120,6 +169,110 @@ class RunArtifacts:
         self.counts["attempts_started"] += 1
         self.ensure_attempt(attempt)
         self.write_summary()
+
+    def log_call_started(
+        self,
+        *,
+        attempt: int,
+        retry: int,
+        target: str,
+        call_role: str,
+        phase_reached: str | None = None,
+    ) -> None:
+        self.update_attempt(
+            attempt,
+            target=target,
+            retry=retry,
+            call_role=call_role,
+            phase_reached=phase_reached or call_role,
+        )
+        self.log(
+            "INFO",
+            f"call start: {call_role} — {target}",
+            event="call_started",
+            attempt=attempt,
+            retry=retry,
+            target=target,
+            call_role=call_role,
+            phase_reached=phase_reached or call_role,
+        )
+
+    def log_call_finished(
+        self,
+        *,
+        attempt: int,
+        retry: int,
+        target: str,
+        call_role: str,
+        phase_reached: str | None = None,
+        status: str,
+        level: str = "INFO",
+        returncode: int | None = None,
+        summary: str | None = None,
+    ) -> None:
+        self.update_attempt(
+            attempt,
+            target=target,
+            retry=retry,
+            call_role=call_role,
+            phase_reached=phase_reached or call_role,
+            failure_summary=summary,
+        )
+        self.log(
+            level,
+            f"call {status}: {call_role} — {target}",
+            event="call_finished",
+            attempt=attempt,
+            retry=retry,
+            target=target,
+            call_role=call_role,
+            phase_reached=phase_reached or call_role,
+            call_status=status,
+            returncode=returncode,
+            summary=summary,
+        )
+
+    def log_transition(
+        self,
+        *,
+        attempt: int,
+        retry: int,
+        target: str,
+        call_role: str,
+        phase_reached: str,
+        decision: str,
+        retry_recommendation: str,
+        failure_kind: str,
+        summary: str,
+        reason_doc_path: Path | None,
+    ) -> None:
+        self.update_attempt(
+            attempt,
+            target=target,
+            retry=retry,
+            call_role=call_role,
+            phase_reached=phase_reached,
+            decision=decision,
+            retry_recommendation=retry_recommendation,
+            failure_kind=failure_kind,
+            failure_summary=summary,
+            reason_doc_path=reason_doc_path,
+        )
+        self.log(
+            "WARN",
+            f"target transition: {decision}/{retry_recommendation} — {target}",
+            event="target_transition",
+            attempt=attempt,
+            retry=retry,
+            target=target,
+            call_role=call_role,
+            phase_reached=phase_reached,
+            decision=decision,
+            retry_recommendation=retry_recommendation,
+            failure_kind=failure_kind,
+            summary=summary,
+            reason_doc_path=str(reason_doc_path) if reason_doc_path else None,
+        )
 
     def record_commit(self, attempt: int, phase: str, commit_sha: str) -> None:
         stats = self.ensure_attempt(attempt)

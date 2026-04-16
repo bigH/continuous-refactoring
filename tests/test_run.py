@@ -6,13 +6,16 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import pytest
+
 if TYPE_CHECKING:
-    import pytest
+    pass
 
 import continuous_refactoring
 import continuous_refactoring.loop
 from continuous_refactoring.cli import build_parser
 from continuous_refactoring.artifacts import CommandCapture, ContinuousRefactorError
+from continuous_refactoring.migrations import MigrationManifest, PhaseSpec, save_manifest
 from continuous_refactoring.targeting import Target
 
 from conftest import (
@@ -29,6 +32,45 @@ def _read_single_run_summary(tmpdir_root: Path) -> dict[str, object]:
     run_dirs = list(run_root.iterdir())
     assert len(run_dirs) == 1
     return json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
+
+
+def _read_single_run_events(tmpdir_root: Path) -> list[dict[str, object]]:
+    run_root = tmpdir_root / "continuous-refactoring"
+    run_dirs = list(run_root.iterdir())
+    assert len(run_dirs) == 1
+    return [
+        json.loads(line)
+        for line in (run_dirs[0] / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
+def _write_live_manifest(
+    live_dir: Path,
+    *,
+    name: str = "queued-migration",
+    status: str = "ready",
+) -> None:
+    manifest = MigrationManifest(
+        name=name,
+        created_at="2026-04-16T00:00:00.000+00:00",
+        last_touch="2026-04-16T00:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status=status,
+        current_phase=0,
+        phases=(
+            PhaseSpec(
+                name="cleanup",
+                file="phase-0-cleanup.md",
+                done=False,
+                ready_when="always",
+            ),
+        ),
+    )
+    migration_dir = live_dir / name
+    migration_dir.mkdir(parents=True, exist_ok=True)
+    save_manifest(manifest, migration_dir / "manifest.json")
 
 
 def _failing_agent(**kwargs: object) -> CommandCapture:
@@ -1142,7 +1184,7 @@ def test_run_exhausts_max_attempts_on_persistent_agent_failure(
     assert "continuous refactor" not in log.stdout
 
 
-def test_run_retry_prompt_includes_previous_failure(
+def test_run_retry_prompt_uses_sanitized_failure_context(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1173,12 +1215,15 @@ def test_run_retry_prompt_includes_previous_failure(
     ) -> CommandCapture:
         stdout_path.parent.mkdir(parents=True, exist_ok=True)
         stderr_path.parent.mkdir(parents=True, exist_ok=True)
-        stdout_path.write_text("FOOBAR-MARKER failed\n", encoding="utf-8")
+        stdout_path.write_text(
+            "codex exec --model fake VERY-HUGE-PROMPT\nFOOBAR-MARKER failed\n",
+            encoding="utf-8",
+        )
         stderr_path.write_text("", encoding="utf-8")
         return CommandCapture(
             command=("pytest",),
             returncode=1,
-            stdout="FOOBAR-MARKER failed\n",
+            stdout="codex exec --model fake VERY-HUGE-PROMPT\nFOOBAR-MARKER failed\n",
             stderr="",
             stdout_path=stdout_path,
             stderr_path=stderr_path,
@@ -1211,8 +1256,392 @@ def test_run_retry_prompt_includes_previous_failure(
 
     assert exit_code == 0
     assert len(captured_prompts) == 2
-    assert "FOOBAR-MARKER" not in captured_prompts[0]
-    assert "FOOBAR-MARKER" in captured_prompts[1]
+    assert "## Retry Context" not in captured_prompts[0]
+    assert "## Retry Context" in captured_prompts[1]
+    assert "validation failed after refactor" in captured_prompts[1]
+    assert "FOOBAR-MARKER" not in captured_prompts[1]
+    assert "VERY-HUGE-PROMPT" not in captured_prompts[1]
+
+
+def test_run_records_retry_and_abandon_transitions_with_failure_docs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    agent_calls = 0
+
+    def touching_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / f"touch-{agent_calls}.txt").write_text("x\n", encoding="utf-8")
+        return noop_agent(**kwargs)
+
+    validation_calls = 0
+
+    def fail_twice_then_pass(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        nonlocal validation_calls
+        if not _count_validation_calls(stdout_path):
+            return noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        validation_calls += 1
+        if validation_calls <= 2:
+            return failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return noop_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", fail_twice_then_pass)
+
+    targets_file = tmp_path / "targets.jsonl"
+    targets_file.write_text(
+        "\n".join(
+            [
+                json.dumps({"description": "target-a", "files": ["a.py"]}),
+                json.dumps({"description": "target-b", "files": ["b.py"]}),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    args = make_run_loop_args(
+        repo_root,
+        targets=targets_file,
+        max_attempts=2,
+        max_consecutive_failures=3,
+        scope_instruction=None,
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert agent_calls == 3
+
+    summary = _read_single_run_summary(tmpdir_root)
+    attempts = summary["attempts"]
+    assert attempts[0]["decision"] == "abandon"
+    assert attempts[0]["retry_recommendation"] == "new-target"
+    assert attempts[0]["call_role"] == "validation"
+    assert attempts[0]["reason_doc_path"]
+    assert attempts[1]["decision"] == "commit"
+
+    events = _read_single_run_events(tmpdir_root)
+    call_roles = [event.get("call_role") for event in events]
+    assert "refactor" in call_roles
+    assert "validation" in call_roles
+    transitions = [
+        (event.get("decision"), event.get("retry_recommendation"))
+        for event in events
+        if event.get("event") == "target_transition"
+    ]
+    assert ("retry", "same-target") in transitions
+    assert ("abandon", "new-target") in transitions
+
+    reason_path = continuous_refactoring.config.reason_for_failure_path(repo_root)
+    assert reason_path.exists()
+    reason_doc = reason_path.read_text(encoding="utf-8")
+    assert 'decision: "abandon"' in reason_doc
+    assert 'retry_recommendation: "new-target"' in reason_doc
+    assert 'call_role: "validation"' in reason_doc
+
+    snapshots = sorted((reason_path.parent / "failures").glob("*.md"))
+    assert len(snapshots) == 2
+
+
+def test_run_successful_retry_clears_reason_doc_from_summary(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
+
+    validation_calls = 0
+
+    def fail_once_then_pass(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        nonlocal validation_calls
+        if not _count_validation_calls(stdout_path):
+            return noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        validation_calls += 1
+        if validation_calls == 1:
+            return failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return noop_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", fail_once_then_pass)
+
+    exit_code = continuous_refactoring.run_loop(
+        make_run_loop_args(repo_root, max_refactors=1, max_attempts=2)
+    )
+
+    assert exit_code == 0
+    summary = _read_single_run_summary(tmpdir_root)
+    attempts = summary["attempts"]
+    assert attempts[0]["decision"] == "commit"
+    assert attempts[0]["reason_doc_path"] is None
+
+
+def test_run_planning_failure_writes_reason_doc_and_logs_stage(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+    live_dir = repo_root / ".migrations"
+    live_dir.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.loop.classify_target",
+        lambda *_args, **_kwargs: "needs-plan",
+    )
+    def timeout_planning_stage(**kwargs: object) -> CommandCapture:
+        raise ContinuousRefactorError("codex timed out after 5s")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.planning.maybe_run_agent",
+        timeout_planning_stage,
+    )
+
+    args = make_run_loop_args(
+        repo_root,
+        max_refactors=1,
+        max_consecutive_failures=1,
+    )
+    with pytest.raises(ContinuousRefactorError, match="1 consecutive failures"):
+        continuous_refactoring.run_loop(args)
+
+    events = _read_single_run_events(tmpdir_root)
+    planning_events = [
+        event for event in events if event.get("call_role") == "planning.approaches"
+    ]
+    assert planning_events
+    assert any(event.get("call_status") == "failed" for event in planning_events)
+
+    reason_doc = continuous_refactoring.config.reason_for_failure_path(repo_root).read_text(
+        encoding="utf-8"
+    )
+    assert 'call_role: "planning.approaches"' in reason_doc
+    assert 'decision: "abandon"' in reason_doc
+
+
+def test_run_phase_ready_check_failure_logs_phase_ready_role(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+    live_dir = tmp_path / "live-migrations"
+    live_dir.mkdir()
+    _write_live_manifest(live_dir)
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+
+    def timeout_ready_check(**kwargs: object) -> CommandCapture:
+        raise ContinuousRefactorError("codex timed out after 5s")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.maybe_run_agent", timeout_ready_check,
+    )
+
+    args = make_run_loop_args(
+        repo_root,
+        max_refactors=1,
+        max_consecutive_failures=1,
+    )
+    with pytest.raises(ContinuousRefactorError, match="1 consecutive failures"):
+        continuous_refactoring.run_loop(args)
+
+    events = _read_single_run_events(tmpdir_root)
+    assert any(
+        event.get("call_role") == "phase.ready-check"
+        and event.get("call_status") == "failed"
+        for event in events
+    )
+
+    reason_doc = continuous_refactoring.config.reason_for_failure_path(repo_root).read_text(
+        encoding="utf-8"
+    )
+    assert 'call_role: "phase.ready-check"' in reason_doc
+
+
+def test_run_phase_execute_validation_failure_logs_phase_validation_role(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+    live_dir = tmp_path / "live-migrations"
+    live_dir.mkdir()
+    _write_live_manifest(live_dir)
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+
+    def ready_then_execute(**kwargs: object) -> CommandCapture:
+        stdout_path = Path(str(kwargs["stdout_path"]))
+        stderr_path = Path(str(kwargs["stderr_path"]))
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stderr_path.parent.mkdir(parents=True, exist_ok=True)
+        if "phase-ready-check" in str(stdout_path):
+            stdout = "ready: yes\n"
+        else:
+            stdout = "done\n"
+        stdout_path.write_text(stdout, encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return CommandCapture(
+            command=("fake",),
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+
+    monkeypatch.setattr("continuous_refactoring.phases.maybe_run_agent", ready_then_execute)
+    monkeypatch.setattr("continuous_refactoring.phases.run_tests", failing_tests)
+
+    args = make_run_loop_args(
+        repo_root,
+        max_refactors=1,
+        max_consecutive_failures=1,
+    )
+    with pytest.raises(ContinuousRefactorError, match="1 consecutive failures"):
+        continuous_refactoring.run_loop(args)
+
+    events = _read_single_run_events(tmpdir_root)
+    assert any(
+        event.get("call_role") == "phase.execute"
+        and event.get("call_status") == "finished"
+        for event in events
+    )
+    assert any(
+        event.get("call_role") == "phase.validation"
+        and event.get("call_status") == "failed"
+        for event in events
+    )
+
+    reason_doc = continuous_refactoring.config.reason_for_failure_path(repo_root).read_text(
+        encoding="utf-8"
+    )
+    assert 'call_role: "phase.validation"' in reason_doc
+
+
+def test_run_phase_execute_validation_infra_failure_logs_phase_validation_role(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+    live_dir = tmp_path / "live-migrations"
+    live_dir.mkdir()
+    _write_live_manifest(live_dir)
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+
+    def ready_then_execute(**kwargs: object) -> CommandCapture:
+        stdout_path = Path(str(kwargs["stdout_path"]))
+        stderr_path = Path(str(kwargs["stderr_path"]))
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stderr_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout = "ready: yes\n" if "phase-ready-check" in str(stdout_path) else "done\n"
+        stdout_path.write_text(stdout, encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return CommandCapture(
+            command=("fake",),
+            returncode=0,
+            stdout=stdout,
+            stderr="",
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+
+    def validation_timeout(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        raise ContinuousRefactorError("pytest timed out after 5s")
+
+    monkeypatch.setattr("continuous_refactoring.phases.maybe_run_agent", ready_then_execute)
+    monkeypatch.setattr("continuous_refactoring.phases.run_tests", validation_timeout)
+
+    args = make_run_loop_args(
+        repo_root,
+        max_refactors=1,
+        max_consecutive_failures=1,
+    )
+    with pytest.raises(ContinuousRefactorError, match="1 consecutive failures"):
+        continuous_refactoring.run_loop(args)
+
+    events = _read_single_run_events(tmpdir_root)
+    assert any(
+        event.get("call_role") == "phase.validation"
+        and event.get("call_status") == "failed"
+        for event in events
+    )
 
 
 def test_run_retry_prompt_includes_fix_amendment(

@@ -231,12 +231,54 @@ def test_run_routed_planning_reports_and_records_commit(
     output = capsys.readouterr().out
     assert "Classification: needs-plan — random files" in output
     assert "Committed: " in output
-    assert "Planning: ready — stub" in output
+    assert "Planning: queued for execution — stub" in output
 
     log = continuous_refactoring.run_command(
         ["git", "log", "--oneline"], cwd=repo_root,
     ).stdout
     assert "continuous refactor: plan " in log
+
+
+def test_run_routed_planning_surfaces_human_review_requirement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo_root = tmp_path / "repo"
+    init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+    live_dir = repo_root / ".migrations"
+    live_dir.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.loop.classify_target",
+        lambda *_args, **_kwargs: "needs-plan",
+    )
+
+    class StubPlanningOutcome:
+        status = "awaiting_human_review"
+        reason = "phase 2 has a decision gap"
+
+    def fake_run_planning(*_args: object, **_kwargs: object) -> StubPlanningOutcome:
+        (repo_root / "plan.txt").write_text("plan\n", encoding="utf-8")
+        return StubPlanningOutcome()
+
+    monkeypatch.setattr("continuous_refactoring.loop.run_planning", fake_run_planning)
+
+    exit_code = continuous_refactoring.run_loop(make_run_loop_args(repo_root, max_refactors=1))
+
+    assert exit_code == 0
+    output = capsys.readouterr().out
+    assert "Planning: awaiting human review — phase 2 has a decision gap" in output
 
     summary = _read_single_run_summary(tmpdir_root)
     assert summary["counts"]["commits_created"] == 1

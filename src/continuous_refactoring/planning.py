@@ -356,7 +356,7 @@ def run_planning(
     if decision == "approve-needs-human":
         manifest = replace(manifest, status="ready", awaiting_human_review=True)
         save_manifest(manifest, manifest_path)
-        return PlanningOutcome(status="ready", reason=reason)
+        return PlanningOutcome(status="awaiting_human_review", reason=reason)
 
     # reject
     manifest = replace(manifest, status="skipped")

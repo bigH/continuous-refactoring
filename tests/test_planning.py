@@ -143,24 +143,34 @@ def _base_responses() -> list[tuple[str, dict[str, str]]]:
 
 
 @pytest.mark.parametrize(
-    ("decision", "reason", "status", "awaiting", "phase_names", "should_skip"),
+    (
+        "decision",
+        "reason",
+        "status",
+        "manifest_status",
+        "awaiting",
+        "phase_names",
+        "should_skip",
+    ),
     [
-        ("approve-auto", "plan is solid", "ready", False, ("setup", "migrate"), False),
+        ("approve-auto", "plan is solid", "ready", "ready", False, ("setup", "migrate"), False),
         (
             "approve-needs-human",
             "needs security audit",
+            "awaiting_human_review",
             "ready",
             True,
             ("setup", "migrate"),
             False,
         ),
-        ("reject", "fundamentally flawed approach", "skipped", False, (), True),
+        ("reject", "fundamentally flawed approach", "skipped", "skipped", False, (), True),
     ],
 )
 def test_initial_decisions(
     decision: str,
     reason: str,
     status: str,
+    manifest_status: str,
     awaiting: bool,
     phase_names: tuple[str, ...],
     should_skip: bool,
@@ -178,7 +188,7 @@ def test_initial_decisions(
     assert outcome == PlanningOutcome(status=status, reason=reason)
 
     manifest = load_manifest(mig_root / "manifest.json")
-    assert manifest.status == status
+    assert manifest.status == manifest_status
     assert manifest.awaiting_human_review is awaiting
 
     if should_skip:

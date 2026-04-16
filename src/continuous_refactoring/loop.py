@@ -352,12 +352,20 @@ def _route_and_run(
         phase="planning",
     )
 
-    print(f"Planning: {outcome.status} — {outcome.reason}")
+    print(f"Planning: {_describe_planning_outcome(outcome.status)} — {outcome.reason}")
     return RouteResult(
         outcome="success",
         target=target,
         planning_context=planning_context,
     )
+
+
+def _describe_planning_outcome(status: str) -> str:
+    if status == "ready":
+        return "queued for execution"
+    if status == "awaiting_human_review":
+        return "awaiting human review"
+    return status.replace("_", " ")
 
 
 def _resolve_base_prompt(args: argparse.Namespace) -> str:

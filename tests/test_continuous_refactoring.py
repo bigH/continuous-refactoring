@@ -507,3 +507,13 @@ def test_default_artifacts_root_falls_back_to_tempdir(
     monkeypatch.setattr(artifacts.tempfile, "gettempdir", lambda: str(tmp_path))
 
     assert artifacts.default_artifacts_root() == tmp_path
+
+
+def test_default_artifacts_root_ignores_blank_tmpdir(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.setenv("TMPDIR", "")
+    monkeypatch.setattr(artifacts.tempfile, "gettempdir", lambda: str(tmp_path))
+
+    assert artifacts.default_artifacts_root() == tmp_path

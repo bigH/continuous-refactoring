@@ -171,7 +171,7 @@ def _now() -> datetime:
 
 
 def default_artifacts_root() -> Path:
-    return Path(os.environ.get("TMPDIR", tempfile.gettempdir()))
+    return Path(os.environ.get("TMPDIR") or tempfile.gettempdir())
 
 
 def create_run_artifacts(

@@ -6,7 +6,11 @@ from pathlib import Path
 
 import pytest
 
-from continuous_refactoring.cli import _handle_review_list, _handle_review_perform
+from continuous_refactoring.cli import (
+    _handle_review,
+    _handle_review_list,
+    _handle_review_perform,
+)
 from continuous_refactoring.config import register_project, set_live_migrations_dir
 from continuous_refactoring.migrations import (
     MigrationManifest,
@@ -262,3 +266,47 @@ def test_review_perform_exits_2_when_not_flagged_for_review(
     assert exc_info.value.code == 2
     err = capsys.readouterr().err
     assert "not flagged" in err
+
+
+def test_review_dispatches_list_subcommand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[str] = []
+
+    monkeypatch.setattr(
+        "continuous_refactoring.cli._handle_review_list",
+        lambda: seen.append("list"),
+    )
+
+    _handle_review(argparse.Namespace(review_command="list"))
+
+    assert seen == ["list"]
+
+
+def test_review_dispatches_perform_subcommand(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen: list[str] = []
+
+    def fake_perform(args: argparse.Namespace) -> None:
+        seen.append(args.migration)
+
+    monkeypatch.setattr(
+        "continuous_refactoring.cli._handle_review_perform",
+        fake_perform,
+    )
+
+    _handle_review(argparse.Namespace(review_command="perform", migration="my-mig"))
+
+    assert seen == ["my-mig"]
+
+
+def test_review_exits_2_without_subcommand(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_review(argparse.Namespace(review_command=None))
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "Usage: continuous-refactoring review {list,perform}" in err

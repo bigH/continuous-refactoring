@@ -643,11 +643,12 @@ def _handle_review_perform(args: argparse.Namespace) -> None:
 
 def _handle_review(args: argparse.Namespace) -> None:
     review_command = getattr(args, "review_command", None)
-    review_handler = _REVIEW_COMMAND_HANDLERS.get(review_command)
-    if review_handler is None:
-        print(_REVIEW_USAGE, file=sys.stderr)
-        raise SystemExit(2)
-    return review_handler(args)
+    if review_command == "list":
+        return _handle_review_list()
+    if review_command == "perform":
+        return _handle_review_perform(args)
+    print(_REVIEW_USAGE, file=sys.stderr)
+    raise SystemExit(2)
 
 
 def _run_with_loop_errors(
@@ -701,9 +702,4 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], None]] = {
 _TASTE_MODE_HANDLERS: dict[str, Callable[[argparse.Namespace], None]] = {
     "interview": lambda args: _handle_taste_interview(args),
     "refine": lambda args: _handle_taste_refine(args),
-}
-
-_REVIEW_COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], None]] = {
-    "list": lambda args: _handle_review_list(),
-    "perform": _handle_review_perform,
 }

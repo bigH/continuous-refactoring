@@ -99,14 +99,11 @@ class Task:
     blocked_by: list[str]
     review_criteria: list[str]
     done: bool
-    raw: str  # body text between the fences, for in-place rewrite
     span: tuple[int, int]  # (start, end) in plan text -- body only
 
 
 @dataclass
 class Plan:
-    path: Path
-    text: str
     status: str
     tasks: list[Task]
 
@@ -141,7 +138,6 @@ def parse_plan(text: str) -> Plan:
                     blocked_by=list(data.get("blocked_by", [])),
                     review_criteria=list(data.get("review_criteria", [])),
                     done=bool(data["done"]),
-                    raw=body,
                     span=(block_match.start("body"), block_match.end("body")),
                 )
             )
@@ -149,7 +145,7 @@ def parse_plan(text: str) -> Plan:
             raise SystemExit(
                 f"task block at offset {block_match.start()} missing required field {error}."
             ) from error
-    return Plan(path=PLAN_PATH, text=text, status=status, tasks=tasks)
+    return Plan(status=status, tasks=tasks)
 
 
 def validate_plan(plan: Plan) -> None:

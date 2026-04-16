@@ -47,6 +47,17 @@ def _claude_result_line(final_message: str, *, timestamp_prefix: bool = True) ->
     return f"[2026-04-14T00:04:03.441-07:00] {line}" if timestamp_prefix else line
 
 
+def _plan_text(*task_bodies: str, status: str = "todo") -> str:
+    blocks = "\n\n".join(
+        f"```json task\n{body}\n```" for body in task_bodies
+    )
+    return (
+        "# Larger refactorings\n"
+        f"Status: {status}\n\n"
+        f"{blocks}\n"
+    )
+
+
 def test_claude_stream_json_with_review_ok_at_end_of_result() -> None:
     final = "Criteria checklist:\n1. foo ok\n2. bar ok\n\nREVIEW_OK"
     stdout = (
@@ -168,3 +179,65 @@ def test_parse_plan_status_understands_prefixed_states() -> None:
 def test_parse_plan_status_rejects_unknown() -> None:
     with pytest.raises(ValueError, match="unrecognized plan status"):
         rlrp.parse_plan_status("stalled")
+
+
+def test_rewrite_task_done_flips_only_the_selected_task() -> None:
+    plan_text = _plan_text(
+        '{"id":"one","title":"First","type":"cleanup","touches":["a.py"],'
+        '"blocked_by":[],"review_criteria":["preserve \u2192 formatting"],'
+        '"done":false}',
+        '{"id":"two","title":"Second","type":"cleanup","touches":["b.py"],'
+        '"blocked_by":["one"],"review_criteria":[],"done":false}',
+    )
+
+    plan = rlrp.parse_plan(plan_text)
+    rewritten = rlrp.rewrite_task_done(plan_text, plan.tasks[0])
+
+    assert rewritten.count('"done": true') == 1
+    assert rewritten.count('"done":false') == 1
+    assert '"touches":["a.py"]' in rewritten
+    assert '"review_criteria":["preserve \u2192 formatting"]' in rewritten
+
+
+def test_pick_next_task_returns_first_unblocked_undone_task() -> None:
+    plan = rlrp.parse_plan(
+        _plan_text(
+            '{"id":"one","title":"First","type":"cleanup","touches":[],"blocked_by":[],'
+            '"review_criteria":[],"done":true}',
+            '{"id":"two","title":"Second","type":"cleanup","touches":[],"blocked_by":["one"],'
+            '"review_criteria":[],"done":false}',
+            '{"id":"three","title":"Third","type":"cleanup","touches":[],"blocked_by":["two"],'
+            '"review_criteria":[],"done":false}',
+        )
+    )
+
+    task = rlrp.pick_next_task(plan)
+
+    assert task is not None
+    assert task.id == "two"
+
+
+def test_validate_plan_rejects_unknown_dependency() -> None:
+    plan = rlrp.parse_plan(
+        _plan_text(
+            '{"id":"one","title":"First","type":"cleanup","touches":[],"blocked_by":["missing"],'
+            '"review_criteria":[],"done":false}',
+        )
+    )
+
+    with pytest.raises(SystemExit, match="references unknown dependency missing"):
+        rlrp.validate_plan(plan)
+
+
+def test_rewrite_status_updates_only_the_top_level_status_line() -> None:
+    plan_text = _plan_text(
+        '{"id":"one","title":"First","type":"cleanup","touches":[],"blocked_by":[],'
+        '"review_criteria":["Status: keep this text inside task data"],"done":false}',
+        status="todo",
+    )
+
+    rewritten = rlrp.rewrite_status(plan_text, "failed -- tests red")
+
+    assert "Status: failed -- tests red" in rewritten
+    assert '"review_criteria":["Status: keep this text inside task data"]' in rewritten
+    assert rewritten.count("Status:") == 2

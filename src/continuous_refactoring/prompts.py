@@ -5,6 +5,7 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from continuous_refactoring.migrations import MigrationManifest, PhaseSpec
+    from continuous_refactoring.scope_expansion import ScopeCandidate
     from continuous_refactoring.targeting import Target
 
 __all__ = [
@@ -22,6 +23,7 @@ __all__ = [
     "PlanningStage",
     "REQUIRED_PREAMBLE",
     "REVIEW_PERFORM_PROMPT",
+    "SCOPE_SELECTION_PROMPT",
     "TASTE_REFINE_PROMPT_TEMPLATE",
     "TASTE_UPGRADE_PROMPT_TEMPLATE",
     "compose_classifier_prompt",
@@ -31,6 +33,7 @@ __all__ = [
     "compose_phase_ready_prompt",
     "compose_planning_prompt",
     "compose_review_perform_prompt",
+    "compose_scope_selection_prompt",
     "compose_taste_refine_prompt",
     "compose_taste_upgrade_prompt",
     "prompt_file_text",
@@ -69,6 +72,24 @@ def _first_scope(*scopes: str | None) -> str | None:
         if scope_text:
             return _heading_section("Scope", scope_text)
     return None
+
+
+def _format_scope_candidates(candidates: tuple[ScopeCandidate, ...]) -> str:
+    sections: list[str] = []
+    for candidate in candidates:
+        details = [
+            f"Kind: {candidate.kind}",
+            "Files:",
+            *(f"- {file_path}" for file_path in candidate.files),
+            "Cluster labels:",
+            *(f"- {label}" for label in candidate.cluster_labels),
+            "Evidence:",
+            *(f"- {line}" for line in candidate.evidence_lines),
+            "Likely validation surfaces:",
+            *(f"- {surface}" for surface in candidate.validation_surfaces),
+        ]
+        sections.append(f"### {candidate.kind}\n" + "\n".join(details))
+    return "\n\n".join(sections)
 
 
 REQUIRED_PREAMBLE = (
@@ -414,6 +435,26 @@ Your final line MUST be exactly one of:
   decision: needs-plan \u2014 <short reason>\
 """
 
+SCOPE_SELECTION_PROMPT = """\
+You are selecting the best scope candidate for refactoring classification.
+
+Choose the smallest candidate that still captures the real cleanup cluster. Prefer:
+- `seed` when evidence is weak, conflicting, or mostly speculative.
+- `local-cluster` when one nearby cluster shares one rationale and validation path.
+- `cross-cluster` only when repo-local evidence clearly shows the work crosses
+  module clusters and should be classified together.
+
+Do not invent evidence beyond the provided candidate data.
+Refactoring taste is injected by the caller. Respect it when deciding how much
+scope is justified.
+
+## Output Contract
+Your final line MUST be exactly one of:
+  selected-candidate: seed \u2014 <short reason>
+  selected-candidate: local-cluster \u2014 <short reason>
+  selected-candidate: cross-cluster \u2014 <short reason>\
+"""
+
 PLANNING_APPROACHES_PROMPT = """\
 You are a planning agent generating candidate approaches for a refactoring migration.
 
@@ -544,6 +585,21 @@ def compose_classifier_prompt(target: Target, taste: str) -> str:
         CLASSIFIER_PROMPT,
         f"## Target\n{target.description}",
         _format_target_files(target.files),
+        _first_scope(target.scoping),
+        f"## Taste\n{taste}",
+    )
+
+
+def compose_scope_selection_prompt(
+    target: Target,
+    candidates: tuple[ScopeCandidate, ...],
+    taste: str,
+) -> str:
+    return _join_sections(
+        SCOPE_SELECTION_PROMPT,
+        f"## Seed Target\n{target.description}",
+        _format_target_files(target.files),
+        _heading_section("Candidates", _format_scope_candidates(candidates)),
         _first_scope(target.scoping),
         f"## Taste\n{taste}",
     )

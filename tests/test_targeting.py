@@ -99,6 +99,7 @@ def test_load_targets_jsonl_valid(tmp_path: Path) -> None:
         scoping=None,
         model_override=None,
         effort_override=None,
+        provenance="targets",
     )
     assert targets[1].scoping == "only utils"
 
@@ -309,6 +310,7 @@ def test_resolve_targets_prefers_jsonl(tmp_path: Path) -> None:
 
     assert len(targets) == 1
     assert targets[0].description == "jsonl wins"
+    assert targets[0].provenance == "targets"
 
 
 def test_resolve_targets_prefers_globs_over_extensions(tmp_path: Path) -> None:
@@ -330,6 +332,7 @@ def test_resolve_targets_prefers_globs_over_extensions(tmp_path: Path) -> None:
     assert set(files) == {"src/foo.py", "src/bar.py"}
     for target in targets:
         assert target.description == target.files[0]
+        assert target.provenance == "globs"
 
 
 def test_resolve_targets_extensions_expands_to_one_target_per_file(tmp_path: Path) -> None:
@@ -346,6 +349,7 @@ def test_resolve_targets_extensions_expands_to_one_target_per_file(tmp_path: Pat
     assert len(targets) == 3
     assert all(len(t.files) == 1 for t in targets)
     assert all(t.description == t.files[0] for t in targets)
+    assert all(t.provenance == "extensions" for t in targets)
     files = [t.files[0] for t in targets]
     assert files == sorted(files)
     assert set(files) == {"src/foo.py", "src/bar.py", "tests/test_foo.py"}
@@ -517,6 +521,7 @@ def test_resolve_targets_falls_back_to_random(tmp_path: Path) -> None:
     assert len(targets) == 1
     assert targets[0].description == "random files"
     assert len(targets[0].files) > 0
+    assert targets[0].provenance == "random"
 
 
 # ---------------------------------------------------------------------------
@@ -544,6 +549,7 @@ def test_target_jsonl_roundtrip_property(tmp_path: Path) -> None:
             scoping=scoping,
             model_override=model_override,
             effort_override=effort_override,
+            provenance="targets",
         )
         generated.append(target)
 

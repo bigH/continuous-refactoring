@@ -3,7 +3,7 @@ from __future__ import annotations
 import random
 import re
 import sys
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -70,6 +70,14 @@ from continuous_refactoring.prompts import (
     prompt_file_text,
 )
 from continuous_refactoring.routing import classify_target
+from continuous_refactoring.scope_expansion import (
+    build_scope_candidates,
+    describe_scope_candidate,
+    scope_candidate_to_target,
+    scope_expansion_bypass_reason,
+    select_scope_candidate,
+    write_scope_expansion_artifacts,
+)
 from continuous_refactoring.targeting import Target, resolve_targets
 
 
@@ -115,6 +123,13 @@ def _migration_name_from_target(target: Target) -> str:
 
 
 TickOutcome = Literal["not-routed", "success", "failed"]
+
+
+@dataclass(frozen=True)
+class RouteResult:
+    outcome: TickOutcome
+    target: Target
+    planning_context: str = ""
 
 
 def _enumerate_eligible_manifests(
@@ -207,6 +222,69 @@ def _try_migration_tick(
     return "not-routed"
 
 
+def _scope_bypass_context(target: Target, reason: str) -> str:
+    lines = [
+        f"Scope expansion bypassed: {reason}",
+        "Files:",
+        *(f"- {file_path}" for file_path in target.files),
+    ]
+    return "\n".join(lines)
+
+
+def _expand_target_for_classification(
+    target: Target,
+    taste: str,
+    repo_root: Path,
+    artifacts: RunArtifacts,
+    *,
+    agent: str,
+    model: str,
+    effort: str,
+    timeout: int | None,
+) -> tuple[Target, str]:
+    scope_dir = artifacts.root / "scope-expansion"
+    bypass_reason = scope_expansion_bypass_reason(target)
+    if bypass_reason is not None:
+        write_scope_expansion_artifacts(
+            scope_dir,
+            target,
+            (),
+            bypass_reason=bypass_reason,
+        )
+        bypass_line = f"selected-candidate: seed — {bypass_reason}\n"
+        (scope_dir / "selection.stdout.log").write_text(bypass_line, encoding="utf-8")
+        (scope_dir / "selection-last-message.md").write_text(
+            bypass_line,
+            encoding="utf-8",
+        )
+        return target, _scope_bypass_context(target, bypass_reason)
+
+    candidates = build_scope_candidates(target, repo_root)
+    selection = select_scope_candidate(
+        target,
+        candidates,
+        taste,
+        repo_root,
+        artifacts,
+        agent=agent,
+        model=model,
+        effort=effort,
+        timeout=timeout,
+    )
+    write_scope_expansion_artifacts(
+        scope_dir,
+        target,
+        candidates,
+        selection=selection,
+    )
+
+    selected_candidate = next(
+        candidate for candidate in candidates if candidate.kind == selection.kind
+    )
+    planning_context = describe_scope_candidate(selected_candidate)
+    return scope_candidate_to_target(target, selected_candidate), planning_context
+
+
 def _route_and_run(
     target: Target,
     taste: str,
@@ -219,10 +297,10 @@ def _route_and_run(
     timeout: int | None,
     commit_message_prefix: str,
     attempt: int,
-) -> TickOutcome:
+) -> RouteResult:
     live_dir = _resolve_live_migrations_dir(repo_root)
     if live_dir is None:
-        return "not-routed"
+        return RouteResult(outcome="not-routed", target=target)
 
     migration_result = _try_migration_tick(
         live_dir, taste, repo_root, artifacts,
@@ -231,7 +309,18 @@ def _route_and_run(
         attempt=attempt,
     )
     if migration_result != "not-routed":
-        return migration_result
+        return RouteResult(outcome=migration_result, target=target)
+
+    target, planning_context = _expand_target_for_classification(
+        target,
+        taste,
+        repo_root,
+        artifacts,
+        agent=agent,
+        model=model,
+        effort=effort,
+        timeout=timeout,
+    )
 
     decision = classify_target(
         target, taste, repo_root, artifacts,
@@ -240,13 +329,18 @@ def _route_and_run(
     print(f"Classification: {decision} — {target.description}")
 
     if decision == "cohesive-cleanup":
-        return "not-routed"
+        return RouteResult(
+            outcome="not-routed",
+            target=target,
+            planning_context=planning_context,
+        )
 
     migration_name = _migration_name_from_target(target)
     head_before = get_head_sha(repo_root)
     outcome = run_planning(
         migration_name, target.description, taste, repo_root, live_dir, artifacts,
         agent=agent, model=model, effort=effort, timeout=timeout,
+        extra_context=planning_context,
     )
 
     _finalize_commit(
@@ -259,7 +353,11 @@ def _route_and_run(
     )
 
     print(f"Planning: {outcome.status} — {outcome.reason}")
-    return "success"
+    return RouteResult(
+        outcome="success",
+        target=target,
+        planning_context=planning_context,
+    )
 
 
 def _resolve_base_prompt(args: argparse.Namespace) -> str:
@@ -275,6 +373,7 @@ def _build_target_fallback(scope_instruction: str | None) -> Target:
         scoping=scope_instruction,
         model_override=None,
         effort_override=None,
+        provenance="fallback",
     )
 
 
@@ -394,17 +493,18 @@ def run_once(args: argparse.Namespace) -> int:
         )
         artifacts.mark_attempt_started(1)
 
-        tick_outcome = _route_and_run(
+        route_result = _route_and_run(
             target, taste, repo_root, artifacts,
             agent=args.agent, model=model, effort=effort,
             timeout=timeout,
             commit_message_prefix="continuous refactor",
             attempt=1,
         )
-        if tick_outcome == "success":
+        target = route_result.target
+        if route_result.outcome == "success":
             final_status = "completed"
             return 0
-        if tick_outcome == "failed":
+        if route_result.outcome == "failed":
             final_status = "migration_failed"
             raise ContinuousRefactorError(
                 "Migration phase execution failed"
@@ -571,17 +671,18 @@ def run_loop(args: argparse.Namespace) -> int:
             model = target.model_override or args.model
             effort = target.effort_override or args.effort
 
-            tick_outcome = _route_and_run(
+            route_result = _route_and_run(
                 target, taste, repo_root, artifacts,
                 agent=args.agent, model=model, effort=effort,
                 timeout=timeout,
                 commit_message_prefix=args.commit_message_prefix,
                 attempt=target_index,
             )
-            if tick_outcome == "success":
+            target = route_result.target
+            if route_result.outcome == "success":
                 consecutive_failures = 0
                 continue
-            if tick_outcome == "failed":
+            if route_result.outcome == "failed":
                 consecutive_failures += 1
                 if consecutive_failures >= max_consecutive:
                     final_status = "max_consecutive_failures"

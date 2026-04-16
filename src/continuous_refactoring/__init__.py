@@ -1,4 +1,16 @@
-from . import artifacts, agent, cli, git, migrations, phases, planning, prompts, routing, loop
+from . import (
+    agent,
+    artifacts,
+    cli,
+    git,
+    loop,
+    migrations,
+    phases,
+    planning,
+    prompts,
+    routing,
+    scope_expansion,
+)
 
 
 _exported_modules = (
@@ -10,6 +22,7 @@ _exported_modules = (
     planning,
     phases,
     prompts,
+    scope_expansion,
     loop,
     cli,
 )
@@ -24,4 +37,3 @@ for _module in _exported_modules:
         globals()[_name] = getattr(_module, _name)
         _seen_exports.add(_name)
     __all__ = (*__all__, *_module.__all__)
-

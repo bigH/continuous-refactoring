@@ -202,6 +202,7 @@ def run_planning(
     model: str,
     effort: str,
     timeout: int | None,
+    extra_context: str = "",
 ) -> PlanningOutcome:
     mig_root = migration_root(live_dir, migration_name)
     mig_root.mkdir(parents=True, exist_ok=True)
@@ -226,7 +227,7 @@ def run_planning(
     # Stage 1: approaches
     _run_stage(
         "approaches", migration_name, taste,
-        _build_context(target, mig_relative),
+        _build_context(target, mig_relative, extra_context),
         repo_root, artifacts, **agent_kw,
     )
     manifest = replace(manifest, last_touch=iso_timestamp())
@@ -242,7 +243,13 @@ def run_planning(
         )
     pick_stdout = _run_stage(
         "pick-best", migration_name, taste,
-        _build_context(target, mig_relative, f"Approaches:\n{approach_listing}"),
+        _build_context(
+            target,
+            mig_relative,
+            "\n\n".join(
+                part for part in (extra_context, f"Approaches:\n{approach_listing}") if part
+            ),
+        ),
         repo_root, artifacts, **agent_kw,
     )
     manifest = replace(manifest, last_touch=iso_timestamp())
@@ -251,7 +258,13 @@ def run_planning(
     # Stage 3: expand
     _run_stage(
         "expand", migration_name, taste,
-        _build_context(target, mig_relative, f"Chosen approach:\n{pick_stdout}"),
+        _build_context(
+            target,
+            mig_relative,
+            "\n\n".join(
+                part for part in (extra_context, f"Chosen approach:\n{pick_stdout}") if part
+            ),
+        ),
         repo_root, artifacts, **agent_kw,
     )
     phases = _discover_phase_files(mig_root)
@@ -263,7 +276,13 @@ def run_planning(
     plan_text = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
     review_stdout = _run_stage(
         "review", migration_name, taste,
-        _build_context(target, mig_relative, f"Plan:\n{plan_text}"),
+        _build_context(
+            target,
+            mig_relative,
+            "\n\n".join(
+                part for part in (extra_context, f"Plan:\n{plan_text}") if part
+            ),
+        ),
         repo_root, artifacts, **agent_kw,
     )
     manifest = replace(manifest, last_touch=iso_timestamp())
@@ -274,8 +293,16 @@ def run_planning(
         _run_stage(
             "expand", migration_name, taste,
             _build_context(
-                target, mig_relative,
-                f"Review findings to address:\n{review_stdout}",
+                target,
+                mig_relative,
+                "\n\n".join(
+                    part
+                    for part in (
+                        extra_context,
+                        f"Review findings to address:\n{review_stdout}",
+                    )
+                    if part
+                ),
             ),
             repo_root, artifacts, stage_label="revise", **agent_kw,
         )
@@ -286,7 +313,15 @@ def run_planning(
         plan_text = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
         _run_stage(
             "review", migration_name, taste,
-            _build_context(target, mig_relative, f"Plan (revised):\n{plan_text}"),
+            _build_context(
+                target,
+                mig_relative,
+                "\n\n".join(
+                    part
+                    for part in (extra_context, f"Plan (revised):\n{plan_text}")
+                    if part
+                ),
+            ),
             repo_root, artifacts, stage_label="review-2", **agent_kw,
         )
         manifest = replace(manifest, last_touch=iso_timestamp())
@@ -296,7 +331,13 @@ def run_planning(
     plan_text = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
     final_stdout = _run_stage(
         "final-review", migration_name, taste,
-        _build_context(target, mig_relative, f"Plan:\n{plan_text}"),
+        _build_context(
+            target,
+            mig_relative,
+            "\n\n".join(
+                part for part in (extra_context, f"Plan:\n{plan_text}") if part
+            ),
+        ),
         repo_root, artifacts, **agent_kw,
     )
 

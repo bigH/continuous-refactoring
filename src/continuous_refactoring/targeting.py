@@ -7,13 +7,16 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
 
 
 __all__ = [
     "Target",
+    "TargetSource",
     "expand_patterns_to_files",
+    "list_tracked_files",
     "load_targets_jsonl",
     "parse_extensions",
     "parse_globs",
@@ -23,6 +26,9 @@ __all__ = [
 ]
 
 
+TargetSource = Literal["targets", "globs", "extensions", "paths", "random", "fallback"]
+
+
 @dataclass(frozen=True)
 class Target:
     description: str
@@ -30,6 +36,7 @@ class Target:
     scoping: str | None = None
     model_override: str | None = None
     effort_override: str | None = None
+    provenance: TargetSource | None = None
 
 
 def _warn_skip(message: str) -> None:
@@ -127,6 +134,7 @@ def validate_target_line(data: object) -> Target | None:
         scoping=scoping,
         model_override=model_override,
         effort_override=effort_override,
+        provenance="targets",
     )
 
 
@@ -148,7 +156,7 @@ def load_targets_jsonl(path: Path) -> list[Target]:
     return targets
 
 
-def _list_tracked_files(repo_root: Path) -> list[str]:
+def list_tracked_files(repo_root: Path) -> list[str]:
     """Return tracked paths via ``git ls-files -z``.
 
     Null-delimited output preserves non-ASCII/special-char paths verbatim
@@ -170,7 +178,7 @@ def _list_tracked_files(repo_root: Path) -> list[str]:
 
 def select_random_files(repo_root: Path, count: int = 5) -> tuple[str, ...]:
     """Select random tracked files from a git repository."""
-    files = _list_tracked_files(repo_root)
+    files = list_tracked_files(repo_root)
     if not files:
         return ()
     return tuple(random.sample(files, min(count, len(files))))
@@ -215,7 +223,7 @@ def expand_patterns_to_files(
     Returns a sorted, deduplicated tuple for determinism; sampling happens
     downstream.
     """
-    tracked = _list_tracked_files(repo_root)
+    tracked = list_tracked_files(repo_root)
     if not tracked or not patterns:
         return ()
 
@@ -224,8 +232,16 @@ def expand_patterns_to_files(
     return tuple(sorted(matched))
 
 
-def _targets_from_patterns(patterns: tuple[str, ...], repo_root: Path) -> list[Target]:
-    return [Target(description=path, files=(path,)) for path in expand_patterns_to_files(patterns, repo_root)]
+def _targets_from_patterns(
+    patterns: tuple[str, ...],
+    repo_root: Path,
+    *,
+    provenance: TargetSource,
+) -> list[Target]:
+    return [
+        Target(description=path, files=(path,), provenance=provenance)
+        for path in expand_patterns_to_files(patterns, repo_root)
+    ]
 
 
 def resolve_targets(
@@ -246,16 +262,16 @@ def resolve_targets(
 
     if globs is not None:
         patterns = parse_globs(globs)
-        return _targets_from_patterns(patterns, repo_root)
+        return _targets_from_patterns(patterns, repo_root, provenance="globs")
 
     if extensions is not None:
         patterns = parse_extensions(extensions)
-        return _targets_from_patterns(patterns, repo_root)
+        return _targets_from_patterns(patterns, repo_root, provenance="extensions")
 
     if paths:
-        return [Target(description="specified paths", files=paths)]
+        return [Target(description="specified paths", files=paths, provenance="paths")]
 
     random_files = select_random_files(repo_root)
     if not random_files:
         return []
-    return [Target(description="random files", files=random_files)]
+    return [Target(description="random files", files=random_files, provenance="random")]

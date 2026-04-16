@@ -28,6 +28,7 @@ import argparse
 import json
 import re
 from enum import Enum
+from glob import has_magic
 import subprocess
 import sys
 import textwrap
@@ -527,6 +528,73 @@ def _single_line(text: str, limit: int = 200) -> str:
     return collapsed if len(collapsed) <= limit else collapsed[: limit - 3] + "..."
 
 
+def _recoverable_task_from_plan_texts(
+    head_plan_text: str,
+    disk_plan_text: str,
+) -> Task | None:
+    try:
+        head_plan = parse_plan(head_plan_text)
+    except SystemExit:
+        return None
+
+    matches = [
+        task
+        for task in head_plan.tasks
+        if not task.done and rewrite_task_done(head_plan_text, task) == disk_plan_text
+    ]
+    if len(matches) != 1:
+        return None
+    return matches[0]
+
+
+def _workspace_changed_paths(repo_root: Path) -> set[str] | None:
+    diff_result = subprocess.run(
+        ["git", "diff", "--name-only", "--relative", "HEAD"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if diff_result.returncode != 0:
+        return None
+
+    untracked_result = subprocess.run(
+        ["git", "ls-files", "--others", "--exclude-standard"],
+        cwd=repo_root,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if untracked_result.returncode != 0:
+        return None
+
+    return {
+        line.strip()
+        for line in (diff_result.stdout + untracked_result.stdout).splitlines()
+        if line.strip()
+    }
+
+
+def _recoverable_scope_paths(
+    repo_root: Path,
+    task: Task,
+    plan_relative_path: str,
+) -> set[str]:
+    paths = {plan_relative_path}
+    for touch in task.touches:
+        matched = {
+            path.relative_to(repo_root).as_posix()
+            for path in repo_root.glob(touch)
+            if path.is_file()
+        }
+        if matched:
+            paths.update(matched)
+            continue
+        if not has_magic(touch):
+            paths.add(Path(touch).as_posix())
+    return paths
+
+
 # ---------------------------------------------------------------------------
 # CLI
 # ---------------------------------------------------------------------------
@@ -578,8 +646,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _recover_interrupted_success(repo_root: Path) -> str | None:
     """Commit a pending success left behind by a prior run that crashed between
     rewriting the plan and committing it. Detects the case where the on-disk plan
-    has a ``done: true`` flip not yet present at HEAD and commits it together
-    with whatever code changes accompany it.
+    has the exact single-task ``done: true`` flip not yet present at HEAD, and
+    only the plan plus that task's in-scope paths are dirty.
     """
     if not repo_has_changes(repo_root):
         return None
@@ -596,17 +664,22 @@ def _recover_interrupted_success(repo_root: Path) -> str | None:
         return None
 
     try:
-        head_plan = parse_plan(result.stdout)
-        disk_plan = parse_plan(PLAN_PATH.read_text(encoding="utf-8"))
-    except SystemExit:
+        disk_plan_text = PLAN_PATH.read_text(encoding="utf-8")
+    except OSError:
         return None
 
-    head_done = {t.id: t.done for t in head_plan.tasks}
-    flipped = [t for t in disk_plan.tasks if t.done and not head_done.get(t.id, False)]
-    if len(flipped) != 1:
+    task = _recoverable_task_from_plan_texts(result.stdout, disk_plan_text)
+    if task is None:
         return None
 
-    task = flipped[0]
+    changed_paths = _workspace_changed_paths(repo_root)
+    if changed_paths is None:
+        return None
+
+    allowed_paths = _recoverable_scope_paths(repo_root, task, plan_rel)
+    if not changed_paths.issubset(allowed_paths):
+        return None
+
     sha = git_commit(repo_root, f"plan/{task.id}: {task.title}")
     print(f"recovered interrupted task {task.id}; committed as {sha}.")
     return sha

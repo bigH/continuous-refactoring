@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -56,6 +57,44 @@ def _plan_text(*task_bodies: str, status: str = "todo") -> str:
         f"Status: {status}\n\n"
         f"{blocks}\n"
     )
+
+
+def _git(repo_root: Path, *args: str) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=repo_root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout
+
+
+def _init_repo(repo_root: Path) -> None:
+    repo_root.mkdir(parents=True, exist_ok=True)
+    _git(repo_root, "init", "-b", "main")
+    _git(repo_root, "config", "user.email", "test@example.com")
+    _git(repo_root, "config", "user.name", "Test User")
+
+
+def _seed_recovery_repo(repo_root: Path) -> tuple[Path, str]:
+    _init_repo(repo_root)
+    plan_path = repo_root / "docs" / "plans" / "larger-refactorings.md"
+    module_path = repo_root / "src" / "module.py"
+    plan_path.parent.mkdir(parents=True, exist_ok=True)
+    module_path.parent.mkdir(parents=True, exist_ok=True)
+
+    head_plan_text = _plan_text(
+        '{"id":"one","title":"First","type":"cleanup","touches":["src/module.py"],'
+        '"blocked_by":[],"review_criteria":[],"done":false}',
+        '{"id":"two","title":"Second","type":"cleanup","touches":[],"blocked_by":["one"],'
+        '"review_criteria":[],"done":false}',
+    )
+    plan_path.write_text(head_plan_text, encoding="utf-8")
+    module_path.write_text("before\n", encoding="utf-8")
+    _git(repo_root, "add", ".")
+    _git(repo_root, "commit", "-m", "seed")
+    return plan_path, head_plan_text
 
 
 def test_claude_stream_json_with_review_ok_at_end_of_result() -> None:
@@ -241,3 +280,69 @@ def test_rewrite_status_updates_only_the_top_level_status_line() -> None:
     assert "Status: failed -- tests red" in rewritten
     assert '"review_criteria":["Status: keep this text inside task data"]' in rewritten
     assert rewritten.count("Status:") == 2
+
+
+def test_recoverable_task_from_plan_texts_rejects_extra_plan_edits() -> None:
+    head_plan_text = _plan_text(
+        '{"id":"one","title":"First","type":"cleanup","touches":["src/module.py"],'
+        '"blocked_by":[],"review_criteria":[],"done":false}',
+    )
+    task = rlrp.parse_plan(head_plan_text).tasks[0]
+    disk_plan_text = rlrp.rewrite_task_done(head_plan_text, task).replace(
+        '"title":"First"',
+        '"title":"First revised"',
+        1,
+    )
+
+    assert (
+        rlrp._recoverable_task_from_plan_texts(head_plan_text, disk_plan_text) is None
+    )
+
+
+def test_recover_interrupted_success_commits_exact_scope_only(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path, head_plan_text = _seed_recovery_repo(tmp_path)
+    module_path = tmp_path / "src" / "module.py"
+    task = rlrp.parse_plan(head_plan_text).tasks[0]
+
+    plan_path.write_text(
+        rlrp.rewrite_task_done(head_plan_text, task),
+        encoding="utf-8",
+    )
+    module_path.write_text("after\n", encoding="utf-8")
+    monkeypatch.setattr(rlrp, "PLAN_PATH", plan_path)
+
+    sha = rlrp._recover_interrupted_success(tmp_path)
+
+    assert sha == _git(tmp_path, "rev-parse", "HEAD").strip()
+    assert _git(tmp_path, "status", "--short") == ""
+    assert set(_git(tmp_path, "show", "--name-only", "--format=", "HEAD").splitlines()) == {
+        "docs/plans/larger-refactorings.md",
+        "src/module.py",
+    }
+
+
+def test_recover_interrupted_success_refuses_unrelated_dirty_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    plan_path, head_plan_text = _seed_recovery_repo(tmp_path)
+    module_path = tmp_path / "src" / "module.py"
+    task = rlrp.parse_plan(head_plan_text).tasks[0]
+    before_head = _git(tmp_path, "rev-parse", "HEAD").strip()
+
+    plan_path.write_text(
+        rlrp.rewrite_task_done(head_plan_text, task),
+        encoding="utf-8",
+    )
+    module_path.write_text("after\n", encoding="utf-8")
+    (tmp_path / "user-note.txt").write_text("leave me out of it\n", encoding="utf-8")
+    monkeypatch.setattr(rlrp, "PLAN_PATH", plan_path)
+
+    sha = rlrp._recover_interrupted_success(tmp_path)
+
+    assert sha is None
+    assert _git(tmp_path, "rev-parse", "HEAD").strip() == before_head
+    assert "user-note.txt" in _git(tmp_path, "status", "--short")

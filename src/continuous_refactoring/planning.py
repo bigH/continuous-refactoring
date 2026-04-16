@@ -185,6 +185,16 @@ def _build_context(target: str, mig_relative: Path, extra: str = "") -> str:
     return "\n\n".join(parts)
 
 
+def _bump_manifest(manifest: MigrationManifest, manifest_path: Path) -> MigrationManifest:
+    manifest = replace(manifest, last_touch=iso_timestamp())
+    save_manifest(manifest, manifest_path)
+    return manifest
+
+
+def _plan_text(plan_path: Path) -> str:
+    return plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
+
+
 # ---------------------------------------------------------------------------
 # Main workflow
 # ---------------------------------------------------------------------------
@@ -230,8 +240,7 @@ def run_planning(
         _build_context(target, mig_relative, extra_context),
         repo_root, artifacts, **agent_kw,
     )
-    manifest = replace(manifest, last_touch=iso_timestamp())
-    save_manifest(manifest, manifest_path)
+    manifest = _bump_manifest(manifest, manifest_path)
 
     # Stage 2: pick-best
     app_dir = approaches_dir(live_dir, migration_name)
@@ -252,8 +261,7 @@ def run_planning(
         ),
         repo_root, artifacts, **agent_kw,
     )
-    manifest = replace(manifest, last_touch=iso_timestamp())
-    save_manifest(manifest, manifest_path)
+    manifest = _bump_manifest(manifest, manifest_path)
 
     # Stage 3: expand
     _run_stage(
@@ -268,12 +276,11 @@ def run_planning(
         repo_root, artifacts, **agent_kw,
     )
     phases = _discover_phase_files(mig_root)
-    manifest = replace(manifest, last_touch=iso_timestamp(), phases=phases)
-    save_manifest(manifest, manifest_path)
+    manifest = _bump_manifest(replace(manifest, phases=phases), manifest_path)
 
     # Stage 4: review
     plan_path = mig_root / "plan.md"
-    plan_text = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
+    plan_text = _plan_text(plan_path)
     review_stdout = _run_stage(
         "review", migration_name, taste,
         _build_context(
@@ -285,8 +292,7 @@ def run_planning(
         ),
         repo_root, artifacts, **agent_kw,
     )
-    manifest = replace(manifest, last_touch=iso_timestamp())
-    save_manifest(manifest, manifest_path)
+    manifest = _bump_manifest(manifest, manifest_path)
 
     # Stage 5: revise + review again (only if first review had findings)
     if _review_has_findings(review_stdout):
@@ -307,10 +313,9 @@ def run_planning(
             repo_root, artifacts, stage_label="revise", **agent_kw,
         )
         phases = _discover_phase_files(mig_root)
-        manifest = replace(manifest, last_touch=iso_timestamp(), phases=phases)
-        save_manifest(manifest, manifest_path)
+        manifest = _bump_manifest(replace(manifest, phases=phases), manifest_path)
 
-        plan_text = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
+        plan_text = _plan_text(plan_path)
         _run_stage(
             "review", migration_name, taste,
             _build_context(
@@ -324,11 +329,10 @@ def run_planning(
             ),
             repo_root, artifacts, stage_label="review-2", **agent_kw,
         )
-        manifest = replace(manifest, last_touch=iso_timestamp())
-        save_manifest(manifest, manifest_path)
+        manifest = _bump_manifest(manifest, manifest_path)
 
     # Stage 6: final-review
-    plan_text = plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
+    plan_text = _plan_text(plan_path)
     final_stdout = _run_stage(
         "final-review", migration_name, taste,
         _build_context(
@@ -342,7 +346,7 @@ def run_planning(
     )
 
     decision, reason = _parse_final_decision(final_stdout)
-    manifest = replace(manifest, last_touch=iso_timestamp())
+    manifest = _bump_manifest(manifest, manifest_path)
 
     if decision == "approve-auto":
         manifest = replace(manifest, status="ready")

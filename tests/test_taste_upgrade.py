@@ -42,12 +42,16 @@ def _init_repo(path: Path) -> None:
 
 
 def _upgrade_args(
-    *, global_: bool = False,
-    agent: str | None = "codex", model: str | None = "m", effort: str | None = "high",
+    *,
+    global_: bool = False,
+    agent: str | None = "codex",
+    model: str | None = "m",
+    effort: str | None = "high",
+    force: bool = False,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         global_=global_, interview=False, upgrade=True,
-        agent=agent, model=model, effort=effort, force=False,
+        agent=agent, model=model, effort=effort, force=force,
     )
 
 
@@ -240,6 +244,26 @@ def test_upgrade_requires_agent_flags_when_stale(
     assert "--upgrade requires" in err
 
 
+def test_upgrade_requires_agent_flags_when_global_taste_is_stale(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    taste_path = global_dir() / "taste.md"
+    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path.write_text("- Legacy.\n", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_taste(
+            _upgrade_args(global_=True, agent=None, model=None, effort=None),
+        )
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "--upgrade requires" in err
+
+
 def test_upgrade_noop_skips_agent_flag_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -258,6 +282,21 @@ def test_upgrade_noop_skips_agent_flag_check(
     out = capsys.readouterr().out.strip()
     assert "taste already current" in out
     assert "taste --refine" in out
+
+
+def test_upgrade_rejects_force(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_taste(_upgrade_args(force=True))
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "--force requires --interview" in err
 
 
 # ---------------------------------------------------------------------------

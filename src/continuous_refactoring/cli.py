@@ -319,6 +319,12 @@ def _active_taste_mode(args: argparse.Namespace) -> str | None:
     return None
 
 
+def _taste_agent_flags_set(args: argparse.Namespace) -> bool:
+    return any(
+        getattr(args, name, None) is not None for name in ("agent", "model", "effort")
+    )
+
+
 def _require_taste_action_flags(
     *,
     action: str,
@@ -381,40 +387,42 @@ def _run_taste_agent(
         settle_path.unlink()
 
 
-def _handle_taste(args: argparse.Namespace) -> None:
-    mode = _active_taste_mode(args)
-    agent_flags_set = any(
-        getattr(args, name, None) is not None for name in ("agent", "model", "effort")
-    )
+def _handle_plain_taste(args: argparse.Namespace) -> None:
+    from continuous_refactoring.config import ensure_taste_file
 
-    if getattr(args, "force", False) and not getattr(args, "interview", False):
-        print("Error: --force requires --interview.", file=sys.stderr)
-        raise SystemExit(2)
+    path = _resolve_taste_path(args.global_)
+    ensure_taste_file(path)
+    print(str(path))
 
-    if mode is None and agent_flags_set:
-        print(
-            "Error: --with/--model/--effort require --interview, --upgrade, or --refine.",
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
 
-    if mode == "upgrade":
-        return _handle_taste_upgrade(args)
-
-    if mode is not None:
+def _dispatch_taste_mode(mode: str, args: argparse.Namespace) -> None:
+    if mode != "upgrade":
         _require_taste_action_flags(
             action=mode,
             agent=getattr(args, "agent", None),
             model=getattr(args, "model", None),
             effort=getattr(args, "effort", None),
         )
-        return _TASTE_MODE_HANDLERS[mode](args)
+    _TASTE_MODE_HANDLERS[mode](args)
 
-    from continuous_refactoring.config import ensure_taste_file
 
-    path = _resolve_taste_path(args.global_)
-    ensure_taste_file(path)
-    print(str(path))
+def _handle_taste(args: argparse.Namespace) -> None:
+    mode = _active_taste_mode(args)
+
+    if getattr(args, "force", False) and mode != "interview":
+        print("Error: --force requires --interview.", file=sys.stderr)
+        raise SystemExit(2)
+
+    if mode is None:
+        if _taste_agent_flags_set(args):
+            print(
+                "Error: --with/--model/--effort require --interview, --upgrade, or --refine.",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        return _handle_plain_taste(args)
+
+    return _dispatch_taste_mode(mode, args)
 
 
 def _handle_taste_interview(args: argparse.Namespace) -> None:
@@ -717,6 +725,7 @@ _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], None]] = {
 }
 
 _TASTE_MODE_HANDLERS: dict[str, Callable[[argparse.Namespace], None]] = {
-    "interview": lambda args: _handle_taste_interview(args),
-    "refine": lambda args: _handle_taste_refine(args),
+    "interview": _handle_taste_interview,
+    "refine": _handle_taste_refine,
+    "upgrade": _handle_taste_upgrade,
 }

@@ -1,0 +1,35 @@
+{
+  "awaiting_human_review": true,
+  "created_at": "2026-04-15T22:45:17.672-07:00",
+  "current_phase": 0,
+  "last_touch": "2026-04-15T22:49:21.057-07:00",
+  "name": "src-continuous-refactoring-artifacts-py-20260415T224517",
+  "phases": [
+    {
+      "done": false,
+      "file": "phase-1-boundary-inventory.md",
+      "name": "boundary-inventory",
+      "ready_when": "phase 1 prerequisites met"
+    },
+    {
+      "done": false,
+      "file": "phase-2-core-boundary-hardening.md",
+      "name": "core-boundary-hardening",
+      "ready_when": "phase 2 prerequisites met"
+    },
+    {
+      "done": false,
+      "file": "phase-3-loop-cli-contract-alignment.md",
+      "name": "loop-cli-contract-alignment",
+      "ready_when": "phase 3 prerequisites met"
+    },
+    {
+      "done": false,
+      "file": "phase-4-validation-lock.md",
+      "name": "validation-lock",
+      "ready_when": "phase 4 prerequisites met"
+    }
+  ],
+  "status": "ready",
+  "wake_up_on": null
+}

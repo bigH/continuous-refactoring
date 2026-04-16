@@ -13,6 +13,7 @@ __all__ = [
     "MigrationManifest",
     "PhaseSpec",
     "MIGRATION_STATUSES",
+    "has_executable_phase",
     "approaches_dir",
     "bump_last_touch",
     "eligible_now",
@@ -70,6 +71,11 @@ def approaches_dir(live_dir: Path, name: str) -> Path:
 
 def intentional_skips_dir(live_dir: Path) -> Path:
     return live_dir / "__intentional_skips__"
+
+
+def has_executable_phase(manifest: MigrationManifest) -> bool:
+    """Whether the manifest's current_phase addresses an existing phase."""
+    return 0 <= manifest.current_phase < len(manifest.phases)
 
 
 # ---------------------------------------------------------------------------

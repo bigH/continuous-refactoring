@@ -326,3 +326,33 @@ def test_6h_invariant_blocks_execution(
 
     assert exit_code == 0
     _assert_fell_through(classifier_calls, prompts)
+
+
+def test_negative_current_phase_skips_migration_path(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = _utc_now()
+    live_dir, manifest, manifest_path = _seed_manifest(
+        run_once_env,
+        name="rework-auth",
+        last_touch=now - timedelta(hours=24),
+        commit=False,
+    )
+    manifest = replace(manifest, current_phase=-1)
+    save_manifest(manifest, manifest_path)
+    _git_commit_all(run_once_env)
+
+    _patch_live_dir(monkeypatch, live_dir)
+    check_calls = _patch_check_ready(monkeypatch, "yes")
+    _patch_execute_phase_trap(monkeypatch)
+    classifier_calls = _patch_classifier_cohesive(monkeypatch)
+    prompts = _patch_one_shot(monkeypatch)
+
+    exit_code = _run_once(run_once_env)
+
+    assert exit_code == 0
+    assert check_calls == []
+    _assert_fell_through(classifier_calls, prompts)
+
+    reloaded = load_manifest(manifest_path)
+    assert reloaded.current_phase == -1

@@ -54,6 +54,7 @@ from continuous_refactoring.git import (
 from continuous_refactoring.migrations import (
     bump_last_touch,
     eligible_now,
+    has_executable_phase,
     load_manifest,
     save_manifest,
 )
@@ -147,7 +148,7 @@ def _enumerate_eligible_manifests(
         manifest = load_manifest(manifest_path)
         if manifest.status not in ("ready", "in-progress"):
             continue
-        if manifest.current_phase >= len(manifest.phases):
+        if not has_executable_phase(manifest):
             continue
         if not eligible_now(manifest, now):
             continue

@@ -13,6 +13,7 @@ from continuous_refactoring.migrations import (
     approaches_dir,
     MIGRATION_STATUSES,
     intentional_skips_dir,
+    has_executable_phase,
     load_manifest,
     migration_root,
     phase_path,
@@ -56,6 +57,49 @@ def test_manifest_roundtrip_property(tmp_path: Path) -> None:
         save_manifest(manifest, path)
         loaded = load_manifest(path)
         assert loaded == manifest
+
+
+def test_has_executable_phase_rejects_invalid_indices() -> None:
+    manifest_zero_phase = MigrationManifest(
+        name="empty-phases",
+        created_at="2025-01-01T00:00:00.000+00:00",
+        last_touch="2025-01-01T00:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="ready",
+        current_phase=0,
+        phases=(),
+    )
+    manifest_negative = MigrationManifest(
+        name="negative-phase",
+        created_at="2025-01-01T00:00:00.000+00:00",
+        last_touch="2025-01-01T00:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="ready",
+        current_phase=-1,
+        phases=(
+            PhaseSpec(name="setup", file="phase-0-setup.md", done=False, ready_when="always"),
+        ),
+    )
+    manifest_valid = MigrationManifest(
+        name="valid-phase",
+        created_at="2025-01-01T00:00:00.000+00:00",
+        last_touch="2025-01-01T00:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="ready",
+        current_phase=0,
+        phases=(
+            PhaseSpec(
+                name="setup", file="phase-0-setup.md", done=False, ready_when="always"
+            ),
+        ),
+    )
+
+    assert has_executable_phase(manifest_zero_phase) is False
+    assert has_executable_phase(manifest_negative) is False
+    assert has_executable_phase(manifest_valid) is True
 
 
 # ---------------------------------------------------------------------------

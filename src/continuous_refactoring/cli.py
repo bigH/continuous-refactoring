@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 __all__ = [
@@ -22,6 +23,20 @@ _GLOBAL_TASTE_WARNING = (
     "warning: global taste is out of date — "
     "run 'continuous-refactoring taste --upgrade' to update."
 )
+
+_COMMAND_HANDLERS: dict[str, str] = {
+    "init": "_handle_init",
+    "taste": "_handle_taste",
+    "upgrade": "_handle_upgrade",
+    "review": "_handle_review",
+    "run-once": "_handle_run_once",
+    "run": "_handle_run",
+}
+
+_REVIEW_HANDLERS: dict[str | None, str] = {
+    "list": "_handle_review_list",
+    "perform": "_handle_review_perform",
+}
 
 
 def parse_max_attempts(value: str) -> int:
@@ -545,11 +560,7 @@ def _resolve_review_context(*, error_code: int) -> Path:
 
 def _handle_run_once(args: argparse.Namespace) -> None:
     _validate_targeting(args)
-    try:
-        raise SystemExit(run_once(args))
-    except ContinuousRefactorError as error:
-        print(error, file=sys.stderr)
-        raise SystemExit(1) from error
+    _run_with_loop_errors(run_once, args)
 
 
 def _handle_run(args: argparse.Namespace) -> None:
@@ -560,11 +571,7 @@ def _handle_run(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         raise SystemExit(2)
-    try:
-        raise SystemExit(run_loop(args))
-    except ContinuousRefactorError as error:
-        print(error, file=sys.stderr)
-        raise SystemExit(1) from error
+    _run_with_loop_errors(run_loop, args)
 
 
 def _handle_review_list() -> None:
@@ -648,12 +655,37 @@ def _handle_review_perform(args: argparse.Namespace) -> None:
 
 def _handle_review(args: argparse.Namespace) -> None:
     review_command = getattr(args, "review_command", None)
-    if review_command == "list":
-        return _handle_review_list()
-    if review_command == "perform":
-        return _handle_review_perform(args)
-    print("Usage: continuous-refactoring review {list,perform}", file=sys.stderr)
-    raise SystemExit(2)
+    handler_name = _REVIEW_HANDLERS.get(review_command)
+    if handler_name is None:
+        print("Usage: continuous-refactoring review {list,perform}", file=sys.stderr)
+        raise SystemExit(2)
+
+    handler = globals().get(handler_name)
+    if handler is None:
+        print("Usage: continuous-refactoring review {list,perform}", file=sys.stderr)
+        raise SystemExit(2)
+
+    if handler_name == "_handle_review_list":
+        return handler()
+    return handler(args)
+
+
+def _dispatch_handler(handler_name: str, args: argparse.Namespace) -> None:
+    handler = globals().get(handler_name)
+    if handler is None:
+        raise RuntimeError(f"Unknown CLI handler: {handler_name}")
+    handler(args)
+
+
+def _run_with_loop_errors(
+    command: Callable[[argparse.Namespace], int],
+    args: argparse.Namespace,
+) -> None:
+    try:
+        raise SystemExit(command(args))
+    except ContinuousRefactorError as error:
+        print(error, file=sys.stderr)
+        raise SystemExit(1) from error
 
 
 def _maybe_warn_stale_taste() -> None:
@@ -676,18 +708,9 @@ def cli_main() -> None:
     if args.command is not None:
         _maybe_warn_stale_taste()
 
-    if args.command == "init":
-        return _handle_init(args)
-    if args.command == "taste":
-        return _handle_taste(args)
-    if args.command == "upgrade":
-        return _handle_upgrade(args)
-    if args.command == "review":
-        return _handle_review(args)
-    if args.command == "run-once":
-        return _handle_run_once(args)
-    if args.command == "run":
-        return _handle_run(args)
+    handler_name = _COMMAND_HANDLERS.get(args.command)
+    if handler_name is None:
+        parser.print_help()
+        raise SystemExit(1)
 
-    parser.print_help()
-    raise SystemExit(1)
+    return _dispatch_handler(handler_name, args)

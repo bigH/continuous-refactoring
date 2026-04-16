@@ -24,19 +24,22 @@ _GLOBAL_TASTE_WARNING = (
     "run 'continuous-refactoring taste --upgrade' to update."
 )
 
-_COMMAND_HANDLERS: dict[str, str] = {
-    "init": "_handle_init",
-    "taste": "_handle_taste",
-    "upgrade": "_handle_upgrade",
-    "review": "_handle_review",
-    "run-once": "_handle_run_once",
-    "run": "_handle_run",
-}
-
-_REVIEW_HANDLERS: dict[str | None, str] = {
-    "list": "_handle_review_list",
-    "perform": "_handle_review_perform",
-}
+def _command_handler(command: str | None) -> Callable[[argparse.Namespace], None] | None:
+    if command is None:
+        return None
+    if command == "init":
+        return _handle_init
+    if command == "taste":
+        return _handle_taste
+    if command == "upgrade":
+        return _handle_upgrade
+    if command == "review":
+        return _handle_review
+    if command == "run-once":
+        return _handle_run_once
+    if command == "run":
+        return _handle_run
+    return None
 
 
 def parse_max_attempts(value: str) -> int:
@@ -655,26 +658,17 @@ def _handle_review_perform(args: argparse.Namespace) -> None:
 
 def _handle_review(args: argparse.Namespace) -> None:
     review_command = getattr(args, "review_command", None)
-    handler_name = _REVIEW_HANDLERS.get(review_command)
-    if handler_name is None:
+    if review_command == "list":
+        return _handle_review_list()
+    if review_command == "perform":
+        return _handle_review_perform(args)
+
+    if review_command is None:
         print("Usage: continuous-refactoring review {list,perform}", file=sys.stderr)
         raise SystemExit(2)
 
-    handler = globals().get(handler_name)
-    if handler is None:
-        print("Usage: continuous-refactoring review {list,perform}", file=sys.stderr)
-        raise SystemExit(2)
-
-    if handler_name == "_handle_review_list":
-        return handler()
-    return handler(args)
-
-
-def _dispatch_handler(handler_name: str, args: argparse.Namespace) -> None:
-    handler = globals().get(handler_name)
-    if handler is None:
-        raise RuntimeError(f"Unknown CLI handler: {handler_name}")
-    handler(args)
+    print("Usage: continuous-refactoring review {list,perform}", file=sys.stderr)
+    raise SystemExit(2)
 
 
 def _run_with_loop_errors(
@@ -708,9 +702,9 @@ def cli_main() -> None:
     if args.command is not None:
         _maybe_warn_stale_taste()
 
-    handler_name = _COMMAND_HANDLERS.get(args.command)
-    if handler_name is None:
+    handler = _command_handler(args.command)
+    if handler is None:
         parser.print_help()
         raise SystemExit(1)
 
-    return _dispatch_handler(handler_name, args)
+    return handler(args)

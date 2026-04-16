@@ -74,7 +74,8 @@ continuous-refactoring run \
   --with claude --model claude-opus-4-6 --effort high \
   --globs 'src/**/*.py' \
   --max-refactors 10 \
-  --max-attempts 2
+  --max-attempts 2 \
+  --sleep 5
 ```
 
 ## Subcommands
@@ -129,6 +130,7 @@ If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`, the
 - `--max-attempts N` — per-target retry budget. `1` = no retry, `0` = unlimited (which means permanently broken targets will never give up).
 - `--max-refactors N` — cap the number of targets per run. Required unless you use `--targets`.
 - `--max-consecutive-failures N` — bail after N targets fail in a row. Default 3.
+- `--sleep SECONDS` — pause between completed targets. Useful when you want a long batch without hammering the repo or your agent budget.
 - `--no-push` — keep commits local.
 - `--push-remote NAME` — remote used when pushing. Default `origin`.
 - `--commit-message-prefix TEXT` — prefix for successful refactor or migration-plan commits. Default `continuous refactor`.

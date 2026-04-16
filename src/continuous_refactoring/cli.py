@@ -9,6 +9,7 @@ __all__ = [
     "build_parser",
     "cli_main",
     "parse_max_attempts",
+    "parse_sleep_seconds",
 ]
 
 from continuous_refactoring.agent import (
@@ -39,6 +40,16 @@ def parse_max_attempts(value: str) -> int:
     if attempts < 0:
         raise argparse.ArgumentTypeError("--max-attempts must be >= 0")
     return attempts
+
+
+def parse_sleep_seconds(value: str) -> float:
+    try:
+        seconds = float(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from error
+    if seconds < 0:
+        raise argparse.ArgumentTypeError("--sleep must be >= 0")
+    return seconds
 
 
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
@@ -197,6 +208,12 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=3,
         help="Stop after N consecutive failures.",
+    )
+    run_parser.add_argument(
+        "--sleep",
+        type=parse_sleep_seconds,
+        default=0.0,
+        help="Seconds to sleep between completed targets.",
     )
 
     subparsers.add_parser(

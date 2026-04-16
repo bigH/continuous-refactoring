@@ -287,6 +287,7 @@ def make_run_loop_args(
     push_remote: str = "origin",
     commit_message_prefix: str = "continuous refactor",
     max_consecutive_failures: int = 3,
+    sleep: float = 0.0,
     use_branch: str | None = None,
     show_agent_logs: bool = False,
     show_command_logs: bool = False,
@@ -319,6 +320,7 @@ def make_run_loop_args(
         push_remote=push_remote,
         commit_message_prefix=commit_message_prefix,
         max_consecutive_failures=max_consecutive_failures,
+        sleep=sleep,
         use_branch=use_branch,
     )
 

@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 
 import continuous_refactoring
 import continuous_refactoring.loop
+from continuous_refactoring.cli import build_parser
 from continuous_refactoring.artifacts import CommandCapture, ContinuousRefactorError
 from continuous_refactoring.targeting import Target
 
@@ -73,6 +74,22 @@ def test_run_creates_branch(
     assert re.match(r"^refactor-\d{8}T\d{6}$", branch)
 
 
+def test_run_parser_accepts_sleep_flag() -> None:
+    args = build_parser().parse_args(
+        [
+            "run",
+            "--with", "codex",
+            "--model", "m",
+            "--effort", "high",
+            "--scope-instruction", "s",
+            "--max-refactors", "1",
+            "--sleep", "0.25",
+        ],
+    )
+
+    assert args.sleep == 0.25
+
+
 def test_run_pushes_after_commit(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -109,6 +126,46 @@ def test_run_pushes_after_commit(
     assert push_calls[0][0] == "origin"
 
 
+def test_run_sleeps_only_between_targets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("continuous_refactoring.loop.time.sleep", sleep_calls.append)
+
+    targets_file = tmp_path / "targets.jsonl"
+    targets_file.write_text(
+        "\n".join(
+            json.dumps({"description": f"target-{index}", "files": [f"file{index}.py"]})
+            for index in range(3)
+        ),
+        encoding="utf-8",
+    )
+
+    args = make_run_loop_args(
+        repo_root,
+        targets=targets_file,
+        scope_instruction=None,
+        sleep=0.25,
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert sleep_calls == [0.25, 0.25]
+
+
 def test_run_no_push_flag(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -142,6 +199,78 @@ def test_run_no_push_flag(
 
     assert exit_code == 0
     assert len(push_calls) == 0
+
+
+def test_run_does_not_sleep_between_retries(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    init_repo(repo_root)
+    tmpdir_root = tmp_path / "tmpdir"
+    tmpdir_root.mkdir()
+    xdg_root = tmp_path / "xdg"
+    xdg_root.mkdir()
+
+    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+
+    agent_calls = 0
+
+    def touching_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / f"touched-{agent_calls}.txt").write_text("x\n", encoding="utf-8")
+        return noop_agent(**kwargs)
+
+    validation_calls = 0
+
+    def fail_first_attempt_then_pass(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        nonlocal validation_calls
+        if not _count_validation_calls(stdout_path):
+            return noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        validation_calls += 1
+        if validation_calls == 1:
+            return failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return noop_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop.run_tests", fail_first_attempt_then_pass,
+    )
+
+    sleep_calls: list[float] = []
+    monkeypatch.setattr("continuous_refactoring.loop.time.sleep", sleep_calls.append)
+
+    targets_file = tmp_path / "targets.jsonl"
+    targets_file.write_text(
+        "\n".join(
+            json.dumps({"description": f"target-{index}", "files": [f"file{index}.py"]})
+            for index in range(2)
+        ),
+        encoding="utf-8",
+    )
+
+    args = make_run_loop_args(
+        repo_root,
+        targets=targets_file,
+        scope_instruction=None,
+        sleep=0.4,
+        max_attempts=3,
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert agent_calls == 3
+    assert validation_calls == 3
+    assert sleep_calls == [0.4]
 
 
 def test_run_reports_and_records_driver_owned_commit_for_agent_commit(

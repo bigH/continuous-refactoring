@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 import re
 import sys
+import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -441,6 +442,26 @@ def _max_attempts_exhausted(
     return True
 
 
+def _sleep_between_targets(
+    sleep_seconds: float,
+    *,
+    artifacts: RunArtifacts,
+    target_index: int,
+    total_targets: int,
+) -> None:
+    if sleep_seconds <= 0 or target_index >= total_targets:
+        return
+    artifacts.log(
+        "INFO",
+        f"Sleeping {sleep_seconds:g}s before next target",
+        event="sleep_between_targets",
+        attempt=target_index,
+        sleep_seconds=sleep_seconds,
+    )
+    print(f"Sleeping {sleep_seconds:g}s before next target")
+    time.sleep(sleep_seconds)
+
+
 def _finalize_commit(
     repo_root: Path,
     head_before: str,
@@ -604,6 +625,7 @@ def run_once(args: argparse.Namespace) -> int:
 def run_loop(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
     timeout = args.timeout or 1800
+    sleep_seconds = getattr(args, "sleep", 0.0)
     max_consecutive = args.max_consecutive_failures
     max_attempts_effective = _effective_max_attempts(
         getattr(args, "max_attempts", None)
@@ -650,6 +672,7 @@ def run_loop(args: argparse.Namespace) -> int:
     final_status = "running"
     error_message: str | None = None
     consecutive_failures = 0
+    total_targets = len(targets)
 
     try:
         require_clean_worktree(repo_root)
@@ -672,9 +695,7 @@ def run_loop(args: argparse.Namespace) -> int:
                 f"Baseline validation failed\n{baseline_context}"
             )
 
-        target_index = 0
-        for target in targets:
-            target_index += 1
+        for target_index, target in enumerate(targets, start=1):
             artifacts.mark_attempt_started(target_index)
 
             model = target.model_override or args.model
@@ -690,6 +711,12 @@ def run_loop(args: argparse.Namespace) -> int:
             target = route_result.target
             if route_result.outcome == "success":
                 consecutive_failures = 0
+                _sleep_between_targets(
+                    sleep_seconds,
+                    artifacts=artifacts,
+                    target_index=target_index,
+                    total_targets=total_targets,
+                )
                 continue
             if route_result.outcome == "failed":
                 consecutive_failures += 1
@@ -698,6 +725,12 @@ def run_loop(args: argparse.Namespace) -> int:
                     raise ContinuousRefactorError(
                         f"Stopping: {max_consecutive} consecutive failures"
                     )
+                _sleep_between_targets(
+                    sleep_seconds,
+                    artifacts=artifacts,
+                    target_index=target_index,
+                    total_targets=total_targets,
+                )
                 continue
 
             previous_failure: str | None = None
@@ -814,6 +847,13 @@ def run_loop(args: argparse.Namespace) -> int:
                     raise ContinuousRefactorError(
                         f"Stopping: {max_consecutive} consecutive failures"
                     )
+
+            _sleep_between_targets(
+                sleep_seconds,
+                artifacts=artifacts,
+                target_index=target_index,
+                total_targets=total_targets,
+            )
 
         final_status = "completed"
         return 0

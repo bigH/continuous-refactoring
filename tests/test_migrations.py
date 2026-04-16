@@ -175,6 +175,23 @@ def test_load_manifest_rejects_invalid_phases_field(tmp_path: Path) -> None:
         load_manifest(path)
 
 
+def test_load_manifest_rejects_non_mapping_phase_entry(tmp_path: Path) -> None:
+    path = tmp_path / "bad-phase-entry" / "manifest.json"
+    path.parent.mkdir(parents=True)
+    payload = {
+        "name": "bad-migration",
+        "created_at": "2025-01-01T00:00:00.000+00:00",
+        "last_touch": "2025-01-01T00:00:00.000+00:00",
+        "status": "planning",
+        "current_phase": 0,
+        "phases": ["not-a-phase"],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ContinuousRefactorError, match="must be an object"):
+        load_manifest(path)
+
+
 def test_load_manifest_rejects_missing_required_field(tmp_path: Path) -> None:
     path = tmp_path / "missing-field" / "manifest.json"
     path.parent.mkdir(parents=True)
@@ -205,6 +222,23 @@ def test_load_manifest_rejects_non_string_status(tmp_path: Path) -> None:
     path.write_text(json.dumps(payload), encoding="utf-8")
 
     with pytest.raises(ContinuousRefactorError, match="Migration status must be a string"):
+        load_manifest(path)
+
+
+def test_load_manifest_rejects_bool_current_phase(tmp_path: Path) -> None:
+    path = tmp_path / "bool-current-phase" / "manifest.json"
+    path.parent.mkdir(parents=True)
+    payload = {
+        "name": "bad-migration",
+        "created_at": "2025-01-01T00:00:00.000+00:00",
+        "last_touch": "2025-01-01T00:00:00.000+00:00",
+        "status": "planning",
+        "current_phase": True,
+        "phases": [],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ContinuousRefactorError, match="must be an int"):
         load_manifest(path)
 
 

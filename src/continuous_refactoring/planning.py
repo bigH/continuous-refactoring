@@ -185,14 +185,36 @@ def _build_context(target: str, mig_relative: Path, extra: str = "") -> str:
     return "\n\n".join(parts)
 
 
-def _bump_manifest(manifest: MigrationManifest, manifest_path: Path) -> MigrationManifest:
-    manifest = replace(manifest, last_touch=iso_timestamp())
-    save_manifest(manifest, manifest_path)
-    return manifest
-
-
 def _plan_text(plan_path: Path) -> str:
     return plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
+
+
+def _join_nonempty(*parts: str) -> str:
+    return "\n\n".join(part for part in parts if part)
+
+
+def _approach_listing(live_dir: Path, migration_name: str) -> str:
+    app_dir = approaches_dir(live_dir, migration_name)
+    if not app_dir.exists():
+        return ""
+    return "\n\n".join(
+        f"### {path.stem}\n{path.read_text(encoding='utf-8')}"
+        for path in sorted(app_dir.glob("*.md"))
+    )
+
+
+def _touch_manifest(
+    manifest: MigrationManifest,
+    manifest_path: Path,
+    *,
+    mig_root: Path | None = None,
+    **changes: object,
+) -> MigrationManifest:
+    if mig_root is not None:
+        changes["phases"] = _discover_phase_files(mig_root)
+    updated = replace(manifest, last_touch=iso_timestamp(), **changes)
+    save_manifest(updated, manifest_path)
+    return updated
 
 
 # ---------------------------------------------------------------------------
@@ -240,28 +262,20 @@ def run_planning(
         _build_context(target, mig_relative, extra_context),
         repo_root, artifacts, **agent_kw,
     )
-    manifest = _bump_manifest(manifest, manifest_path)
+    manifest = _touch_manifest(manifest, manifest_path)
 
     # Stage 2: pick-best
-    app_dir = approaches_dir(live_dir, migration_name)
-    approach_listing = ""
-    if app_dir.exists():
-        approach_listing = "\n\n".join(
-            f"### {f.stem}\n{f.read_text(encoding='utf-8')}"
-            for f in sorted(app_dir.glob("*.md"))
-        )
+    approach_listing = _approach_listing(live_dir, migration_name)
     pick_stdout = _run_stage(
         "pick-best", migration_name, taste,
         _build_context(
             target,
             mig_relative,
-            "\n\n".join(
-                part for part in (extra_context, f"Approaches:\n{approach_listing}") if part
-            ),
+            _join_nonempty(extra_context, f"Approaches:\n{approach_listing}"),
         ),
         repo_root, artifacts, **agent_kw,
     )
-    manifest = _bump_manifest(manifest, manifest_path)
+    manifest = _touch_manifest(manifest, manifest_path)
 
     # Stage 3: expand
     _run_stage(
@@ -269,30 +283,24 @@ def run_planning(
         _build_context(
             target,
             mig_relative,
-            "\n\n".join(
-                part for part in (extra_context, f"Chosen approach:\n{pick_stdout}") if part
-            ),
+            _join_nonempty(extra_context, f"Chosen approach:\n{pick_stdout}"),
         ),
         repo_root, artifacts, **agent_kw,
     )
-    phases = _discover_phase_files(mig_root)
-    manifest = _bump_manifest(replace(manifest, phases=phases), manifest_path)
+    manifest = _touch_manifest(manifest, manifest_path, mig_root=mig_root)
 
     # Stage 4: review
     plan_path = mig_root / "plan.md"
-    plan_text = _plan_text(plan_path)
     review_stdout = _run_stage(
         "review", migration_name, taste,
         _build_context(
             target,
             mig_relative,
-            "\n\n".join(
-                part for part in (extra_context, f"Plan:\n{plan_text}") if part
-            ),
+            _join_nonempty(extra_context, f"Plan:\n{_plan_text(plan_path)}"),
         ),
         repo_root, artifacts, **agent_kw,
     )
-    manifest = _bump_manifest(manifest, manifest_path)
+    manifest = _touch_manifest(manifest, manifest_path)
 
     # Stage 5: revise + review again (only if first review had findings)
     if _review_has_findings(review_stdout):
@@ -301,65 +309,57 @@ def run_planning(
             _build_context(
                 target,
                 mig_relative,
-                "\n\n".join(
-                    part
-                    for part in (
-                        extra_context,
-                        f"Review findings to address:\n{review_stdout}",
-                    )
-                    if part
+                _join_nonempty(
+                    extra_context,
+                    f"Review findings to address:\n{review_stdout}",
                 ),
             ),
             repo_root, artifacts, stage_label="revise", **agent_kw,
         )
-        phases = _discover_phase_files(mig_root)
-        manifest = _bump_manifest(replace(manifest, phases=phases), manifest_path)
+        manifest = _touch_manifest(manifest, manifest_path, mig_root=mig_root)
 
-        plan_text = _plan_text(plan_path)
         _run_stage(
             "review", migration_name, taste,
             _build_context(
                 target,
                 mig_relative,
-                "\n\n".join(
-                    part
-                    for part in (extra_context, f"Plan (revised):\n{plan_text}")
-                    if part
+                _join_nonempty(
+                    extra_context,
+                    f"Plan (revised):\n{_plan_text(plan_path)}",
                 ),
             ),
             repo_root, artifacts, stage_label="review-2", **agent_kw,
         )
-        manifest = _bump_manifest(manifest, manifest_path)
+        manifest = _touch_manifest(manifest, manifest_path)
 
     # Stage 6: final-review
-    plan_text = _plan_text(plan_path)
     final_stdout = _run_stage(
         "final-review", migration_name, taste,
         _build_context(
             target,
             mig_relative,
-            "\n\n".join(
-                part for part in (extra_context, f"Plan:\n{plan_text}") if part
-            ),
+            _join_nonempty(extra_context, f"Plan:\n{_plan_text(plan_path)}"),
         ),
         repo_root, artifacts, **agent_kw,
     )
 
     decision, reason = _parse_final_decision(final_stdout)
-    manifest = _bump_manifest(manifest, manifest_path)
+    manifest = _touch_manifest(manifest, manifest_path)
 
     if decision == "approve-auto":
-        manifest = replace(manifest, status="ready")
-        save_manifest(manifest, manifest_path)
+        manifest = _touch_manifest(manifest, manifest_path, status="ready")
         return PlanningOutcome(status="ready", reason=reason)
 
     if decision == "approve-needs-human":
-        manifest = replace(manifest, status="ready", awaiting_human_review=True)
-        save_manifest(manifest, manifest_path)
+        manifest = _touch_manifest(
+            manifest,
+            manifest_path,
+            status="ready",
+            awaiting_human_review=True,
+        )
         return PlanningOutcome(status="awaiting_human_review", reason=reason)
 
     # reject
-    manifest = replace(manifest, status="skipped")
-    save_manifest(manifest, manifest_path)
+    manifest = _touch_manifest(manifest, manifest_path, status="skipped")
     _write_skip_file(live_dir, migration_name, target, reason)
     return PlanningOutcome(status="skipped", reason=reason)

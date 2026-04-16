@@ -86,6 +86,7 @@ class _MockAgent:
         self._responses = responses
         self._index = 0
         self.call_count = 0
+        self.prompts: list[str] = []
 
     def __call__(self, **kwargs: object) -> CommandCapture:
         assert self._index < len(self._responses), (
@@ -94,6 +95,7 @@ class _MockAgent:
         stdout, writes = self._responses[self._index]
         self._index += 1
         self.call_count += 1
+        self.prompts.append(str(kwargs["prompt"]))
 
         for rel_path, content in writes.items():
             full = self._mig_root / rel_path
@@ -273,6 +275,56 @@ def test_review_findings_trigger_revise(
 
     assert (mig_root / "plan.md").read_text(encoding="utf-8") == "# Plan v2 (revised)"
     assert mock.call_count == 7
+
+
+def test_revised_plan_is_reloaded_for_follow_up_reviews(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
+    (tmp_path / "tmpdir").mkdir()
+
+    live_dir = tmp_path / "live"
+    live_dir.mkdir()
+    mig_root = migration_root(live_dir, _MIGRATION)
+
+    responses = [
+        ("Generated approach\n", {"approaches/big-bang.md": "# Big Bang\nAll at once."}),
+        ("Chose big-bang.\n", {}),
+        (
+            "Expanded.\n",
+            {
+                "plan.md": "# Plan v1",
+                "phase-0-prep.md": "Ready when: always\nPrep phase.",
+            },
+        ),
+        ("1. Missing rollback step.\n", {}),
+        (
+            "Revised plan.\n",
+            {
+                "plan.md": "# Plan v2 (revised)",
+                "phase-0-prep.md": "Ready when: always\nRevised prep.",
+                "phase-1-rollback.md": "Ready when: phase 0 done\nRollback added.",
+            },
+        ),
+        ("Reviewed revised plan. no findings.\n", {}),
+        ("final-decision: approve-auto — revised plan looks good\n", {}),
+    ]
+    mock = _MockAgent(mig_root, responses)
+    monkeypatch.setattr("continuous_refactoring.planning.maybe_run_agent", mock)
+
+    run_planning(
+        _MIGRATION, _TARGET, _TASTE, tmp_path, live_dir,
+        _make_artifacts(tmp_path),
+        agent="codex", model="fake", effort="low", timeout=None,
+    )
+
+    review_two_prompt = mock.prompts[5]
+    final_review_prompt = mock.prompts[6]
+
+    assert "# Plan v2 (revised)" in review_two_prompt
+    assert "# Plan v1" not in review_two_prompt
+    assert "# Plan v2 (revised)" in final_review_prompt
+    assert "# Plan v1" not in final_review_prompt
 
 
 def test_parse_final_decision_ignores_trailing_lines() -> None:

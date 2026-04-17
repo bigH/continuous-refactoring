@@ -43,21 +43,26 @@ def _warn_skip(message: str) -> None:
     print(f"warning: target line has {message}, skipping", file=sys.stderr)
 
 
-def _extract_nonempty_str(
-    data: dict[str, object],
-    key: str,
-    reason: str,
-    *,
-    required: bool = False,
-) -> tuple[str | None, bool]:
+class _InvalidTarget(Exception):
+    """Raised inside validate_target_line to short-circuit with a warning."""
+
+
+def _required_nonempty_str(data: dict[str, object], key: str, reason: str) -> str:
     value = data.get(key)
     if isinstance(value, str) and value.strip():
-        return value, True
-    if value is None and not required:
-        return None, True
+        return value
+    raise _InvalidTarget(reason)
 
-    _warn_skip(reason)
-    return None, False
+
+def _optional_nonempty_str(
+    data: dict[str, object], key: str, reason: str,
+) -> str | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip():
+        return value
+    raise _InvalidTarget(reason)
 
 
 def parse_extensions(raw: str) -> tuple[str, ...]:
@@ -90,42 +95,26 @@ def validate_target_line(data: object) -> Target | None:
         _warn_skip("non-dict target data")
         return None
 
-    description, ok = _extract_nonempty_str(
-        data,
-        "description",
-        "missing or empty description",
-        required=True,
-    )
-    if not ok:
-        return None
-
-    files = data.get("files")
-    if not isinstance(files, list) or not files:
-        _warn_skip("missing or empty files")
-        return None
-
-    if not all(isinstance(f, str) and f for f in files):
-        _warn_skip("invalid file entries")
-        return None
-
-    scoping, ok = _extract_nonempty_str(data, "scoping", "non-string or empty scoping")
-    if not ok:
-        return None
-
-    model_override, ok = _extract_nonempty_str(
-        data,
-        "model-override",
-        "non-string or empty model-override",
-    )
-    if not ok:
-        return None
-
-    effort_override, ok = _extract_nonempty_str(
-        data,
-        "effort-override",
-        "non-string or empty effort-override",
-    )
-    if not ok:
+    try:
+        description = _required_nonempty_str(
+            data, "description", "missing or empty description",
+        )
+        files = data.get("files")
+        if not isinstance(files, list) or not files:
+            raise _InvalidTarget("missing or empty files")
+        if not all(isinstance(f, str) and f for f in files):
+            raise _InvalidTarget("invalid file entries")
+        scoping = _optional_nonempty_str(
+            data, "scoping", "non-string or empty scoping",
+        )
+        model_override = _optional_nonempty_str(
+            data, "model-override", "non-string or empty model-override",
+        )
+        effort_override = _optional_nonempty_str(
+            data, "effort-override", "non-string or empty effort-override",
+        )
+    except _InvalidTarget as error:
+        _warn_skip(str(error))
         return None
 
     return Target(

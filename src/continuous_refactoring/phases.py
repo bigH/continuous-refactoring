@@ -164,6 +164,47 @@ def _find_phase_index(manifest: MigrationManifest, phase: PhaseSpec) -> int:
     raise ContinuousRefactorError(f"Phase {phase.name!r} not found in manifest")
 
 
+def _fail_execute(
+    artifacts: RunArtifacts,
+    *,
+    attempt: int,
+    retry: int,
+    target_label: str,
+    call_role: str,
+    phase_reached: str | None,
+    repo_root: Path,
+    head_before: str,
+    reason: str,
+    failure_kind: str,
+    returncode: int | None = None,
+    summary: str | None = None,
+) -> ExecutePhaseOutcome:
+    extra: dict[str, object] = {}
+    if returncode is not None:
+        extra["returncode"] = returncode
+    if summary is not None:
+        extra["summary"] = summary
+    if phase_reached is not None:
+        extra["phase_reached"] = phase_reached
+    artifacts.log_call_finished(
+        attempt=attempt,
+        retry=retry,
+        target=target_label,
+        call_role=call_role,
+        status="failed",
+        level="WARN",
+        **extra,
+    )
+    revert_to(repo_root, head_before)
+    return ExecutePhaseOutcome(
+        status="failed",
+        reason=reason,
+        call_role=call_role,
+        phase_reached=phase_reached or call_role,
+        failure_kind=failure_kind,
+    )
+
+
 def execute_phase(
     phase: PhaseSpec,
     manifest: MigrationManifest,
@@ -213,42 +254,24 @@ def execute_phase(
             timeout=timeout,
         )
     except ContinuousRefactorError as error:
-        artifacts.log_call_finished(
-            attempt=attempt,
-            retry=retry,
-            target=target_label,
-            call_role=execute_role,
-            status="failed",
-            level="WARN",
+        return _fail_execute(
+            artifacts,
+            attempt=attempt, retry=retry, target_label=target_label,
+            call_role=execute_role, phase_reached=None,
+            repo_root=repo_root, head_before=head_before,
+            reason=str(error), failure_kind="agent-infra-failure",
             summary=str(error),
-        )
-        revert_to(repo_root, head_before)
-        return ExecutePhaseOutcome(
-            status="failed",
-            reason=str(error),
-            call_role=execute_role,
-            phase_reached=execute_role,
-            failure_kind="agent-infra-failure",
         )
 
     if result.returncode != 0:
-        artifacts.log_call_finished(
-            attempt=attempt,
-            retry=retry,
-            target=target_label,
-            call_role=execute_role,
-            status="failed",
-            level="WARN",
-            returncode=result.returncode,
-            summary=f"{agent} exited with code {result.returncode}",
-        )
-        revert_to(repo_root, head_before)
-        return ExecutePhaseOutcome(
-            status="failed",
-            reason=f"{agent} exited with code {result.returncode}",
-            call_role=execute_role,
-            phase_reached=execute_role,
-            failure_kind="agent-exited-nonzero",
+        reason = f"{agent} exited with code {result.returncode}"
+        return _fail_execute(
+            artifacts,
+            attempt=attempt, retry=retry, target_label=target_label,
+            call_role=execute_role, phase_reached=None,
+            repo_root=repo_root, head_before=head_before,
+            reason=reason, failure_kind="agent-exited-nonzero",
+            returncode=result.returncode, summary=reason,
         )
 
     artifacts.log_call_finished(
@@ -275,44 +298,25 @@ def execute_phase(
             mirror_to_terminal=False,
         )
     except ContinuousRefactorError as error:
-        artifacts.log_call_finished(
-            attempt=attempt,
-            retry=retry,
-            target=target_label,
-            call_role=validation_role,
-            phase_reached=execute_role,
-            status="failed",
-            level="WARN",
+        return _fail_execute(
+            artifacts,
+            attempt=attempt, retry=retry, target_label=target_label,
+            call_role=validation_role, phase_reached=execute_role,
+            repo_root=repo_root, head_before=head_before,
+            reason=str(error), failure_kind="validation-infra-failure",
             summary=str(error),
-        )
-        revert_to(repo_root, head_before)
-        return ExecutePhaseOutcome(
-            status="failed",
-            reason=str(error),
-            call_role=validation_role,
-            phase_reached=execute_role,
-            failure_kind="validation-infra-failure",
         )
 
     if test_result.returncode != 0:
-        artifacts.log_call_finished(
-            attempt=attempt,
-            retry=retry,
-            target=target_label,
-            call_role=validation_role,
-            phase_reached=execute_role,
-            status="failed",
-            level="WARN",
+        return _fail_execute(
+            artifacts,
+            attempt=attempt, retry=retry, target_label=target_label,
+            call_role=validation_role, phase_reached=execute_role,
+            repo_root=repo_root, head_before=head_before,
+            reason=f"Tests failed: {summarize_output(test_result)}",
+            failure_kind="validation-failed",
             returncode=test_result.returncode,
             summary="validation failed after phase execution",
-        )
-        revert_to(repo_root, head_before)
-        return ExecutePhaseOutcome(
-            status="failed",
-            reason=f"Tests failed: {summarize_output(test_result)}",
-            call_role=validation_role,
-            phase_reached=execute_role,
-            failure_kind="validation-failed",
         )
 
     artifacts.log_call_finished(

@@ -9,6 +9,7 @@ from conftest import init_repo
 
 from continuous_refactoring.cli import _handle_upgrade
 from continuous_refactoring.config import (
+    CONFIG_CURRENT_VERSION,
     default_taste_text,
     global_dir,
     load_config_version,
@@ -55,7 +56,7 @@ def test_upgrade_is_idempotent(
     _handle_upgrade(_upgrade_args())
     _handle_upgrade(_upgrade_args())
 
-    assert load_config_version() == 1
+    assert load_config_version() == CONFIG_CURRENT_VERSION
 
 
 # ---------------------------------------------------------------------------

@@ -148,13 +148,12 @@ def test_e2e_init_then_run_with_failures(
     exit_code = continuous_refactoring.run_loop(args)
 
     assert exit_code == 0
-    # First target failed validation, second succeeded with changes
+    # Targets run in random order: one fails validation, the other commits.
     log_output = subprocess.run(
         ["git", "log", "--oneline"], cwd=run_once_env,
         capture_output=True, text=True, check=True,
     ).stdout
-    assert "target-2" in log_output
-    assert "target-1" not in log_output
+    assert ("target-1" in log_output) ^ ("target-2" in log_output)
 
 
 def test_e2e_taste_flows_through(

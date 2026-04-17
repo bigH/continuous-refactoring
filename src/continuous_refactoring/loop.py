@@ -332,6 +332,12 @@ def _make_decision_record(
     )
 
 
+def _resolved_phase_reached(status: AgentStatus | None, fallback: str) -> str:
+    if status is None:
+        return fallback
+    return status.phase_reached or fallback
+
+
 def _error_failure_kind(message: str) -> str:
     lowered = message.lower()
     if "timed out" in lowered:
@@ -629,7 +635,7 @@ def _run_refactor_attempt(
             retry_recommendation="same-target",
             target=target.description,
             call_role=call_role,
-            phase_reached=agent_status.phase_reached or phase_reached if agent_status else phase_reached,
+            phase_reached=_resolved_phase_reached(agent_status, phase_reached),
             failure_kind=_error_failure_kind(str(error)),
             summary=summary,
             next_retry_focus=focus,
@@ -665,7 +671,7 @@ def _run_refactor_attempt(
             retry_recommendation="same-target",
             target=target.description,
             call_role=call_role,
-            phase_reached=agent_status.phase_reached or phase_reached if agent_status else phase_reached,
+            phase_reached=_resolved_phase_reached(agent_status, phase_reached),
             failure_kind="agent-exited-nonzero",
             summary=summary,
             next_retry_focus=focus,
@@ -689,7 +695,7 @@ def _run_refactor_attempt(
         retry=retry,
         target=target.description,
         call_role=validation_role,
-        phase_reached=agent_status.phase_reached or phase_reached if agent_status else phase_reached,
+        phase_reached=_resolved_phase_reached(agent_status, phase_reached),
     )
     try:
         validation_result = run_tests(
@@ -705,7 +711,7 @@ def _run_refactor_attempt(
             retry=retry,
             target=target.description,
             call_role=validation_role,
-            phase_reached=agent_status.phase_reached or phase_reached if agent_status else phase_reached,
+            phase_reached=_resolved_phase_reached(agent_status, phase_reached),
             status="failed",
             level="WARN",
             summary=str(error),
@@ -721,7 +727,7 @@ def _run_refactor_attempt(
             retry_recommendation="same-target",
             target=target.description,
             call_role=validation_role,
-            phase_reached=agent_status.phase_reached or phase_reached if agent_status else phase_reached,
+            phase_reached=_resolved_phase_reached(agent_status, phase_reached),
             failure_kind="validation-infra-failure",
             summary=summary,
             next_retry_focus=focus,
@@ -743,7 +749,7 @@ def _run_refactor_attempt(
             retry=retry,
             target=target.description,
             call_role=validation_role,
-            phase_reached=agent_status.phase_reached or phase_reached if agent_status else phase_reached,
+            phase_reached=_resolved_phase_reached(agent_status, phase_reached),
             status="failed",
             level="WARN",
             returncode=validation_result.returncode,
@@ -755,7 +761,7 @@ def _run_refactor_attempt(
             retry_recommendation="same-target",
             target=target.description,
             call_role=validation_role,
-            phase_reached=agent_status.phase_reached or phase_reached if agent_status else phase_reached,
+            phase_reached=_resolved_phase_reached(agent_status, phase_reached),
             failure_kind="validation-failed",
             summary=summary,
             next_retry_focus=focus,
@@ -771,7 +777,7 @@ def _run_refactor_attempt(
         retry=retry,
         target=target.description,
         call_role=validation_role,
-        phase_reached=agent_status.phase_reached or phase_reached if agent_status else phase_reached,
+        phase_reached=_resolved_phase_reached(agent_status, phase_reached),
         status="finished",
         returncode=validation_result.returncode,
     )
@@ -821,7 +827,7 @@ def _run_refactor_attempt(
         retry_recommendation="none",
         target=target.description,
         call_role=validation_role,
-        phase_reached=agent_status.phase_reached or phase_reached if agent_status else phase_reached,
+        phase_reached=_resolved_phase_reached(agent_status, phase_reached),
         failure_kind="none",
         summary="Validated refactor ready to commit",
         agent_last_message_path=last_message_path,
@@ -1274,26 +1280,6 @@ def _resolve_targets_from_args(
         paths=_parse_paths_arg(args.paths),
         repo_root=repo_root,
     )
-
-
-def _max_attempts_exhausted(
-    target: Target,
-    retry: int,
-    max_attempts: int | None,
-    *,
-    artifacts: RunArtifacts,
-    target_index: int,
-) -> bool:
-    if max_attempts is None or retry < max_attempts:
-        return False
-    artifacts.log(
-        "WARN",
-        f"Exhausted {max_attempts} attempts: {target.description}",
-        event="max_attempts_exhausted",
-        attempt=target_index,
-        retry=retry,
-    )
-    return True
 
 
 def _sleep_between_targets(

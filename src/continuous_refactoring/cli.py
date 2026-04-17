@@ -26,11 +26,6 @@ _GLOBAL_TASTE_WARNING = (
 )
 _REVIEW_USAGE = "Usage: continuous-refactoring review {list,perform}"
 
-def _command_handler(command: str | None) -> Callable[[argparse.Namespace], None] | None:
-    if command is None:
-        return None
-    return _COMMAND_HANDLERS.get(command)
-
 
 def parse_max_attempts(value: str) -> int:
     try:
@@ -707,7 +702,7 @@ def cli_main() -> None:
     if args.command is not None:
         _maybe_warn_stale_taste()
 
-    handler = _command_handler(args.command)
+    handler = _COMMAND_HANDLERS.get(args.command) if args.command else None
     if handler is None:
         parser.print_help()
         raise SystemExit(1)

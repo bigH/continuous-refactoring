@@ -28,17 +28,11 @@ from conftest import (
 # ---------------------------------------------------------------------------
 
 
-def _read_single_run_summary(tmp_path: Path) -> dict[str, object]:
+def _assert_final_status(tmp_path: Path, expected_status: str) -> None:
     run_root = tmp_path / "tmpdir" / "continuous-refactoring"
     run_dirs = list(run_root.iterdir())
     assert len(run_dirs) == 1
-    summary_path = run_dirs[0] / "summary.json"
-    assert summary_path.exists()
-    return json.loads(summary_path.read_text(encoding="utf-8"))
-
-
-def _assert_final_status(tmp_path: Path, expected_status: str) -> None:
-    summary = _read_single_run_summary(tmp_path)
+    summary = json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
     assert summary["final_status"] == expected_status
 
 
@@ -237,9 +231,9 @@ def test_e2e_without_init_uses_default_taste(
 
     assert exit_code == 0
 
-    _assert_single_prompt(prompt_capture)
-    builtin_taste = default_taste_text()
-    for line in builtin_taste.splitlines():
-        line = line.strip()
-        if line.startswith("-"):
-            _assert_single_prompt(prompt_capture, line.lstrip("- "))
+    needles = [
+        line.strip().lstrip("- ")
+        for line in default_taste_text().splitlines()
+        if line.strip().startswith("-")
+    ]
+    _assert_single_prompt(prompt_capture, *needles)

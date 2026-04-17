@@ -48,16 +48,6 @@ class AttemptStats:
     failure_kind: str | None = None
     failure_summary: str | None = None
     reason_doc_path: str | None = None
-    refactor_target: str | None = None
-    refactor_outcome: str | None = None
-    refactor_agent_returncode: int | None = None
-    refactor_test_returncode: int | None = None
-    refactor_change_count: int | None = None
-    fix_target: str | None = None
-    fix_outcome: str | None = None
-    fix_agent_returncode: int | None = None
-    fix_test_returncode: int | None = None
-    fix_change_count: int | None = None
     commit_sha: str | None = None
     commit_phase: str | None = None
     pushed: bool = False
@@ -83,15 +73,6 @@ class RunArtifacts:
     counts: dict[str, int] = field(
         default_factory=lambda: {
             "attempts_started": 0,
-            "baseline_failures": 0,
-            "refactor_agent_failed": 0,
-            "refactor_failed_tests": 0,
-            "refactor_passed_with_changes": 0,
-            "refactor_passed_no_changes": 0,
-            "fix_agent_failed": 0,
-            "fix_failed_tests": 0,
-            "fix_passed_with_changes": 0,
-            "fix_passed_no_changes": 0,
             "commits_created": 0,
             "pushes_completed": 0,
         }

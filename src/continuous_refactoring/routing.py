@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 if TYPE_CHECKING:
     from continuous_refactoring.artifacts import RunArtifacts
@@ -22,22 +22,15 @@ _DECISION_RE = re.compile(
 
 
 def _parse_decision(stdout: str) -> ClassifierDecision:
-    last_output_line: str | None = None
-    for line in reversed(stdout.splitlines()):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        last_output_line = stripped
-        match = _DECISION_RE.match(stripped)
-        if match:
-            match_text = match.group(1).lower()
-            if match_text == "cohesive-cleanup":
-                return "cohesive-cleanup"
-            return "needs-plan"
-    if last_output_line is None:
+    non_empty = [line.strip() for line in stdout.splitlines() if line.strip()]
+    if not non_empty:
         raise ContinuousRefactorError("Classifier produced no output")
+    for line in reversed(non_empty):
+        match = _DECISION_RE.match(line)
+        if match:
+            return cast(ClassifierDecision, match.group(1).lower())
     raise ContinuousRefactorError(
-        f"Classifier produced unrecognised output: {last_output_line!r}"
+        f"Classifier produced unrecognised output: {non_empty[-1]!r}"
     )
 
 

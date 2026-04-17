@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
-from collections.abc import Callable
 
 import pytest
 from conftest import (
@@ -32,22 +31,8 @@ def _interview_args(
     )
 
 
-def _record_taste_agent_calls(
-    calls: list[tuple[str, str, str]],
-) -> Callable[..., int]:
-    def fake(
-        agent: str,
-        model: str,
-        effort: str,
-        prompt: str,
-        repo_root: Path,
-        **_: object,
-    ) -> int:
-        _ = (prompt, repo_root)
-        calls.append((agent, model, effort))
-        return 0
-
-    return fake
+def _fail_if_taste_agent_runs(**_: object) -> int:
+    pytest.fail("taste agent should not be invoked")
 
 
 # ---------------------------------------------------------------------------
@@ -163,17 +148,11 @@ def test_interview_refuses_overwrite_without_force(
     taste_path = init_taste_project(tmp_path, monkeypatch)
     taste_path.write_text("- pre-existing custom\n", encoding="utf-8")
 
-    calls: list[tuple[str, ...]] = []
-
-    monkeypatch.setattr(
-        _AGENT_RUNNER_PATH,
-        _record_taste_agent_calls(calls),
-    )
+    monkeypatch.setattr(_AGENT_RUNNER_PATH, _fail_if_taste_agent_runs)
     with pytest.raises(SystemExit) as exc_info:
         _handle_taste(_interview_args())
 
     assert exc_info.value.code == 1
-    assert calls == []
     assert taste_path.read_text(encoding="utf-8") == "- pre-existing custom\n"
     err = capsys.readouterr().err
     assert "--force" in err
@@ -222,8 +201,7 @@ def test_interview_errors_if_agent_did_not_write(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     taste_path = init_taste_project(tmp_path, monkeypatch)
-    if taste_path.exists():
-        taste_path.unlink()
+    assert not taste_path.exists()
 
     monkeypatch.setattr(
         _AGENT_RUNNER_PATH,

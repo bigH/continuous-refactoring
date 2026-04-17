@@ -272,12 +272,10 @@ def _candidate_from_files(
     )
 
 
-def _ranked_paths(
+def _cross_ranked_paths(
     scores: Counter[str],
     support: dict[str, tuple[str, ...]],
     seed_file: str,
-    *,
-    include_same_dir_cochange_only: bool,
 ) -> list[str]:
     seed_parent = _cluster_label(seed_file)
     ranked: list[tuple[int, str]] = []
@@ -286,7 +284,6 @@ def _ranked_paths(
         same_dir = _cluster_label(path) == seed_parent
         if (
             same_dir
-            and not include_same_dir_cochange_only
             and evidence
             and all(line.startswith("git co-change") for line in evidence)
         ):
@@ -380,12 +377,7 @@ def build_scope_candidates(
             _candidate_from_files("local-cluster", seed_file, local_files, support)
         )
 
-    cross_ranked = _ranked_paths(
-        scores,
-        support,
-        seed_file,
-        include_same_dir_cochange_only=False,
-    )
+    cross_ranked = _cross_ranked_paths(scores, support, seed_file)
     cross_extras = tuple(cross_ranked[: max_files - 1])
     if cross_extras:
         cross_files = (seed_file, *cross_extras)

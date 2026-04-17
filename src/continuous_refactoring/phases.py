@@ -53,10 +53,7 @@ def _parse_ready_verdict(stdout: str) -> tuple[ReadyVerdict, str]:
         if not match:
             continue
         verdict = match.group("verdict").lower()  # type: ignore[assignment]
-        reason = match.group("reason")
-        if reason is None:
-            reason = ""
-        reason = reason.lstrip(" \u2014-").strip() or verdict
+        reason = match.group("reason").lstrip(" \u2014-").strip() or verdict
         return verdict, reason
     raise ContinuousRefactorError(
         f"Phase ready-check produced unrecognised output: {nonempty_lines[-1]!r}"
@@ -179,21 +176,16 @@ def _fail_execute(
     returncode: int | None = None,
     summary: str | None = None,
 ) -> ExecutePhaseOutcome:
-    extra: dict[str, object] = {}
-    if returncode is not None:
-        extra["returncode"] = returncode
-    if summary is not None:
-        extra["summary"] = summary
-    if phase_reached is not None:
-        extra["phase_reached"] = phase_reached
     artifacts.log_call_finished(
         attempt=attempt,
         retry=retry,
         target=target_label,
         call_role=call_role,
+        phase_reached=phase_reached,
         status="failed",
         level="WARN",
-        **extra,
+        returncode=returncode,
+        summary=summary,
     )
     revert_to(repo_root, head_before)
     return ExecutePhaseOutcome(

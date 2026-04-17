@@ -43,28 +43,6 @@ def _warn_skip(message: str) -> None:
     print(f"warning: target line has {message}, skipping", file=sys.stderr)
 
 
-class _InvalidTarget(Exception):
-    """Raised inside validate_target_line to short-circuit with a warning."""
-
-
-def _required_nonempty_str(data: dict[str, object], key: str, reason: str) -> str:
-    value = data.get(key)
-    if isinstance(value, str) and value.strip():
-        return value
-    raise _InvalidTarget(reason)
-
-
-def _optional_nonempty_str(
-    data: dict[str, object], key: str, reason: str,
-) -> str | None:
-    value = data.get(key)
-    if value is None:
-        return None
-    if isinstance(value, str) and value.strip():
-        return value
-    raise _InvalidTarget(reason)
-
-
 def parse_extensions(raw: str) -> tuple[str, ...]:
     """Convert comma-separated extensions to glob patterns.
 
@@ -89,32 +67,40 @@ def parse_globs(raw: str) -> tuple[str, ...]:
     return tuple(g for g in (p.strip() for p in raw.split(":")) if g)
 
 
+def _optional_str(data: dict[str, object], key: str) -> str | None:
+    value = data.get(key)
+    if value is None:
+        return None
+    if isinstance(value, str) and value.strip():
+        return value
+    _warn_skip(f"non-string or empty {key}")
+    raise ValueError(key)
+
+
 def validate_target_line(data: object) -> Target | None:
     """Validate a parsed JSON dict and return a Target, or None if invalid."""
     if not isinstance(data, dict):
         _warn_skip("non-dict target data")
         return None
 
+    description = data.get("description")
+    if not (isinstance(description, str) and description.strip()):
+        _warn_skip("missing or empty description")
+        return None
+
+    files = data.get("files")
+    if not isinstance(files, list) or not files:
+        _warn_skip("missing or empty files")
+        return None
+    if not all(isinstance(f, str) and f for f in files):
+        _warn_skip("invalid file entries")
+        return None
+
     try:
-        description = _required_nonempty_str(
-            data, "description", "missing or empty description",
-        )
-        files = data.get("files")
-        if not isinstance(files, list) or not files:
-            raise _InvalidTarget("missing or empty files")
-        if not all(isinstance(f, str) and f for f in files):
-            raise _InvalidTarget("invalid file entries")
-        scoping = _optional_nonempty_str(
-            data, "scoping", "non-string or empty scoping",
-        )
-        model_override = _optional_nonempty_str(
-            data, "model-override", "non-string or empty model-override",
-        )
-        effort_override = _optional_nonempty_str(
-            data, "effort-override", "non-string or empty effort-override",
-        )
-    except _InvalidTarget as error:
-        _warn_skip(str(error))
+        scoping = _optional_str(data, "scoping")
+        model_override = _optional_str(data, "model-override")
+        effort_override = _optional_str(data, "effort-override")
+    except ValueError:
         return None
 
     return Target(

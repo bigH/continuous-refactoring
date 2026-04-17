@@ -20,7 +20,6 @@ __all__ = [
     "intentional_skips_dir",
     "load_manifest",
     "migration_root",
-    "phase_path",
     "save_manifest",
 ]
 
@@ -59,10 +58,6 @@ class MigrationManifest:
 
 def migration_root(live_dir: Path, name: str) -> Path:
     return live_dir / name
-
-
-def phase_path(live_dir: Path, name: str, phase: PhaseSpec) -> Path:
-    return migration_root(live_dir, name) / phase.file
 
 
 def approaches_dir(live_dir: Path, name: str) -> Path:

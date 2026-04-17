@@ -16,7 +16,6 @@ from continuous_refactoring.migrations import (
     has_executable_phase,
     load_manifest,
     migration_root,
-    phase_path,
     save_manifest,
 )
 
@@ -273,12 +272,6 @@ def test_load_manifest_defaults_optional_fields(tmp_path: Path) -> None:
 def test_migration_root() -> None:
     root = migration_root(Path("/live"), "my-migration")
     assert root == Path("/live/my-migration")
-
-
-def test_phase_path_returns_expected() -> None:
-    phase = PhaseSpec(name="setup", file="phase-0-setup.md", done=False, ready_when="always")
-    result = phase_path(Path("/live"), "mig", phase)
-    assert result == Path("/live/mig/phase-0-setup.md")
 
 
 def test_approaches_dir_returns_expected() -> None:

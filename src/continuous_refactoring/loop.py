@@ -299,39 +299,6 @@ def _status_summary(
     return summary, focus
 
 
-def _make_decision_record(
-    *,
-    decision: RunnerDecision,
-    retry_recommendation: RetryRecommendation,
-    target: str,
-    call_role: str,
-    phase_reached: str,
-    failure_kind: str,
-    summary: str,
-    next_retry_focus: str | None = None,
-    agent_last_message_path: Path | None = None,
-    agent_stdout_path: Path | None = None,
-    agent_stderr_path: Path | None = None,
-    tests_stdout_path: Path | None = None,
-    tests_stderr_path: Path | None = None,
-) -> DecisionRecord:
-    return DecisionRecord(
-        decision=decision,
-        retry_recommendation=retry_recommendation,
-        target=target,
-        call_role=call_role,
-        phase_reached=phase_reached,
-        failure_kind=failure_kind,
-        summary=summary,
-        next_retry_focus=next_retry_focus,
-        agent_last_message_path=agent_last_message_path,
-        agent_stdout_path=agent_stdout_path,
-        agent_stderr_path=agent_stderr_path,
-        tests_stdout_path=tests_stdout_path,
-        tests_stderr_path=tests_stderr_path,
-    )
-
-
 def _resolved_phase_reached(status: AgentStatus | None, fallback: str) -> str:
     if status is None:
         return fallback
@@ -465,7 +432,7 @@ def _effective_record(
     if max_attempts is None or retry < max_attempts:
         return record
     summary = f"Exhausted {max_attempts} attempts. Last failure: {record.summary}"
-    return _make_decision_record(
+    return DecisionRecord(
         decision="abandon",
         retry_recommendation="new-target",
         target=record.target,
@@ -630,7 +597,7 @@ def _run_refactor_attempt(
             fallback=_sanitize_text(str(error), repo_root) or str(error),
             repo_root=repo_root,
         )
-        return _make_decision_record(
+        return DecisionRecord(
             decision="retry",
             retry_recommendation="same-target",
             target=target.description,
@@ -666,7 +633,7 @@ def _run_refactor_attempt(
             summary=summary,
         )
         revert_to(repo_root, head_before)
-        return _make_decision_record(
+        return DecisionRecord(
             decision="retry",
             retry_recommendation="same-target",
             target=target.description,
@@ -722,7 +689,7 @@ def _run_refactor_attempt(
             fallback=_sanitize_text(str(error), repo_root) or str(error),
             repo_root=repo_root,
         )
-        return _make_decision_record(
+        return DecisionRecord(
             decision="retry",
             retry_recommendation="same-target",
             target=target.description,
@@ -756,7 +723,7 @@ def _run_refactor_attempt(
             summary=summary,
         )
         revert_to(repo_root, head_before)
-        return _make_decision_record(
+        return DecisionRecord(
             decision="retry",
             retry_recommendation="same-target",
             target=target.description,
@@ -794,7 +761,7 @@ def _run_refactor_attempt(
             agent_status.retry_recommendation
             or _default_retry_recommendation(decision)
         )
-        return _make_decision_record(
+        return DecisionRecord(
             decision=decision,
             retry_recommendation=retry_recommendation,
             target=target.description,
@@ -822,7 +789,7 @@ def _run_refactor_attempt(
         git_push(repo_root, push_remote, branch_name)
         artifacts.record_push(attempt)
 
-    return _make_decision_record(
+    return DecisionRecord(
         decision="commit",
         retry_recommendation="none",
         target=target.description,
@@ -898,7 +865,7 @@ def _try_migration_tick(
             summary = _sanitize_text(str(error), repo_root) or str(error)
             return (
                 "abandon",
-                _make_decision_record(
+                DecisionRecord(
                     decision="abandon",
                     retry_recommendation="new-target",
                     target=target_label,
@@ -952,7 +919,7 @@ def _try_migration_tick(
             if outcome.status == "failed":
                 return (
                     "abandon",
-                    _make_decision_record(
+                    DecisionRecord(
                         decision="abandon",
                         retry_recommendation="new-target",
                         target=target_label,
@@ -964,7 +931,7 @@ def _try_migration_tick(
                 )
             return (
                 "commit",
-                _make_decision_record(
+                DecisionRecord(
                     decision="commit",
                     retry_recommendation="none",
                     target=target_label,
@@ -986,7 +953,7 @@ def _try_migration_tick(
             summary = _sanitize_text(reason, repo_root) or "Phase requires human review"
             return (
                 "blocked",
-                _make_decision_record(
+                DecisionRecord(
                     decision="blocked",
                     retry_recommendation="human-review",
                     target=target_label,
@@ -1123,7 +1090,7 @@ def _route_and_run(
             outcome="abandon",
             target=target,
             planning_context=planning_context,
-            decision_record=_make_decision_record(
+            decision_record=DecisionRecord(
                 decision="abandon",
                 retry_recommendation="new-target",
                 target=target.description,
@@ -1170,7 +1137,7 @@ def _route_and_run(
             outcome="abandon",
             target=target,
             planning_context=planning_context,
-            decision_record=_make_decision_record(
+            decision_record=DecisionRecord(
                 decision="abandon",
                 retry_recommendation="new-target",
                 target=target.description,
@@ -1196,7 +1163,7 @@ def _route_and_run(
             outcome="abandon",
             target=target,
             planning_context=planning_context,
-            decision_record=_make_decision_record(
+            decision_record=DecisionRecord(
                 decision="abandon",
                 retry_recommendation="new-target",
                 target=target.description,
@@ -1210,7 +1177,7 @@ def _route_and_run(
         outcome="commit",
         target=target,
         planning_context=planning_context,
-        decision_record=_make_decision_record(
+        decision_record=DecisionRecord(
             decision="commit",
             retry_recommendation="none",
             target=target.description,

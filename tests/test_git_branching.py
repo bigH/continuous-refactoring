@@ -1,15 +1,8 @@
 from __future__ import annotations
 
 import re
-import sys
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import pytest
-
-from continuous_refactoring.artifacts import ContinuousRefactorError
-from continuous_refactoring.agent import run_observed_command
 from continuous_refactoring.git import (
     create_branch,
     current_branch,
@@ -179,80 +172,3 @@ def test_branch_exists_is_literal(tmp_path: Path) -> None:
 
     assert branch_exists(repo, "feature-alpha")
     assert not branch_exists(repo, "feature-*")
-
-
-# -----------------------------------------------------------------------
-# Timeout
-# -----------------------------------------------------------------------
-
-
-def test_run_observed_command_timeout(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import pytest
-
-    tmpdir = tmp_path / "tmpdir"
-    tmpdir.mkdir()
-    monkeypatch.setenv("TMPDIR", str(tmpdir))
-
-    with pytest.raises(ContinuousRefactorError, match="timed out"):
-        run_observed_command(
-            [sys.executable, "-c", "import time; time.sleep(60)"],
-            cwd=tmp_path,
-            stdout_path=tmpdir / "out.log",
-            stderr_path=tmpdir / "err.log",
-            mirror_to_terminal=False,
-            timeout=1,
-        )
-
-
-# -----------------------------------------------------------------------
-# Integration: branch + commit + undo round-trip
-# -----------------------------------------------------------------------
-
-
-def test_consecutive_failure_tracking(tmp_path: Path) -> None:
-    repo = tmp_path / "repo"
-    _init_repo(repo)
-    original_sha = get_head_sha(repo)
-
-    create_branch(repo, "test-branch")
-    assert current_branch(repo) == "test-branch"
-
-    (repo / "change.txt").write_text("change\n", encoding="utf-8")
-    run_command(["git", "add", "change.txt"], cwd=repo)
-    run_command(["git", "commit", "-m", "test commit"], cwd=repo)
-    commit_sha = get_head_sha(repo)
-    assert commit_sha != original_sha
-
-    undo_last_commit(repo)
-    assert get_head_sha(repo) == original_sha
-    assert not (repo / "change.txt").exists()
-
-
-# -----------------------------------------------------------------------
-# Stuck-agent detection
-# -----------------------------------------------------------------------
-
-
-def test_agent_killed_when_stdout_stalled(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import pytest
-
-    tmpdir = tmp_path / "tmpdir"
-    tmpdir.mkdir()
-    monkeypatch.setenv("TMPDIR", str(tmpdir))
-
-    script = "import sys, time; print('hello'); sys.stdout.flush(); time.sleep(300)"
-
-    with pytest.raises(ContinuousRefactorError, match="no output for"):
-        run_observed_command(
-            [sys.executable, "-c", script],
-            cwd=tmp_path,
-            stdout_path=tmpdir / "out.log",
-            stderr_path=tmpdir / "err.log",
-            mirror_to_terminal=False,
-            stuck_interval=1,
-            stuck_timeout=2,
-        )

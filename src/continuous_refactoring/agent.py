@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import signal
 import shlex
 import subprocess
 import sys
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 from shutil import which
 from typing import TYPE_CHECKING, TextIO
@@ -61,6 +63,62 @@ def _build_claude_command(
         "--include-partial-messages",
         prompt,
     ]
+
+
+def _extract_claude_final_text(raw: str) -> str:
+    """Pull plain-text output from claude's ``--output-format stream-json`` stream.
+
+    Downstream parsers expect single-line prose; claude emits NDJSON events.
+    Prefer the last valid top-level ``result`` string; otherwise join text
+    from assistant messages; otherwise return ``raw`` unchanged so upstream
+    errors like "produced no output" stay meaningful.
+    """
+    last_result: str | None = None
+    assistant_messages: list[str] = []
+    for line in raw.splitlines():
+        if not line.lstrip().startswith("{"):
+            continue
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        event_type = event.get("type")
+        if event_type == "result":
+            if event.get("is_error") is True:
+                continue
+            result_value = event.get("result")
+            if isinstance(result_value, str) and result_value:
+                last_result = result_value
+        elif event_type == "assistant":
+            text = _assistant_event_text(event)
+            if text:
+                assistant_messages.append(text)
+    if last_result is not None:
+        return last_result
+    if assistant_messages:
+        return "\n".join(assistant_messages)
+    return raw
+
+
+def _assistant_event_text(event: dict[str, object]) -> str:
+    message = event.get("message")
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    if not isinstance(content, list):
+        return ""
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        if block.get("type") != "text":
+            continue
+        text = block.get("text")
+        if isinstance(text, str) and text:
+            parts.append(text)
+    return "".join(parts)
 
 
 def _require_agent_on_path(agent: str) -> None:
@@ -440,7 +498,7 @@ def maybe_run_agent(
         repo_root=repo_root,
         last_message_path=last_message_path,
     )
-    return run_observed_command(
+    capture = run_observed_command(
         command,
         cwd=repo_root,
         stdout_path=stdout_path,
@@ -448,6 +506,9 @@ def maybe_run_agent(
         mirror_to_terminal=mirror_to_terminal,
         timeout=timeout,
     )
+    if agent == "claude":
+        return replace(capture, stdout=_extract_claude_final_text(capture.stdout))
+    return capture
 
 
 def _write_timestamped_line(handle: TextIO, line: str) -> None:

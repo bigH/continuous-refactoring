@@ -90,15 +90,27 @@ def _save_manifest_to_disk(manifest: MigrationManifest, live_dir: Path) -> Path:
     return manifest_path
 
 
-def _make_fake_agent(stdout: str, tmp_path: Path) -> object:
+def _patch_agent(
+    monkeypatch: pytest.MonkeyPatch, stdout: str, tmp_path: Path,
+) -> None:
     def fake_agent(**kwargs: object) -> CommandCapture:
-        Path(str(kwargs["stdout_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stdout_path"])).write_text("", encoding="utf-8")
-        Path(str(kwargs["stderr_path"])).parent.mkdir(parents=True, exist_ok=True)
-        Path(str(kwargs["stderr_path"])).write_text("", encoding="utf-8")
+        for key in ("stdout_path", "stderr_path"):
+            path = Path(str(kwargs[key]))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
         return _fake_capture(stdout, tmp_path=tmp_path)
 
-    return fake_agent
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.maybe_run_agent", fake_agent,
+    )
+
+
+@pytest.fixture(autouse=True)
+def _isolate_tmpdir(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    (tmp_path / "tmpdir").mkdir()
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
 
 
 def _passing_tests(
@@ -162,12 +174,7 @@ def test_generate_phase_branch_name_slugifies() -> None:
 def test_check_ready_yes(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-    monkeypatch.setattr(
-        "continuous_refactoring.phases.maybe_run_agent",
-        _make_fake_agent("checking...\nready: yes\n", tmp_path),
-    )
+    _patch_agent(monkeypatch, "checking...\nready: yes\n", tmp_path)
 
     verdict, reason = check_phase_ready(
         _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
@@ -180,14 +187,10 @@ def test_check_ready_yes(
 def test_check_ready_yes_with_trailing_noise(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-    monkeypatch.setattr(
-        "continuous_refactoring.phases.maybe_run_agent",
-        _make_fake_agent(
-            "ready: yes\nthis line should not veto readiness\n",
-            tmp_path,
-        ),
+    _patch_agent(
+        monkeypatch,
+        "ready: yes\nthis line should not veto readiness\n",
+        tmp_path,
     )
 
     verdict, reason = check_phase_ready(
@@ -198,13 +201,10 @@ def test_check_ready_yes_with_trailing_noise(
     assert reason == "yes"
 
 
-def test_check_ready_rejects_no_output(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-    monkeypatch.setattr(
-        "continuous_refactoring.phases.maybe_run_agent",
-        _make_fake_agent("", tmp_path),
-    )
+def test_check_ready_rejects_no_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_agent(monkeypatch, "", tmp_path)
 
     with pytest.raises(ContinuousRefactorError, match="no output"):
         check_phase_ready(
@@ -216,11 +216,8 @@ def test_check_ready_rejects_no_output(tmp_path: Path, monkeypatch: pytest.Monke
 def test_check_ready_rejects_unparseable_output(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-    monkeypatch.setattr(
-        "continuous_refactoring.phases.maybe_run_agent",
-        _make_fake_agent("analysis summary\nstatus: inconclusive\n", tmp_path),
+    _patch_agent(
+        monkeypatch, "analysis summary\nstatus: inconclusive\n", tmp_path,
     )
 
     with pytest.raises(ContinuousRefactorError, match="unrecognised output"):
@@ -233,13 +230,10 @@ def test_check_ready_rejects_unparseable_output(
 def test_check_ready_no(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-    monkeypatch.setattr(
-        "continuous_refactoring.phases.maybe_run_agent",
-        _make_fake_agent(
-            "checking...\nready: no \u2014 prerequisites not met\n", tmp_path,
-        ),
+    _patch_agent(
+        monkeypatch,
+        "checking...\nready: no \u2014 prerequisites not met\n",
+        tmp_path,
     )
 
     verdict, reason = check_phase_ready(
@@ -253,13 +247,10 @@ def test_check_ready_no(
 def test_check_ready_unverifiable(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-    monkeypatch.setattr(
-        "continuous_refactoring.phases.maybe_run_agent",
-        _make_fake_agent(
-            "analysis...\nready: unverifiable \u2014 need human judgment\n", tmp_path,
-        ),
+    _patch_agent(
+        monkeypatch,
+        "analysis...\nready: unverifiable \u2014 need human judgment\n",
+        tmp_path,
     )
 
     verdict, reason = check_phase_ready(
@@ -278,9 +269,6 @@ def test_check_ready_unverifiable(
 def test_ready_yes_green_tests_flips_phase_done(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
     live_dir = tmp_path / "live"
     manifest = _make_manifest()
     manifest_path = _save_manifest_to_disk(manifest, live_dir)
@@ -288,10 +276,7 @@ def test_ready_yes_green_tests_flips_phase_done(
     monkeypatch.setattr(
         "continuous_refactoring.phases.get_head_sha", lambda _: "abc123",
     )
-    monkeypatch.setattr(
-        "continuous_refactoring.phases.maybe_run_agent",
-        _make_fake_agent("executed phase work\n", tmp_path),
-    )
+    _patch_agent(monkeypatch, "executed phase work\n", tmp_path)
     monkeypatch.setattr("continuous_refactoring.phases.run_tests", _passing_tests)
 
     outcome = execute_phase(
@@ -316,19 +301,13 @@ def test_ready_yes_green_tests_flips_phase_done(
 def test_ready_no_leaves_manifest_untouched(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
     live_dir = tmp_path / "live"
     old_touch = "2020-01-01T00:00:00.000+00:00"
     manifest = _make_manifest(last_touch=old_touch)
     manifest_path = _save_manifest_to_disk(manifest, live_dir)
     original = load_manifest(manifest_path)
 
-    monkeypatch.setattr(
-        "continuous_refactoring.phases.maybe_run_agent",
-        _make_fake_agent("ready: no \u2014 not ready yet\n", tmp_path),
-    )
+    _patch_agent(monkeypatch, "ready: no \u2014 not ready yet\n", tmp_path)
 
     verdict, _reason = check_phase_ready(
         _PHASE_0, manifest, tmp_path, _make_artifacts(tmp_path),
@@ -360,19 +339,13 @@ def test_ready_no_leaves_manifest_untouched(
 def test_ready_unverifiable_sets_awaiting_human_review(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
     live_dir = tmp_path / "live"
     manifest = _make_manifest()
     manifest_path = _save_manifest_to_disk(manifest, live_dir)
     assert load_manifest(manifest_path).awaiting_human_review is False
 
-    monkeypatch.setattr(
-        "continuous_refactoring.phases.maybe_run_agent",
-        _make_fake_agent(
-            "ready: unverifiable \u2014 external dependency\n", tmp_path,
-        ),
+    _patch_agent(
+        monkeypatch, "ready: unverifiable \u2014 external dependency\n", tmp_path,
     )
 
     verdict, _reason = check_phase_ready(
@@ -397,9 +370,6 @@ def test_ready_unverifiable_sets_awaiting_human_review(
 def test_execute_phase_test_failure_reverts_workspace(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
     live_dir = tmp_path / "live"
     manifest = _make_manifest()
     manifest_path = _save_manifest_to_disk(manifest, live_dir)
@@ -413,10 +383,7 @@ def test_execute_phase_test_failure_reverts_workspace(
         "continuous_refactoring.phases.revert_to",
         lambda _repo, head: reverted.append(head),
     )
-    monkeypatch.setattr(
-        "continuous_refactoring.phases.maybe_run_agent",
-        _make_fake_agent("made changes\n", tmp_path),
-    )
+    _patch_agent(monkeypatch, "made changes\n", tmp_path)
     monkeypatch.setattr("continuous_refactoring.phases.run_tests", _failing_tests)
 
     outcome = execute_phase(

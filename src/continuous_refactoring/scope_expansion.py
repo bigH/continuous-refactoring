@@ -28,7 +28,10 @@ __all__ = [
 
 from continuous_refactoring.agent import maybe_run_agent
 from continuous_refactoring.artifacts import ContinuousRefactorError
-from continuous_refactoring.prompts import compose_scope_selection_prompt
+from continuous_refactoring.prompts import (
+    compose_scope_selection_prompt,
+    scope_candidate_detail_lines,
+)
 from continuous_refactoring.targeting import list_tracked_files
 
 ScopeCandidateKind = Literal["seed", "local-cluster", "cross-cluster"]
@@ -404,18 +407,8 @@ def scope_candidate_to_target(target: Target, candidate: ScopeCandidate) -> Targ
 
 
 def describe_scope_candidate(candidate: ScopeCandidate) -> str:
-    sections = [
-        f"Selected scope candidate: {candidate.kind}",
-        "Files:",
-        *(f"- {file_path}" for file_path in candidate.files),
-        "Cluster labels:",
-        *(f"- {label}" for label in candidate.cluster_labels),
-        "Evidence:",
-        *(f"- {line}" for line in candidate.evidence_lines),
-        "Likely validation surfaces:",
-        *(f"- {surface}" for surface in candidate.validation_surfaces),
-    ]
-    return "\n".join(sections)
+    header = f"Selected scope candidate: {candidate.kind}"
+    return "\n".join([header, *scope_candidate_detail_lines(candidate)])
 
 
 def select_scope_candidate(

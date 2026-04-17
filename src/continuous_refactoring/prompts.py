@@ -39,6 +39,7 @@ __all__ = [
     "compose_taste_refine_prompt",
     "compose_taste_upgrade_prompt",
     "prompt_file_text",
+    "scope_candidate_detail_lines",
 ]
 
 
@@ -76,22 +77,24 @@ def _first_scope(*scopes: str | None) -> str | None:
     return None
 
 
+def scope_candidate_detail_lines(candidate: ScopeCandidate) -> list[str]:
+    return [
+        "Files:",
+        *(f"- {file_path}" for file_path in candidate.files),
+        "Cluster labels:",
+        *(f"- {label}" for label in candidate.cluster_labels),
+        "Evidence:",
+        *(f"- {line}" for line in candidate.evidence_lines),
+        "Likely validation surfaces:",
+        *(f"- {surface}" for surface in candidate.validation_surfaces),
+    ]
+
+
 def _format_scope_candidates(candidates: tuple[ScopeCandidate, ...]) -> str:
-    sections: list[str] = []
-    for candidate in candidates:
-        details = [
-            f"Kind: {candidate.kind}",
-            "Files:",
-            *(f"- {file_path}" for file_path in candidate.files),
-            "Cluster labels:",
-            *(f"- {label}" for label in candidate.cluster_labels),
-            "Evidence:",
-            *(f"- {line}" for line in candidate.evidence_lines),
-            "Likely validation surfaces:",
-            *(f"- {surface}" for surface in candidate.validation_surfaces),
-        ]
-        sections.append(f"### {candidate.kind}\n" + "\n".join(details))
-    return "\n\n".join(sections)
+    return "\n\n".join(
+        f"### {candidate.kind}\n" + "\n".join(scope_candidate_detail_lines(candidate))
+        for candidate in candidates
+    )
 
 
 REQUIRED_PREAMBLE = (

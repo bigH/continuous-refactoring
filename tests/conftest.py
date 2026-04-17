@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 from collections.abc import Callable
-import os
 import sys
 from pathlib import Path
 
@@ -156,44 +155,36 @@ if __name__ == "__main__":
     return script
 
 
-def _write_if_path(path_obj: object, content: str) -> Path:
-    if path_obj is None:
-        return Path(os.devnull)
-    output_path = Path(path_obj)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(content, encoding="utf-8")
-    return output_path
-
-
 def _record_command(
     *,
     returncode: int,
     stdout: str,
     stderr: str,
-    stdout_path: object,
-    stderr_path: object,
+    stdout_path: Path,
+    stderr_path: Path,
     command: tuple[str, ...] = ("pytest",),
 ) -> CommandCapture:
+    for path, content in ((stdout_path, stdout), (stderr_path, stderr)):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
     return CommandCapture(
         command=command,
         returncode=returncode,
         stdout=stdout,
         stderr=stderr,
-        stdout_path=_write_if_path(stdout_path, stdout),
-        stderr_path=_write_if_path(stderr_path, stderr),
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
     )
 
 
 def noop_agent(**kwargs: object) -> CommandCapture:
-    stdout_path = kwargs.get("stdout_path")
-    stderr_path = kwargs.get("stderr_path")
     return _record_command(
         returncode=0,
         stdout="noop\n",
         stderr="",
         command=("fake",),
-        stdout_path=stdout_path,
-        stderr_path=stderr_path,
+        stdout_path=kwargs["stdout_path"],  # type: ignore[arg-type]
+        stderr_path=kwargs["stderr_path"],  # type: ignore[arg-type]
     )
 
 

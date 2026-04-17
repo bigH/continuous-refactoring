@@ -102,23 +102,18 @@ def _require_mapping(value: object, *, field: str) -> dict[str, object]:
     return value
 
 
-def _require_str(
-    value: object,
-    *,
-    field: str,
-    allow_none: bool = False,
-) -> str | None:
-    if value is None:
-        if allow_none:
-            return None
-        raise ContinuousRefactorError(
-            f"Migration field {field!r} must be a string: {value!r}"
-        )
+def _require_str(value: object, *, field: str) -> str:
     if not isinstance(value, str):
         raise ContinuousRefactorError(
             f"Migration field {field!r} must be a string: {value!r}"
         )
     return value
+
+
+def _optional_str(value: object, *, field: str) -> str | None:
+    if value is None:
+        return None
+    return _require_str(value, field=field)
 
 
 def _require_bool(value: object, *, field: str) -> bool:
@@ -139,16 +134,12 @@ def _require_int(value: object, *, field: str) -> int:
 
 def _require_phase(raw_phase: object, *, index: int) -> PhaseSpec:
     phase = _require_mapping(raw_phase, field=f"phases[{index}]")
+    prefix = f"phases[{index}]"
     return PhaseSpec(
-        name=cast(str, _require_str(phase.get("name"), field=f"phases[{index}].name")),
-        file=cast(str, _require_str(phase.get("file"), field=f"phases[{index}].file")),
-        done=_require_bool(phase.get("done"), field=f"phases[{index}].done"),
-        ready_when=cast(
-            str,
-            _require_str(
-            phase.get("ready_when"), field=f"phases[{index}].ready_when"
-            ),
-        ),
+        name=_require_str(phase.get("name"), field=f"{prefix}.name"),
+        file=_require_str(phase.get("file"), field=f"{prefix}.file"),
+        done=_require_bool(phase.get("done"), field=f"{prefix}.done"),
+        ready_when=_require_str(phase.get("ready_when"), field=f"{prefix}.ready_when"),
     )
 
 
@@ -172,12 +163,10 @@ def load_manifest(path: Path) -> MigrationManifest:
     status = _require_status(raw.get("status"))
     phases = _require_phases(raw.get("phases"))
     return MigrationManifest(
-        name=cast(str, _require_str(raw.get("name"), field="name")),
-        created_at=cast(str, _require_str(raw.get("created_at"), field="created_at")),
-        last_touch=cast(str, _require_str(raw.get("last_touch"), field="last_touch")),
-        wake_up_on=_require_str(
-            raw.get("wake_up_on"), field="wake_up_on", allow_none=True
-        ),
+        name=_require_str(raw.get("name"), field="name"),
+        created_at=_require_str(raw.get("created_at"), field="created_at"),
+        last_touch=_require_str(raw.get("last_touch"), field="last_touch"),
+        wake_up_on=_optional_str(raw.get("wake_up_on"), field="wake_up_on"),
         awaiting_human_review=_require_bool(
             raw.get("awaiting_human_review", False), field="awaiting_human_review"
         ),

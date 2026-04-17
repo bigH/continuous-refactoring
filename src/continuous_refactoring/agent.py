@@ -487,9 +487,7 @@ def maybe_run_agent(
     mirror_to_terminal: bool = True,
     timeout: int | None = None,
 ) -> CommandCapture:
-    if which(agent) is None:
-        raise ContinuousRefactorError(f"Required command not found in PATH: {agent}")
-
+    _require_agent_on_path(agent)
     command = build_command(
         agent=agent,
         model=model,

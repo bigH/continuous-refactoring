@@ -1490,12 +1490,13 @@ def run_loop(args: argparse.Namespace) -> int:
     taste = _load_taste_safe(repo_root)
 
     targets = _resolve_targets_from_args(args, repo_root)
+    random.shuffle(targets)
 
     max_refactors = args.max_refactors
     if max_refactors is None and args.targets:
         max_refactors = len(targets)
     if max_refactors and len(targets) > max_refactors:
-        targets = random.sample(targets, max_refactors)
+        targets = targets[:max_refactors]
 
     fell_back_to_scope = False
     if not targets:

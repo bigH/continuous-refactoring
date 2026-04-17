@@ -533,7 +533,7 @@ def test_restore_codex_terminal_modes_writes_expected_escape_sequence(
     )
 
 
-def test_compose_full_prompt_orders_previous_failure_then_fix_amendment() -> None:
+def test_compose_full_prompt_orders_retry_context_then_fix_amendment() -> None:
     target = Target(
         description="foo",
         files=("src/foo.py",),
@@ -548,7 +548,7 @@ def test_compose_full_prompt_orders_previous_failure_then_fix_amendment() -> Non
         scope_instruction="SCOPE-TEXT",
         validation_command="uv run pytest",
         attempt=2,
-        previous_failure="PREV-FAIL-OUTPUT",
+        retry_context="RETRY-CONTEXT-OUTPUT",
         fix_amendment="FIX-AMENDMENT-TEXT",
     )
 
@@ -560,7 +560,7 @@ def test_compose_full_prompt_orders_previous_failure_then_fix_amendment() -> Non
         prompt.index("## Target Files"),
         prompt.index("## Scope"),
         prompt.index("## Validation"),
-        prompt.index("PREV-FAIL-OUTPUT"),
+        prompt.index("RETRY-CONTEXT-OUTPUT"),
         prompt.index("FIX-AMENDMENT-TEXT"),
     ]
     assert positions == sorted(positions)

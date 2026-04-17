@@ -411,12 +411,9 @@ def compose_full_prompt(
     validation_command: str,
     attempt: int,
     retry_context: str | None = None,
-    previous_failure: str | None = None,
     fix_amendment: str | None = None,
 ) -> str:
-    sanitized_retry_context = _strip_or_none(retry_context) or _strip_or_none(
-        previous_failure
-    )
+    sanitized_retry_context = _strip_or_none(retry_context)
     sections: list[str] = [
         f"Attempt {attempt}",
         base_prompt,

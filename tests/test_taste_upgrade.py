@@ -1,19 +1,19 @@
 from __future__ import annotations
 
 import argparse
-import hashlib
 from pathlib import Path
 
 import pytest
-from conftest import extract_settle_path, init_repo, make_taste_agent_writer
+from conftest import extract_settle_path, init_taste_project, make_taste_agent_writer
 
 from continuous_refactoring.cli import _handle_taste, build_parser
 from continuous_refactoring.config import (
     TASTE_CURRENT_VERSION,
     default_taste_text,
     global_dir,
-    register_project,
 )
+
+_AGENT_RUNNER_PATH = "continuous_refactoring.cli.run_agent_interactive_until_settled"
 
 
 def _upgrade_args(
@@ -30,6 +30,10 @@ def _upgrade_args(
     )
 
 
+def _fail_if_taste_agent_runs(**_: object) -> int:
+    pytest.fail("taste agent should not be invoked")
+
+
 # ---------------------------------------------------------------------------
 # No-op: current taste → agent NOT invoked
 # ---------------------------------------------------------------------------
@@ -39,36 +43,12 @@ def test_upgrade_noop_on_current_taste(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    init_repo(repo)
-    monkeypatch.chdir(repo)
-    project = register_project(repo)
-    taste_path = project.project_dir / "taste.md"
-    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path = init_taste_project(tmp_path, monkeypatch)
     taste_path.write_text(default_taste_text(), encoding="utf-8")
 
-    calls: list[tuple[str, ...]] = []
-
-    def should_not_run(
-        agent: str,
-        model: str,
-        effort: str,
-        prompt: str,
-        repo_root: Path,
-        **_: object,
-    ) -> int:
-        _ = (prompt, repo_root)
-        calls.append((agent, model, effort))
-        return 0
-
-    monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive_until_settled",
-        should_not_run,
-    )
+    monkeypatch.setattr(_AGENT_RUNNER_PATH, _fail_if_taste_agent_runs)
     _handle_taste(_upgrade_args())
 
-    assert calls == []
     out = capsys.readouterr().out.strip()
     assert "taste already current" in out
     assert "taste --refine" in out
@@ -83,27 +63,9 @@ def test_upgrade_noop_on_current_global_taste(
     gdir.mkdir(parents=True, exist_ok=True)
     (gdir / "taste.md").write_text(default_taste_text(), encoding="utf-8")
 
-    calls: list[tuple[str, ...]] = []
-
-    def should_not_run(
-        agent: str,
-        model: str,
-        effort: str,
-        prompt: str,
-        repo_root: Path,
-        **_: object,
-    ) -> int:
-        _ = (prompt, repo_root)
-        calls.append((agent, model, effort))
-        return 0
-
-    monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive_until_settled",
-        should_not_run,
-    )
+    monkeypatch.setattr(_AGENT_RUNNER_PATH, _fail_if_taste_agent_runs)
     _handle_taste(_upgrade_args(global_=True))
 
-    assert calls == []
     out = capsys.readouterr().out.strip()
     assert "taste already current" in out
     assert "taste --refine" in out
@@ -118,20 +80,11 @@ def test_upgrade_forced_on_legacy_taste(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    init_repo(repo)
-    monkeypatch.chdir(repo)
-    project = register_project(repo)
-    taste_path = project.project_dir / "taste.md"
-    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path = init_taste_project(tmp_path, monkeypatch)
     taste_path.write_text("- Old taste without version.\n", encoding="utf-8")
 
     upgraded = f"taste-scoping-version: {TASTE_CURRENT_VERSION}\n\n- Upgraded.\n"
-    monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive_until_settled",
-        make_taste_agent_writer(content=upgraded),
-    )
+    monkeypatch.setattr(_AGENT_RUNNER_PATH, make_taste_agent_writer(content=upgraded))
     _handle_taste(_upgrade_args())
 
     assert taste_path.read_text(encoding="utf-8") == upgraded
@@ -142,39 +95,13 @@ def test_upgrade_forced_on_legacy_taste(
 def test_upgrade_prompt_mentions_legacy_and_new_dimensions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    init_repo(repo)
-    monkeypatch.chdir(repo)
-    project = register_project(repo)
-    taste_path = project.project_dir / "taste.md"
-    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path = init_taste_project(tmp_path, monkeypatch)
     taste_path.write_text("- Legacy rule.\n", encoding="utf-8")
 
     captured: dict[str, str] = {}
-
-    def capture(
-        agent: str,
-        model: str,
-        effort: str,
-        prompt: str,
-        repo_root: Path,
-        *,
-        content_path: Path,
-        settle_path: Path,
-        **_: object,
-    ) -> int:
-        _ = (agent, model, effort, repo_root)
-        captured["prompt"] = prompt
-        content_path.write_text("- upgraded\n", encoding="utf-8")
-        settle_path.write_text(
-            f"sha256:{hashlib.sha256(b'- upgraded\n').hexdigest()}",
-            encoding="utf-8",
-        )
-        return 0
-
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive_until_settled", capture,
+        _AGENT_RUNNER_PATH,
+        make_taste_agent_writer(content="- upgraded\n", captured=captured),
     )
     _handle_taste(_upgrade_args())
 
@@ -198,13 +125,7 @@ def test_upgrade_requires_agent_flags_when_stale(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    init_repo(repo)
-    monkeypatch.chdir(repo)
-    project = register_project(repo)
-    taste_path = project.project_dir / "taste.md"
-    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path = init_taste_project(tmp_path, monkeypatch)
     taste_path.write_text("- Legacy.\n", encoding="utf-8")
 
     with pytest.raises(SystemExit) as exc_info:
@@ -239,13 +160,7 @@ def test_upgrade_noop_skips_agent_flag_check(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    init_repo(repo)
-    monkeypatch.chdir(repo)
-    project = register_project(repo)
-    taste_path = project.project_dir / "taste.md"
-    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path = init_taste_project(tmp_path, monkeypatch)
     taste_path.write_text(default_taste_text(), encoding="utf-8")
 
     _handle_taste(_upgrade_args(agent=None, model=None, effort=None))

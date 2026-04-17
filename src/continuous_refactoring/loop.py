@@ -419,21 +419,11 @@ def _effective_record(
         return record
     if max_attempts is None or retry < max_attempts:
         return record
-    summary = f"Exhausted {max_attempts} attempts. Last failure: {record.summary}"
-    return DecisionRecord(
+    return replace(
+        record,
         decision="abandon",
         retry_recommendation="new-target",
-        target=record.target,
-        call_role=record.call_role,
-        phase_reached=record.phase_reached,
-        failure_kind=record.failure_kind,
-        summary=summary,
-        next_retry_focus=record.next_retry_focus,
-        agent_last_message_path=record.agent_last_message_path,
-        agent_stdout_path=record.agent_stdout_path,
-        agent_stderr_path=record.agent_stderr_path,
-        tests_stdout_path=record.tests_stdout_path,
-        tests_stderr_path=record.tests_stderr_path,
+        summary=f"Exhausted {max_attempts} attempts. Last failure: {record.summary}",
     )
 
 

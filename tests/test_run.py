@@ -27,15 +27,15 @@ from conftest import (
 )
 
 
-def _read_single_run_summary(tmpdir_root: Path) -> dict[str, object]:
-    run_root = tmpdir_root / "continuous-refactoring"
+def _read_single_run_summary(repo_root: Path) -> dict[str, object]:
+    run_root = repo_root.parent / "tmpdir" / "continuous-refactoring"
     run_dirs = list(run_root.iterdir())
     assert len(run_dirs) == 1
     return json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
 
 
-def _read_single_run_events(tmpdir_root: Path) -> list[dict[str, object]]:
-    run_root = tmpdir_root / "continuous-refactoring"
+def _read_single_run_events(repo_root: Path) -> list[dict[str, object]]:
+    run_root = repo_root.parent / "tmpdir" / "continuous-refactoring"
     run_dirs = list(run_root.iterdir())
     assert len(run_dirs) == 1
     return [
@@ -93,18 +93,10 @@ def _failing_agent(**kwargs: object) -> CommandCapture:
 
 
 def test_run_creates_branch(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
@@ -133,18 +125,10 @@ def test_run_parser_accepts_sleep_flag() -> None:
 
 
 def test_run_pushes_after_commit(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     push_calls: list[tuple[str, str]] = []
 
@@ -169,18 +153,11 @@ def test_run_pushes_after_commit(
 
 
 def test_run_sleeps_only_between_targets(
+    run_loop_env: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
@@ -209,18 +186,10 @@ def test_run_sleeps_only_between_targets(
 
 
 def test_run_no_push_flag(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     push_calls: list[tuple[str, str]] = []
 
@@ -244,18 +213,11 @@ def test_run_no_push_flag(
 
 
 def test_run_does_not_sleep_between_retries(
+    run_loop_env: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     agent_calls = 0
 
@@ -316,19 +278,11 @@ def test_run_does_not_sleep_between_retries(
 
 
 def test_run_reports_and_records_driver_owned_commit_for_agent_commit(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     def committing_agent(**kwargs: object) -> CommandCapture:
         rr = Path(str(kwargs.get("repo_root", "")))
@@ -354,7 +308,7 @@ def test_run_reports_and_records_driver_owned_commit_for_agent_commit(
     assert "continuous refactor: random files" in log
     assert "agent commit" not in log
 
-    summary = _read_single_run_summary(tmpdir_root)
+    summary = _read_single_run_summary(repo_root)
     assert summary["counts"]["commits_created"] == 1
     attempts = summary["attempts"]
     assert len(attempts) == 1
@@ -362,21 +316,13 @@ def test_run_reports_and_records_driver_owned_commit_for_agent_commit(
 
 
 def test_run_routed_planning_reports_and_records_commit(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
+    repo_root = run_loop_env
     live_dir = repo_root / ".migrations"
     live_dir.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
     monkeypatch.setattr(
         "continuous_refactoring.loop._resolve_live_migrations_dir",
         lambda _repo_root: live_dir,
@@ -411,21 +357,13 @@ def test_run_routed_planning_reports_and_records_commit(
 
 
 def test_run_routed_planning_surfaces_human_review_requirement(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
+    repo_root = run_loop_env
     live_dir = repo_root / ".migrations"
     live_dir.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
     monkeypatch.setattr(
         "continuous_refactoring.loop._resolve_live_migrations_dir",
         lambda _repo_root: live_dir,
@@ -451,7 +389,7 @@ def test_run_routed_planning_surfaces_human_review_requirement(
     output = capsys.readouterr().out
     assert "Planning: awaiting human review — phase 2 has a decision gap" in output
 
-    summary = _read_single_run_summary(tmpdir_root)
+    summary = _read_single_run_summary(repo_root)
     assert summary["counts"]["commits_created"] == 1
     attempts = summary["attempts"]
     assert len(attempts) == 1
@@ -459,6 +397,7 @@ def test_run_routed_planning_surfaces_human_review_requirement(
 
 
 def test_run_stops_after_max_consecutive_failures(
+    run_loop_env: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -466,15 +405,7 @@ def test_run_stops_after_max_consecutive_failures(
     # per target increments consecutive_failures exactly once.
     import pytest
 
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", _failing_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
@@ -499,6 +430,7 @@ def test_run_stops_after_max_consecutive_failures(
 
 
 def test_run_resets_consecutive_counter_on_success(
+    run_loop_env: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -506,15 +438,7 @@ def test_run_resets_consecutive_counter_on_success(
     # would shift if retries were wired here.
     import pytest
 
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     call_count = 0
 
@@ -555,18 +479,11 @@ def test_run_resets_consecutive_counter_on_success(
 
 
 def test_run_target_overrides(
+    run_loop_env: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     captured_models: list[str] = []
 
@@ -600,20 +517,12 @@ def test_run_target_overrides(
 
 
 def test_run_undo_commit_on_validation_failure(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     # Relies on default max_attempts=None -> 1 attempt per target so the single
     # validation failure bubbles up as a consecutive failure immediately.
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     def committing_agent(**kwargs: object) -> CommandCapture:
         rr = Path(str(kwargs.get("repo_root", "")))
@@ -656,8 +565,7 @@ def test_run_undo_commit_on_validation_failure(
 
 
 def _repo_with_py_files(repo_root: Path) -> list[str]:
-    """Seed a git repo with three tracked ``.py`` files; return the paths."""
-    init_repo(repo_root)
+    """Seed an already-initialized repo with three tracked ``.py`` files."""
     (repo_root / "src").mkdir(parents=True, exist_ok=True)
     (repo_root / "tests").mkdir(parents=True, exist_ok=True)
     (repo_root / "src" / "foo.py").write_text("# foo\n", encoding="utf-8")
@@ -671,18 +579,11 @@ def _repo_with_py_files(repo_root: Path) -> list[str]:
 
 
 def test_run_extensions_targeting(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
+    repo_root = run_loop_env
     _repo_with_py_files(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
 
     captured_prompts: list[str] = []
 
@@ -704,18 +605,11 @@ def test_run_extensions_targeting(
 
 
 def test_run_extensions_expands_to_multiple_targets(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
+    repo_root = run_loop_env
     tracked = _repo_with_py_files(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
 
     captured_prompts: list[str] = []
 
@@ -735,18 +629,11 @@ def test_run_extensions_expands_to_multiple_targets(
 
 
 def test_run_globs_targeting(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
+    repo_root = run_loop_env
     _repo_with_py_files(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
 
     captured_prompts: list[str] = []
 
@@ -768,11 +655,10 @@ def test_run_globs_targeting(
 
 
 def test_run_max_refactors_samples_from_extensions(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
+    repo_root = run_loop_env
     (repo_root / "src").mkdir(parents=True, exist_ok=True)
     for name in ("a.py", "b.py", "c.py", "d.py", "e.py"):
         (repo_root / "src" / name).write_text(f"# {name}\n", encoding="utf-8")
@@ -780,14 +666,6 @@ def test_run_max_refactors_samples_from_extensions(
     continuous_refactoring.run_command(
         ["git", "commit", "-m", "five py"], cwd=repo_root,
     )
-
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
 
     agent_calls = 0
 
@@ -857,25 +735,16 @@ def test_cli_does_not_cap_max_refactors(
 
 
 def test_run_random_fallback_targeting(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
+    repo_root = run_loop_env
     # Add a Python file so there's something to find
     (repo_root / "hello.py").write_text("print('hi')\n", encoding="utf-8")
     continuous_refactoring.run_command(["git", "add", "hello.py"], cwd=repo_root)
     continuous_refactoring.run_command(
         ["git", "commit", "-m", "add hello"], cwd=repo_root,
     )
-
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
 
     captured_prompts: list[str] = []
 
@@ -897,19 +766,11 @@ def test_run_random_fallback_targeting(
 
 
 def test_run_ctrl_c_discards_and_summarizes(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     def interrupting_agent(**kwargs: object) -> CommandCapture:
         raise KeyboardInterrupt
@@ -926,20 +787,12 @@ def test_run_ctrl_c_discards_and_summarizes(
 
 
 def test_cli_errors_when_no_targets_and_no_scope_instruction(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import pytest
 
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     args = argparse.Namespace(
         agent="codex",
@@ -967,18 +820,11 @@ def test_cli_errors_when_no_targets_and_no_scope_instruction(
 
 
 def test_run_samples_targets_when_max_refactors_lt_total(
+    run_loop_env: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     agent_calls = 0
 
@@ -1017,18 +863,10 @@ def _count_validation_calls(stdout_path: object) -> bool:
 
 
 def test_run_retries_on_validation_failure_and_succeeds(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     agent_calls = 0
     validation_calls = 0
@@ -1074,18 +912,10 @@ def test_run_retries_on_validation_failure_and_succeeds(
 
 
 def test_run_exhausts_max_attempts_on_persistent_validation_failure(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     agent_calls = 0
 
@@ -1129,20 +959,12 @@ def test_run_exhausts_max_attempts_on_persistent_validation_failure(
 
 
 def test_run_exhausts_max_attempts_on_persistent_agent_failure(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     import pytest
 
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     agent_calls = 0
     validation_calls = 0
@@ -1185,18 +1007,10 @@ def test_run_exhausts_max_attempts_on_persistent_agent_failure(
 
 
 def test_run_retry_prompt_uses_sanitized_failure_context(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     captured_prompts: list[str] = []
 
@@ -1264,18 +1078,11 @@ def test_run_retry_prompt_uses_sanitized_failure_context(
 
 
 def test_run_records_retry_and_abandon_transitions_with_failure_docs(
+    run_loop_env: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     agent_calls = 0
 
@@ -1329,7 +1136,7 @@ def test_run_records_retry_and_abandon_transitions_with_failure_docs(
     assert exit_code == 0
     assert agent_calls == 3
 
-    summary = _read_single_run_summary(tmpdir_root)
+    summary = _read_single_run_summary(repo_root)
     attempts = summary["attempts"]
     assert attempts[0]["decision"] == "abandon"
     assert attempts[0]["retry_recommendation"] == "new-target"
@@ -1337,7 +1144,7 @@ def test_run_records_retry_and_abandon_transitions_with_failure_docs(
     assert attempts[0]["reason_doc_path"]
     assert attempts[1]["decision"] == "commit"
 
-    events = _read_single_run_events(tmpdir_root)
+    events = _read_single_run_events(repo_root)
     call_roles = [event.get("call_role") for event in events]
     assert "refactor" in call_roles
     assert "validation" in call_roles
@@ -1361,18 +1168,10 @@ def test_run_records_retry_and_abandon_transitions_with_failure_docs(
 
 
 def test_run_successful_retry_clears_reason_doc_from_summary(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
 
@@ -1400,27 +1199,19 @@ def test_run_successful_retry_clears_reason_doc_from_summary(
     )
 
     assert exit_code == 0
-    summary = _read_single_run_summary(tmpdir_root)
+    summary = _read_single_run_summary(repo_root)
     attempts = summary["attempts"]
     assert attempts[0]["decision"] == "commit"
     assert attempts[0]["reason_doc_path"] is None
 
 
 def test_run_planning_failure_writes_reason_doc_and_logs_stage(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
+    repo_root = run_loop_env
     live_dir = repo_root / ".migrations"
     live_dir.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
     monkeypatch.setattr(
         "continuous_refactoring.loop._resolve_live_migrations_dir",
         lambda _repo_root: live_dir,
@@ -1445,7 +1236,7 @@ def test_run_planning_failure_writes_reason_doc_and_logs_stage(
     with pytest.raises(ContinuousRefactorError, match="1 consecutive failures"):
         continuous_refactoring.run_loop(args)
 
-    events = _read_single_run_events(tmpdir_root)
+    events = _read_single_run_events(repo_root)
     planning_events = [
         event for event in events if event.get("call_role") == "planning.approaches"
     ]
@@ -1460,21 +1251,14 @@ def test_run_planning_failure_writes_reason_doc_and_logs_stage(
 
 
 def test_run_phase_ready_check_failure_logs_phase_ready_role(
+    run_loop_env: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
+    repo_root = run_loop_env
     live_dir = tmp_path / "live-migrations"
     live_dir.mkdir()
     _write_live_manifest(live_dir)
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
     monkeypatch.setattr(
         "continuous_refactoring.loop._resolve_live_migrations_dir",
         lambda _repo_root: live_dir,
@@ -1495,7 +1279,7 @@ def test_run_phase_ready_check_failure_logs_phase_ready_role(
     with pytest.raises(ContinuousRefactorError, match="1 consecutive failures"):
         continuous_refactoring.run_loop(args)
 
-    events = _read_single_run_events(tmpdir_root)
+    events = _read_single_run_events(repo_root)
     assert any(
         event.get("call_role") == "phase.ready-check"
         and event.get("call_status") == "failed"
@@ -1509,21 +1293,14 @@ def test_run_phase_ready_check_failure_logs_phase_ready_role(
 
 
 def test_run_phase_execute_validation_failure_logs_phase_validation_role(
+    run_loop_env: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
+    repo_root = run_loop_env
     live_dir = tmp_path / "live-migrations"
     live_dir.mkdir()
     _write_live_manifest(live_dir)
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
     monkeypatch.setattr(
         "continuous_refactoring.loop._resolve_live_migrations_dir",
         lambda _repo_root: live_dir,
@@ -1560,7 +1337,7 @@ def test_run_phase_execute_validation_failure_logs_phase_validation_role(
     with pytest.raises(ContinuousRefactorError, match="1 consecutive failures"):
         continuous_refactoring.run_loop(args)
 
-    events = _read_single_run_events(tmpdir_root)
+    events = _read_single_run_events(repo_root)
     assert any(
         event.get("call_role") == "phase.execute"
         and event.get("call_status") == "finished"
@@ -1579,21 +1356,14 @@ def test_run_phase_execute_validation_failure_logs_phase_validation_role(
 
 
 def test_run_phase_execute_validation_infra_failure_logs_phase_validation_role(
+    run_loop_env: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
+    repo_root = run_loop_env
     live_dir = tmp_path / "live-migrations"
     live_dir.mkdir()
     _write_live_manifest(live_dir)
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
     monkeypatch.setattr(
         "continuous_refactoring.loop._resolve_live_migrations_dir",
         lambda _repo_root: live_dir,
@@ -1636,7 +1406,7 @@ def test_run_phase_execute_validation_infra_failure_logs_phase_validation_role(
     with pytest.raises(ContinuousRefactorError, match="1 consecutive failures"):
         continuous_refactoring.run_loop(args)
 
-    events = _read_single_run_events(tmpdir_root)
+    events = _read_single_run_events(repo_root)
     assert any(
         event.get("call_role") == "phase.validation"
         and event.get("call_status") == "failed"
@@ -1645,18 +1415,10 @@ def test_run_phase_execute_validation_infra_failure_logs_phase_validation_role(
 
 
 def test_run_retry_prompt_includes_fix_amendment(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     captured_prompts: list[str] = []
 
@@ -1694,18 +1456,10 @@ def test_run_retry_prompt_includes_fix_amendment(
 
 
 def test_run_max_attempts_zero_is_unlimited_until_success(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     agent_calls = 0
 
@@ -1754,18 +1508,11 @@ def test_run_max_attempts_zero_is_unlimited_until_success(
 
 
 def test_run_custom_fix_prompt_file(
+    run_loop_env: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     fix_prompt = tmp_path / "fix.md"
     fix_prompt.write_text("CUSTOM-FIX-BANNER: be very careful\n", encoding="utf-8")
@@ -1811,18 +1558,10 @@ def test_run_custom_fix_prompt_file(
 
 
 def test_run_undo_commit_between_retries(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     agent_calls = 0
 
@@ -1877,19 +1616,11 @@ def test_run_undo_commit_between_retries(
 
 
 def test_run_agent_failure_undoes_commit_before_retry(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Agent that commits then exits non-zero must not leak the commit into retry 2."""
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     base_sha = continuous_refactoring.run_command(
         ["git", "rev-parse", "HEAD"], cwd=repo_root,
@@ -1945,18 +1676,10 @@ def test_run_agent_failure_undoes_commit_before_retry(
 
 
 def test_run_use_branch_creates_when_absent(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
@@ -1968,18 +1691,10 @@ def test_run_use_branch_creates_when_absent(
 
 
 def test_run_use_branch_reuses_existing(
-    tmp_path: Path,
+    run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    tmpdir_root = tmp_path / "tmpdir"
-    tmpdir_root.mkdir()
-    xdg_root = tmp_path / "xdg"
-    xdg_root.mkdir()
-
-    monkeypatch.setenv("TMPDIR", str(tmpdir_root))
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    repo_root = run_loop_env
 
     # Pre-create the branch with a distinct commit so we can verify reuse.
     continuous_refactoring.run_command(

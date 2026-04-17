@@ -342,8 +342,7 @@ def make_run_loop_args(
 # ---------------------------------------------------------------------------
 
 
-@pytest.fixture
-def run_once_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+def _prepare_run_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     repo_root = tmp_path / "repo"
     init_repo(repo_root)
     (tmp_path / "tmpdir").mkdir()
@@ -351,6 +350,16 @@ def run_once_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     return repo_root
+
+
+@pytest.fixture
+def run_once_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    return _prepare_run_env(tmp_path, monkeypatch)
+
+
+@pytest.fixture
+def run_loop_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    return _prepare_run_env(tmp_path, monkeypatch)
 
 
 @pytest.fixture

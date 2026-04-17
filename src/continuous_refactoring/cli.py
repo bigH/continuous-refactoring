@@ -662,10 +662,9 @@ def _handle_review_perform(args: argparse.Namespace) -> None:
 
 
 def _handle_review(args: argparse.Namespace) -> None:
-    review_command = getattr(args, "review_command", None)
-    if review_command == "list":
+    if args.review_command == "list":
         return _handle_review_list()
-    if review_command == "perform":
+    if args.review_command == "perform":
         return _handle_review_perform(args)
     print(_REVIEW_USAGE, file=sys.stderr)
     raise SystemExit(2)

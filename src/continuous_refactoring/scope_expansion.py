@@ -4,6 +4,7 @@ import json
 import re
 import subprocess
 from collections import Counter, defaultdict
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
@@ -272,49 +273,34 @@ def _candidate_from_files(
     )
 
 
-def _cross_ranked_paths(
+def _rank_paths(
     scores: Counter[str],
     support: dict[str, tuple[str, ...]],
     seed_file: str,
+    include: Callable[[bool, tuple[str, ...]], bool],
 ) -> list[str]:
     seed_parent = _cluster_label(seed_file)
-    ranked: list[tuple[int, str]] = []
-    for path, score in scores.items():
-        evidence = support.get(path, ())
-        same_dir = _cluster_label(path) == seed_parent
-        if (
-            same_dir
-            and evidence
-            and all(line.startswith("git co-change") for line in evidence)
-        ):
-            continue
-        ranked.append((score, path))
+    ranked = [
+        (score, path)
+        for path, score in scores.items()
+        if include(_cluster_label(path) == seed_parent, support.get(path, ()))
+    ]
     ranked.sort(key=lambda item: (-item[0], item[1]))
     return [path for _score, path in ranked]
 
 
-def _local_ranked_paths(
-    scores: Counter[str],
-    support: dict[str, tuple[str, ...]],
-    seed_file: str,
-) -> list[str]:
-    seed_parent = _cluster_label(seed_file)
-    ranked: list[tuple[int, str]] = []
-    for path, score in scores.items():
-        evidence = support.get(path, ())
-        same_dir = _cluster_label(path) == seed_parent
-        has_pairing = any(
-            line.startswith("source/test pairing")
-            for line in evidence
-        )
-        has_non_cochange = any(
-            not line.startswith("git co-change")
-            for line in evidence
-        )
-        if has_pairing or (same_dir and has_non_cochange):
-            ranked.append((score, path))
-    ranked.sort(key=lambda item: (-item[0], item[1]))
-    return [path for _score, path in ranked]
+def _include_local(same_dir: bool, evidence: tuple[str, ...]) -> bool:
+    has_pairing = any(line.startswith("source/test pairing") for line in evidence)
+    has_non_cochange = any(not line.startswith("git co-change") for line in evidence)
+    return has_pairing or (same_dir and has_non_cochange)
+
+
+def _include_cross(same_dir: bool, evidence: tuple[str, ...]) -> bool:
+    return not (
+        same_dir
+        and evidence
+        and all(line.startswith("git co-change") for line in evidence)
+    )
 
 
 def build_scope_candidates(
@@ -369,7 +355,7 @@ def build_scope_candidates(
 
     candidates = [_build_seed_candidate(seed_file)]
 
-    local_ranked = _local_ranked_paths(scores, support, seed_file)
+    local_ranked = _rank_paths(scores, support, seed_file, _include_local)
     local_extras = tuple(local_ranked[: max_files - 1])
     if local_extras:
         local_files = (seed_file, *local_extras)
@@ -377,7 +363,7 @@ def build_scope_candidates(
             _candidate_from_files("local-cluster", seed_file, local_files, support)
         )
 
-    cross_ranked = _cross_ranked_paths(scores, support, seed_file)
+    cross_ranked = _rank_paths(scores, support, seed_file, _include_cross)
     cross_extras = tuple(cross_ranked[: max_files - 1])
     if cross_extras:
         cross_files = (seed_file, *cross_extras)

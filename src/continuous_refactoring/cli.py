@@ -281,11 +281,7 @@ def _handle_init(args: argparse.Namespace) -> None:
 
 
 def _resolve_taste_path(global_: bool) -> Path:
-    from continuous_refactoring.config import (
-        ContinuousRefactorError as ConfigError,
-        global_dir,
-        resolve_project,
-    )
+    from continuous_refactoring.config import global_dir, resolve_project
 
     if global_:
         path = global_dir() / "taste.md"
@@ -294,7 +290,7 @@ def _resolve_taste_path(global_: bool) -> Path:
 
     try:
         project = resolve_project(Path.cwd().resolve())
-    except ConfigError:
+    except ContinuousRefactorError:
         print(
             "Error: project not initialized. Run 'continuous-refactoring init' first.",
             file=sys.stderr,

@@ -80,7 +80,7 @@ def test_eligible_now(
 # ---------------------------------------------------------------------------
 
 def test_bump_last_touch_returns_new_manifest() -> None:
-    original = _manifest(last_touch=NOW - timedelta(hours=10))
+    original = _manifest(last_touch=_ago(hours=10))
     bumped = bump_last_touch(original, NOW)
     assert bumped is not original
     assert bumped.last_touch == NOW.isoformat(timespec="milliseconds")
@@ -89,8 +89,8 @@ def test_bump_last_touch_returns_new_manifest() -> None:
 
 def test_bump_last_touch_preserves_other_fields() -> None:
     original = _manifest(
-        last_touch=NOW - timedelta(hours=10),
-        wake_up_on=NOW + timedelta(days=1),
+        last_touch=_ago(hours=10),
+        wake_up_on=_future(days=1),
     )
     bumped = bump_last_touch(original, NOW)
     assert bumped.name == original.name

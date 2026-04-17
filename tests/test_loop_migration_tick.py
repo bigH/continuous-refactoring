@@ -22,7 +22,6 @@ from continuous_refactoring.migrations import (
 from continuous_refactoring.phases import ExecutePhaseOutcome
 
 from conftest import (
-    init_repo,
     make_run_once_args,
     noop_agent,
     noop_tests,
@@ -162,25 +161,24 @@ def _patch_execute_phase(
     calls: list[str] = []
 
     def fake(
-        phase: object, manifest: object,
-        taste: object, repo_root: object, live_dir: object,
+        phase: PhaseSpec, manifest: MigrationManifest,
+        taste: object, repo_root: object, live_dir: Path,
         artifacts: object, **kwargs: object,
     ) -> ExecutePhaseOutcome:
-        calls.append(getattr(phase, "name", ""))
-        m = manifest  # type: ignore[assignment]
+        calls.append(phase.name)
         updated_phases = tuple(
-            replace(p, done=True) if i == m.current_phase else p
-            for i, p in enumerate(m.phases)
+            replace(p, done=True) if i == manifest.current_phase else p
+            for i, p in enumerate(manifest.phases)
         )
         updated = replace(
-            m,
+            manifest,
             phases=updated_phases,
-            current_phase=m.current_phase + 1,
+            current_phase=manifest.current_phase + 1,
             last_touch=_utc_now().isoformat(timespec="milliseconds"),
         )
-        mp = migration_root(Path(str(live_dir)), m.name) / "manifest.json"
+        mp = migration_root(live_dir, manifest.name) / "manifest.json"
         save_manifest(updated, mp)
-        return ExecutePhaseOutcome(status=status, reason=reason)  # type: ignore[arg-type]
+        return ExecutePhaseOutcome(status=status, reason=reason)
 
     monkeypatch.setattr("continuous_refactoring.loop.execute_phase", fake)
     return calls
@@ -271,7 +269,7 @@ def test_eligible_not_ready_bumps_wake_up_on(
     run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     now = _utc_now()
-    live_dir, manifest, manifest_path = _seed_manifest(
+    live_dir, _, manifest_path = _seed_manifest(
         run_once_env,
         name="rework-auth",
         last_touch=now - timedelta(hours=24),
@@ -295,7 +293,6 @@ def test_eligible_not_ready_bumps_wake_up_on(
     assert reloaded.current_phase == 0
 
     _assert_fell_through(classifier_calls, prompts)
-    assert manifest.current_phase == 0
 
 
 # ---------------------------------------------------------------------------

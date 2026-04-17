@@ -7,48 +7,65 @@ import pytest
 import continuous_refactoring
 import continuous_refactoring.loop
 from continuous_refactoring.artifacts import RunArtifacts, create_run_artifacts
+from continuous_refactoring.loop import RouteResult
 from continuous_refactoring.targeting import Target
 
 from conftest import init_repo, make_run_once_args
 
 
-def _make_artifacts(
-    repo_root: Path,
+@pytest.fixture
+def routing_env(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-) -> RunArtifacts:
+) -> tuple[Path, RunArtifacts]:
+    repo_root = tmp_path / "repo"
+    init_repo(repo_root)
+    (repo_root / ".migrations").mkdir()
     tmpdir = tmp_path / "tmpdir"
     tmpdir.mkdir()
     monkeypatch.setenv("TMPDIR", str(tmpdir))
-    return create_run_artifacts(
+    artifacts = create_run_artifacts(
         repo_root=repo_root,
         agent="codex",
         model="fake",
         effort="low",
         test_command="true",
     )
-
-
-def test_expanded_target_reaches_classifier(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    live_dir = repo_root / ".migrations"
-    live_dir.mkdir()
-    artifacts = _make_artifacts(repo_root, tmp_path, monkeypatch)
-
-    seen_files: list[tuple[str, ...]] = []
-
     monkeypatch.setattr(
         "continuous_refactoring.loop._resolve_live_migrations_dir",
-        lambda _repo_root: live_dir,
+        lambda _repo_root: repo_root / ".migrations",
     )
     monkeypatch.setattr(
         "continuous_refactoring.loop._try_migration_tick",
         lambda *_args, **_kwargs: ("not-routed", None),
     )
+    return repo_root, artifacts
+
+
+def _invoke_route_and_run(
+    repo_root: Path, artifacts: RunArtifacts, target: Target,
+) -> RouteResult:
+    return continuous_refactoring.loop._route_and_run(
+        target,
+        "taste",
+        repo_root,
+        artifacts,
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        commit_message_prefix="continuous refactor",
+        attempt=1,
+    )
+
+
+def test_expanded_target_reaches_classifier(
+    routing_env: tuple[Path, RunArtifacts],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, artifacts = routing_env
+    seen_files: list[tuple[str, ...]] = []
+
     monkeypatch.setattr(
         "continuous_refactoring.loop._expand_target_for_classification",
         lambda target, *_args, **_kwargs: (
@@ -67,17 +84,10 @@ def test_expanded_target_reaches_classifier(
 
     monkeypatch.setattr("continuous_refactoring.loop.classify_target", fake_classifier)
 
-    result = continuous_refactoring.loop._route_and_run(
-        Target(description="seed", files=("README.md",), provenance="globs"),
-        "taste",
+    result = _invoke_route_and_run(
         repo_root,
         artifacts,
-        agent="codex",
-        model="fake",
-        effort="low",
-        timeout=None,
-        commit_message_prefix="continuous refactor",
-        attempt=1,
+        Target(description="seed", files=("README.md",), provenance="globs"),
     )
 
     assert seen_files == [("README.md", "src/expanded.py")]
@@ -127,26 +137,13 @@ def test_cohesive_cleanup_runs_one_shot_against_expanded_files(
 
 
 def test_needs_plan_receives_expanded_scope_context(
-    tmp_path: Path,
+    routing_env: tuple[Path, RunArtifacts],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    live_dir = repo_root / ".migrations"
-    live_dir.mkdir()
-    artifacts = _make_artifacts(repo_root, tmp_path, monkeypatch)
-
+    repo_root, artifacts = routing_env
     captured: dict[str, str] = {}
     planning_context = "Selected scope candidate: cross-cluster\n- src/foo.py\n- tests/test_foo.py"
 
-    monkeypatch.setattr(
-        "continuous_refactoring.loop._resolve_live_migrations_dir",
-        lambda _repo_root: live_dir,
-    )
-    monkeypatch.setattr(
-        "continuous_refactoring.loop._try_migration_tick",
-        lambda *_args, **_kwargs: ("not-routed", None),
-    )
     monkeypatch.setattr(
         "continuous_refactoring.loop._expand_target_for_classification",
         lambda target, *_args, **_kwargs: (
@@ -173,17 +170,10 @@ def test_needs_plan_receives_expanded_scope_context(
 
     monkeypatch.setattr("continuous_refactoring.loop.run_planning", fake_run_planning)
 
-    result = continuous_refactoring.loop._route_and_run(
-        Target(description="seed", files=("src/foo.py",), provenance="globs"),
-        "taste",
+    result = _invoke_route_and_run(
         repo_root,
         artifacts,
-        agent="codex",
-        model="fake",
-        effort="low",
-        timeout=None,
-        commit_message_prefix="continuous refactor",
-        attempt=1,
+        Target(description="seed", files=("src/foo.py",), provenance="globs"),
     )
 
     assert result.outcome == "commit"

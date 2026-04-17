@@ -4,19 +4,14 @@ import argparse
 import json
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
-
-if TYPE_CHECKING:
-    pass
 
 import continuous_refactoring
 import continuous_refactoring.loop
 from continuous_refactoring.cli import build_parser
 from continuous_refactoring.artifacts import CommandCapture, ContinuousRefactorError
 from continuous_refactoring.migrations import MigrationManifest, PhaseSpec, save_manifest
-from continuous_refactoring.targeting import Target
 
 from conftest import (
     failing_tests,
@@ -403,8 +398,6 @@ def test_run_stops_after_max_consecutive_failures(
 ) -> None:
     # Relies on default max_attempts=None -> 1 attempt per target; one agent failure
     # per target increments consecutive_failures exactly once.
-    import pytest
-
     repo_root = run_loop_env
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", _failing_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
@@ -436,8 +429,6 @@ def test_run_resets_consecutive_counter_on_success(
 ) -> None:
     # Relies on default max_attempts=None -> 1 attempt per target; counter semantics
     # would shift if retries were wired here.
-    import pytest
-
     repo_root = run_loop_env
 
     call_count = 0
@@ -554,7 +545,6 @@ def test_run_undo_commit_on_validation_failure(
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", baseline_passes_then_fails)
 
     args = make_run_loop_args(repo_root, max_refactors=1, max_consecutive_failures=1)
-    import pytest
     with pytest.raises(ContinuousRefactorError, match="consecutive failures"):
         continuous_refactoring.run_loop(args)
 
@@ -687,8 +677,6 @@ def test_cli_does_not_cap_max_refactors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import pytest
-
     repo_root = tmp_path / "repo"
     init_repo(repo_root)
 
@@ -790,8 +778,6 @@ def test_cli_errors_when_no_targets_and_no_scope_instruction(
     run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import pytest
-
     repo_root = run_loop_env
 
     args = argparse.Namespace(
@@ -962,8 +948,6 @@ def test_run_exhausts_max_attempts_on_persistent_agent_failure(
     run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    import pytest
-
     repo_root = run_loop_env
 
     agent_calls = 0

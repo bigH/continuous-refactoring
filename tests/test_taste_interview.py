@@ -1,12 +1,16 @@
 from __future__ import annotations
 
 import argparse
-import subprocess
 from pathlib import Path
 from collections.abc import Callable
 
 import pytest
-from conftest import extract_settle_path, make_taste_agent_writer
+from conftest import (
+    extract_settle_path,
+    init_repo,
+    init_taste_project,
+    make_taste_agent_writer,
+)
 
 from continuous_refactoring.cli import _handle_taste, build_parser
 from continuous_refactoring.config import (
@@ -18,42 +22,6 @@ from continuous_refactoring.config import (
 _AGENT_RUNNER_PATH = "continuous_refactoring.cli.run_agent_interactive_until_settled"
 
 
-def _init_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@example.com"],
-        cwd=path, check=True, capture_output=True,
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "Test User"],
-        cwd=path, check=True, capture_output=True,
-    )
-    (path / "README.md").write_text("seed\n", encoding="utf-8")
-    subprocess.run(
-        ["git", "add", "README.md"], cwd=path, check=True, capture_output=True,
-    )
-    subprocess.run(
-        ["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True,
-    )
-
-
-def _init_test_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    return repo
-
-
-def _init_taste_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    repo = _init_test_repo(tmp_path, monkeypatch)
-    monkeypatch.chdir(repo)
-    project = register_project(repo)
-    taste_path = project.project_dir / "taste.md"
-    taste_path.parent.mkdir(parents=True, exist_ok=True)
-    return taste_path
-
-
 def _interview_args(
     *, global_: bool = False, force: bool = False,
     agent: str | None = "codex", model: str | None = "m", effort: str | None = "high",
@@ -61,17 +29,6 @@ def _interview_args(
     return argparse.Namespace(
         global_=global_, interview=True, agent=agent, model=model,
         effort=effort, force=force,
-    )
-
-
-def _make_taste_agent_stub(
-    *,
-    content: str | None = None,
-    return_code: int = 0,
-    captured: dict[str, str] | None = None,
-) -> Callable[..., int]:
-    return make_taste_agent_writer(
-        content=content, return_code=return_code, captured=captured,
     )
 
 
@@ -161,11 +118,11 @@ def test_interview_writes_taste_project_level(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    taste_path = _init_taste_project(tmp_path, monkeypatch)
+    taste_path = init_taste_project(tmp_path, monkeypatch)
 
     monkeypatch.setattr(
         _AGENT_RUNNER_PATH,
-        _make_taste_agent_stub(content="- custom rule\n"),
+        make_taste_agent_writer(content="- custom rule\n"),
     )
     _handle_taste(_interview_args())
 
@@ -184,7 +141,7 @@ def test_interview_writes_taste_global(
 
     monkeypatch.setattr(
         _AGENT_RUNNER_PATH,
-        _make_taste_agent_stub(content="- global rule\n"),
+        make_taste_agent_writer(content="- global rule\n"),
     )
     _handle_taste(_interview_args(global_=True))
 
@@ -203,7 +160,7 @@ def test_interview_refuses_overwrite_without_force(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    taste_path = _init_taste_project(tmp_path, monkeypatch)
+    taste_path = init_taste_project(tmp_path, monkeypatch)
     taste_path.write_text("- pre-existing custom\n", encoding="utf-8")
 
     calls: list[tuple[str, ...]] = []
@@ -225,12 +182,12 @@ def test_interview_refuses_overwrite_without_force(
 def test_interview_allows_overwrite_on_default_content(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    taste_path = _init_taste_project(tmp_path, monkeypatch)
+    taste_path = init_taste_project(tmp_path, monkeypatch)
     taste_path.write_text(default_taste_text(), encoding="utf-8")
 
     monkeypatch.setattr(
         _AGENT_RUNNER_PATH,
-        _make_taste_agent_stub(content="- overwritten\n"),
+        make_taste_agent_writer(content="- overwritten\n"),
     )
     _handle_taste(_interview_args())  # no --force
 
@@ -241,12 +198,12 @@ def test_interview_allows_overwrite_on_default_content(
 def test_interview_backup_on_force(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    taste_path = _init_taste_project(tmp_path, monkeypatch)
+    taste_path = init_taste_project(tmp_path, monkeypatch)
     taste_path.write_text("original\n", encoding="utf-8")
 
     monkeypatch.setattr(
         _AGENT_RUNNER_PATH,
-        _make_taste_agent_stub(content="- replacement\n"),
+        make_taste_agent_writer(content="- replacement\n"),
     )
     _handle_taste(_interview_args(force=True))
 
@@ -264,13 +221,13 @@ def test_interview_errors_if_agent_did_not_write(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    taste_path = _init_taste_project(tmp_path, monkeypatch)
+    taste_path = init_taste_project(tmp_path, monkeypatch)
     if taste_path.exists():
         taste_path.unlink()
 
     monkeypatch.setattr(
         _AGENT_RUNNER_PATH,
-        _make_taste_agent_stub(),
+        make_taste_agent_writer(),
     )
     with pytest.raises(SystemExit) as exc_info:
         _handle_taste(_interview_args())
@@ -286,13 +243,13 @@ def test_interview_errors_on_agent_failure(
 ) -> None:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     repo = tmp_path / "project"
-    _init_repo(repo)
+    init_repo(repo)
     monkeypatch.chdir(repo)
     register_project(repo)
 
     monkeypatch.setattr(
         _AGENT_RUNNER_PATH,
-        _make_taste_agent_stub(return_code=42),
+        make_taste_agent_writer(return_code=42),
     )
     with pytest.raises(SystemExit) as exc_info:
         _handle_taste(_interview_args())
@@ -312,7 +269,7 @@ def test_interview_prompt_includes_existing_content(
 ) -> None:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     repo = tmp_path / "project"
-    _init_repo(repo)
+    init_repo(repo)
     monkeypatch.chdir(repo)
     project = register_project(repo)
     taste_path = project.project_dir / "taste.md"
@@ -324,7 +281,7 @@ def test_interview_prompt_includes_existing_content(
 
     monkeypatch.setattr(
         _AGENT_RUNNER_PATH,
-        _make_taste_agent_stub(content="- new\n", captured=captured),
+        make_taste_agent_writer(content="- new\n", captured=captured),
     )
     _handle_taste(_interview_args(force=True))
 

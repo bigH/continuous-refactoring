@@ -12,6 +12,7 @@ import pytest
 import continuous_refactoring
 import continuous_refactoring.loop
 from continuous_refactoring.artifacts import CommandCapture
+from continuous_refactoring.config import register_project
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +91,17 @@ def init_repo(path: Path) -> None:
     (path / "README.md").write_text("seed\n", encoding="utf-8")
     continuous_refactoring.run_command(["git", "add", "README.md"], cwd=path)
     continuous_refactoring.run_command(["git", "commit", "-m", "init"], cwd=path)
+
+
+def init_taste_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "project"
+    init_repo(repo)
+    monkeypatch.chdir(repo)
+    project = register_project(repo)
+    taste_path = project.project_dir / "taste.md"
+    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    return taste_path
 
 
 def write_fake_codex(bin_dir: Path) -> Path:

@@ -30,12 +30,6 @@ def _refine_args(
     )
 
 
-def _assert_refined_taste_written(path: Path, expected: str) -> None:
-    assert path.read_text(encoding="utf-8") == expected
-    assert not path.with_name("taste.md.done").exists()
-    assert not path.with_name("taste.md.bak").exists()
-
-
 def test_refine_requires_agent_flags(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -97,7 +91,9 @@ def test_refine_writes_existing_taste_in_place(
     )
     _handle_taste(_refine_args(global_=global_))
 
-    _assert_refined_taste_written(taste_path, expected)
+    assert taste_path.read_text(encoding="utf-8") == expected
+    assert not taste_path.with_name("taste.md.done").exists()
+    assert not taste_path.with_name("taste.md.bak").exists()
     out = capsys.readouterr().out.strip()
     assert out == str(taste_path)
 

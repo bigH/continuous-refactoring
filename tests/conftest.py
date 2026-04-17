@@ -57,14 +57,6 @@ def make_taste_agent_writer(
         taste_path = extract_taste_path(prompt)
         assert content_path == taste_path
         assert settle_path == extract_settle_path(prompt)
-        _ = (
-            agent,
-            model,
-            effort,
-            repo_root,
-            settle_window_seconds,
-            poll_interval_seconds,
-        )
         if captured is not None:
             captured["prompt"] = prompt
         if content is None:

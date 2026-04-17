@@ -9,6 +9,8 @@ from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
 
+from continuous_refactoring.artifacts import ContinuousRefactorError
+
 __all__ = [
     "CONFIG_CURRENT_VERSION",
     "ProjectEntry",
@@ -35,8 +37,6 @@ __all__ = [
     "taste_is_stale",
     "xdg_data_home",
 ]
-
-from continuous_refactoring.artifacts import ContinuousRefactorError
 
 CONFIG_CURRENT_VERSION = 1
 TASTE_CURRENT_VERSION = 1
@@ -116,24 +116,15 @@ def _load_manifest_payload() -> dict[str, object]:
     return raw
 
 
-def _require_str_field(data: dict[str, object], key: str, *, project_id: str) -> str:
-    value = data.get(key)
-    if value is None:
-        raise ContinuousRefactorError(
-            f"Manifest file is malformed: project '{project_id}' missing '{key}'."
-        )
-    if not isinstance(value, str):
-        raise ContinuousRefactorError(
-            f"Manifest file is malformed: project '{project_id}' field '{key}' must be a string."
-        )
-    return value
-
-
-def _require_optional_str_field(
-    data: dict[str, object], key: str, *, project_id: str
+def _str_field(
+    data: dict[str, object], key: str, *, project_id: str, required: bool
 ) -> str | None:
     value = data.get(key)
     if value is None:
+        if required:
+            raise ContinuousRefactorError(
+                f"Manifest file is malformed: project '{project_id}' missing '{key}'."
+            )
         return None
     if not isinstance(value, str):
         raise ContinuousRefactorError(
@@ -147,14 +138,21 @@ def _entry_from_dict(uid: str, data: object) -> ProjectEntry:
         raise ContinuousRefactorError(
             f"Manifest file is malformed: project '{uid}' must be a JSON object."
         )
+
+    def required(key: str) -> str:
+        value = _str_field(data, key, project_id=uid, required=True)
+        assert value is not None
+        return value
+
+    def optional(key: str) -> str | None:
+        return _str_field(data, key, project_id=uid, required=False)
+
     return ProjectEntry(
-        uuid=_require_str_field(data, "uuid", project_id=uid),
-        path=_require_str_field(data, "path", project_id=uid),
-        git_remote=_require_optional_str_field(data, "git_remote", project_id=uid),
-        created_at=_require_str_field(data, "created_at", project_id=uid),
-        live_migrations_dir=_require_optional_str_field(
-            data, "live_migrations_dir", project_id=uid
-        ),
+        uuid=required("uuid"),
+        path=required("path"),
+        git_remote=optional("git_remote"),
+        created_at=required("created_at"),
+        live_migrations_dir=optional("live_migrations_dir"),
     )
 
 
@@ -225,8 +223,10 @@ def _detect_git_remote(path: Path) -> str | None:
         return None
 
 
-def _project_dir(uid: str) -> Path:
-    return app_data_dir() / "projects" / uid
+def _resolved(entry: ProjectEntry) -> ResolvedProject:
+    project_dir = app_data_dir() / "projects" / entry.uuid
+    project_dir.mkdir(parents=True, exist_ok=True)
+    return ResolvedProject(entry=entry, project_dir=project_dir)
 
 
 def reason_for_failure_path(path: Path) -> Path:
@@ -244,9 +244,7 @@ def register_project(path: Path) -> ResolvedProject:
     manifest = load_manifest()
     existing = find_project(resolved, manifest)
     if existing is not None:
-        project_dir = _project_dir(existing.uuid)
-        project_dir.mkdir(parents=True, exist_ok=True)
-        return ResolvedProject(entry=existing, project_dir=project_dir)
+        return _resolved(existing)
 
     uid = str(uuid.uuid4())
     entry = ProjectEntry(
@@ -257,9 +255,7 @@ def register_project(path: Path) -> ResolvedProject:
     )
     manifest[uid] = entry
     save_manifest(manifest)
-    project_dir = _project_dir(uid)
-    project_dir.mkdir(parents=True, exist_ok=True)
-    return ResolvedProject(entry=entry, project_dir=project_dir)
+    return _resolved(entry)
 
 
 def resolve_project(path: Path) -> ResolvedProject:
@@ -269,9 +265,7 @@ def resolve_project(path: Path) -> ResolvedProject:
         raise ContinuousRefactorError(
             f"Project not registered: {path.resolve()}"
         )
-    project_dir = _project_dir(entry.uuid)
-    project_dir.mkdir(parents=True, exist_ok=True)
-    return ResolvedProject(entry=entry, project_dir=project_dir)
+    return _resolved(entry)
 
 
 def resolve_live_migrations_dir(project: ResolvedProject) -> Path | None:

@@ -2,15 +2,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-import subprocess
 from pathlib import Path
-from typing import TYPE_CHECKING
 
 import pytest
-from conftest import extract_settle_path, make_taste_agent_writer
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from conftest import extract_settle_path, init_repo, make_taste_agent_writer
 
 from continuous_refactoring.cli import _handle_taste, build_parser
 from continuous_refactoring.config import (
@@ -19,26 +14,6 @@ from continuous_refactoring.config import (
     global_dir,
     register_project,
 )
-
-
-def _init_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@example.com"],
-        cwd=path, check=True, capture_output=True,
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "Test User"],
-        cwd=path, check=True, capture_output=True,
-    )
-    (path / "README.md").write_text("seed\n", encoding="utf-8")
-    subprocess.run(
-        ["git", "add", "README.md"], cwd=path, check=True, capture_output=True,
-    )
-    subprocess.run(
-        ["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True,
-    )
 
 
 def _upgrade_args(
@@ -55,10 +30,6 @@ def _upgrade_args(
     )
 
 
-def _fake_upgrade_writer(content: str) -> Callable[..., int]:
-    return make_taste_agent_writer(content=content)
-
-
 # ---------------------------------------------------------------------------
 # No-op: current taste → agent NOT invoked
 # ---------------------------------------------------------------------------
@@ -70,7 +41,7 @@ def test_upgrade_noop_on_current_taste(
 ) -> None:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     repo = tmp_path / "project"
-    _init_repo(repo)
+    init_repo(repo)
     monkeypatch.chdir(repo)
     project = register_project(repo)
     taste_path = project.project_dir / "taste.md"
@@ -149,7 +120,7 @@ def test_upgrade_forced_on_legacy_taste(
 ) -> None:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     repo = tmp_path / "project"
-    _init_repo(repo)
+    init_repo(repo)
     monkeypatch.chdir(repo)
     project = register_project(repo)
     taste_path = project.project_dir / "taste.md"
@@ -159,7 +130,7 @@ def test_upgrade_forced_on_legacy_taste(
     upgraded = f"taste-scoping-version: {TASTE_CURRENT_VERSION}\n\n- Upgraded.\n"
     monkeypatch.setattr(
         "continuous_refactoring.cli.run_agent_interactive_until_settled",
-        _fake_upgrade_writer(upgraded),
+        make_taste_agent_writer(content=upgraded),
     )
     _handle_taste(_upgrade_args())
 
@@ -173,7 +144,7 @@ def test_upgrade_prompt_mentions_legacy_and_new_dimensions(
 ) -> None:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     repo = tmp_path / "project"
-    _init_repo(repo)
+    init_repo(repo)
     monkeypatch.chdir(repo)
     project = register_project(repo)
     taste_path = project.project_dir / "taste.md"
@@ -229,7 +200,7 @@ def test_upgrade_requires_agent_flags_when_stale(
 ) -> None:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     repo = tmp_path / "project"
-    _init_repo(repo)
+    init_repo(repo)
     monkeypatch.chdir(repo)
     project = register_project(repo)
     taste_path = project.project_dir / "taste.md"
@@ -270,7 +241,7 @@ def test_upgrade_noop_skips_agent_flag_check(
 ) -> None:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     repo = tmp_path / "project"
-    _init_repo(repo)
+    init_repo(repo)
     monkeypatch.chdir(repo)
     project = register_project(repo)
     taste_path = project.project_dir / "taste.md"

@@ -13,7 +13,7 @@ import continuous_refactoring.loop
 from continuous_refactoring.artifacts import CommandCapture
 from continuous_refactoring.config import load_taste
 from continuous_refactoring.prompts import DEFAULT_REFACTORING_PROMPT, compose_full_prompt
-from continuous_refactoring.targeting import Target, resolve_targets
+from continuous_refactoring.targeting import resolve_targets
 
 from conftest import (
     init_repo,
@@ -30,30 +30,16 @@ def _classifier_trap(*_args: object, **_kwargs: object) -> object:
     )
 
 
-def _expected_one_shot_prompt(
-    repo_root: Path,
-    validation_command: str,
-    scope_instruction: str = "general cleanup",
-) -> str:
-    taste = load_taste(None)
+def _expected_one_shot_prompt(repo_root: Path, validation_command: str) -> str:
     targets = resolve_targets(
         extensions=None, globs=None, targets_path=None, paths=None,
         repo_root=repo_root,
     )
-    target = (
-        targets[0]
-        if targets
-        else Target(
-            description="general refactoring",
-            files=(),
-            scoping=scope_instruction,
-        )
-    )
     return compose_full_prompt(
         base_prompt=DEFAULT_REFACTORING_PROMPT,
-        taste=taste,
-        target=target,
-        scope_instruction=scope_instruction,
+        taste=load_taste(None),
+        target=targets[0],
+        scope_instruction="general cleanup",
         validation_command=validation_command,
         attempt=1,
     )

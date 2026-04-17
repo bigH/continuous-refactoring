@@ -570,7 +570,8 @@ def _run_refactor_attempt(
     discard_workspace_changes(repo_root)
     head_before = get_head_sha(repo_root)
 
-    print(f"\nTarget {attempt} attempt {retry}: {target.description}")
+    if retry > 1:
+        print(f"  retry {retry}")
 
     attempt_dir = artifacts.attempt_dir(attempt, retry=retry) / "refactor"
     last_message_path = (
@@ -1376,6 +1377,7 @@ def run_once(args: argparse.Namespace) -> int:
         )
         artifacts.mark_attempt_started(1)
 
+        print(f"\n── Target: {target.description} ──")
         route_result = _route_and_run(
             target, taste, repo_root, artifacts,
             agent=args.agent, model=model, effort=effort,
@@ -1556,6 +1558,9 @@ def run_loop(args: argparse.Namespace) -> int:
             model = target.model_override or args.model
             effort = target.effort_override or args.effort
 
+            print(
+                f"\n── Target {target_index}/{total_targets}: {target.description} ──"
+            )
             route_result = _route_and_run(
                 target, taste, repo_root, artifacts,
                 agent=args.agent, model=model, effort=effort,

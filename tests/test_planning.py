@@ -216,17 +216,9 @@ def test_initial_decisions(
 # ---------------------------------------------------------------------------
 
 
-def test_review_findings_trigger_revise(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
-    live_dir = tmp_path / "live"
-    live_dir.mkdir()
-    mig_root = migration_root(live_dir, _MIGRATION)
-
-    responses = [
+def _revise_responses() -> list[tuple[str, dict[str, str]]]:
+    """Approaches → expand → review-with-findings → revise → review-2."""
+    return [
         (
             "Generated approach\n",
             {"approaches/big-bang.md": "# Big Bang\nAll at once."},
@@ -239,9 +231,7 @@ def test_review_findings_trigger_revise(
                 "phase-0-prep.md": "Ready when: always\nPrep phase.",
             },
         ),
-        # review with findings
         ("1. Missing rollback step.\n2. Phase order unclear.\n", {}),
-        # revise (expand with review context)
         (
             "Revised plan.\n",
             {
@@ -250,18 +240,20 @@ def test_review_findings_trigger_revise(
                 "phase-1-rollback.md": "Ready when: phase 0 done\nRollback added.",
             },
         ),
-        # review-2
         ("Reviewed revised plan. no findings.\n", {}),
-        # final-review
-        ("final-decision: approve-auto \u2014 revised plan looks good\n", {}),
     ]
-    mock = _MockAgent(mig_root, responses)
-    monkeypatch.setattr("continuous_refactoring.planning.maybe_run_agent", mock)
 
-    outcome = run_planning(
-        _MIGRATION, _TARGET, _TASTE, tmp_path, live_dir,
-        _make_artifacts(tmp_path),
-        agent="codex", model="fake", effort="low", timeout=None,
+
+def test_review_findings_trigger_revise(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir, mig_root = _planning_context(tmp_path, monkeypatch)
+    outcome, mock, _ = _run_planning(
+        tmp_path,
+        live_dir,
+        _revise_responses()
+        + [_planning_decision_response("approve-auto", "revised plan looks good")],
+        monkeypatch,
     )
 
     assert outcome.status == "ready"
@@ -280,42 +272,13 @@ def test_review_findings_trigger_revise(
 def test_revised_plan_is_reloaded_for_follow_up_reviews(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-
-    live_dir = tmp_path / "live"
-    live_dir.mkdir()
-    mig_root = migration_root(live_dir, _MIGRATION)
-
-    responses = [
-        ("Generated approach\n", {"approaches/big-bang.md": "# Big Bang\nAll at once."}),
-        ("Chose big-bang.\n", {}),
-        (
-            "Expanded.\n",
-            {
-                "plan.md": "# Plan v1",
-                "phase-0-prep.md": "Ready when: always\nPrep phase.",
-            },
-        ),
-        ("1. Missing rollback step.\n", {}),
-        (
-            "Revised plan.\n",
-            {
-                "plan.md": "# Plan v2 (revised)",
-                "phase-0-prep.md": "Ready when: always\nRevised prep.",
-                "phase-1-rollback.md": "Ready when: phase 0 done\nRollback added.",
-            },
-        ),
-        ("Reviewed revised plan. no findings.\n", {}),
-        ("final-decision: approve-auto — revised plan looks good\n", {}),
-    ]
-    mock = _MockAgent(mig_root, responses)
-    monkeypatch.setattr("continuous_refactoring.planning.maybe_run_agent", mock)
-
-    run_planning(
-        _MIGRATION, _TARGET, _TASTE, tmp_path, live_dir,
-        _make_artifacts(tmp_path),
-        agent="codex", model="fake", effort="low", timeout=None,
+    live_dir, _ = _planning_context(tmp_path, monkeypatch)
+    _, mock, _ = _run_planning(
+        tmp_path,
+        live_dir,
+        _revise_responses()
+        + [_planning_decision_response("approve-auto", "revised plan looks good")],
+        monkeypatch,
     )
 
     review_two_prompt = mock.prompts[5]

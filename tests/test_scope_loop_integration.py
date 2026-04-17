@@ -47,7 +47,7 @@ def test_expanded_target_reaches_classifier(
     )
     monkeypatch.setattr(
         "continuous_refactoring.loop._try_migration_tick",
-        lambda *_args, **_kwargs: "not-routed",
+        lambda *_args, **_kwargs: ("not-routed", None),
     )
     monkeypatch.setattr(
         "continuous_refactoring.loop._expand_target_for_classification",
@@ -145,7 +145,7 @@ def test_needs_plan_receives_expanded_scope_context(
     )
     monkeypatch.setattr(
         "continuous_refactoring.loop._try_migration_tick",
-        lambda *_args, **_kwargs: "not-routed",
+        lambda *_args, **_kwargs: ("not-routed", None),
     )
     monkeypatch.setattr(
         "continuous_refactoring.loop._expand_target_for_classification",
@@ -186,7 +186,7 @@ def test_needs_plan_receives_expanded_scope_context(
         attempt=1,
     )
 
-    assert result.outcome == "success"
+    assert result.outcome == "commit"
     assert captured["extra_context"] == planning_context
 
 

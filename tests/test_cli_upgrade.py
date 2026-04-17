@@ -2,10 +2,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
+from conftest import init_repo
 
 from continuous_refactoring.cli import _handle_upgrade
 from continuous_refactoring.config import (
@@ -16,34 +16,12 @@ from continuous_refactoring.config import (
 )
 
 
-def _init_repo(path: Path) -> None:
-    path.mkdir(parents=True, exist_ok=True)
-    subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)
-    subprocess.run(
-        ["git", "config", "user.email", "test@example.com"],
-        cwd=path, check=True, capture_output=True,
-    )
-    subprocess.run(
-        ["git", "config", "user.name", "Test User"],
-        cwd=path, check=True, capture_output=True,
-    )
-    (path / "README.md").write_text("seed\n", encoding="utf-8")
-    subprocess.run(
-        ["git", "add", "README.md"], cwd=path, check=True, capture_output=True,
-    )
-    subprocess.run(
-        ["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True,
-    )
-
-
 def _upgrade_args() -> argparse.Namespace:
     return argparse.Namespace(command="upgrade")
 
 
-def _set_xdg_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
-    xdg = tmp_path / "xdg"
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
-    return xdg
+def _set_xdg_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
 
 
 def _register_project_with_upgrade_layout(
@@ -52,7 +30,7 @@ def _register_project_with_upgrade_layout(
 ) -> None:
     _set_xdg_home(tmp_path, monkeypatch)
     repo = tmp_path / "project"
-    _init_repo(repo)
+    init_repo(repo)
     register_project(repo)
 
 

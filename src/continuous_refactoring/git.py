@@ -125,12 +125,8 @@ def checkout_branch(repo_root: Path, branch_name: str) -> None:
 
 
 def branch_exists(repo_root: Path, branch_name: str) -> bool:
-    return _git_head_ref_exists(repo_root, "heads", branch_name)
-
-
-def _git_head_ref_exists(repo_root: Path, namespace: str, name: str) -> bool:
     result = run_command(
-        ["git", "show-ref", "--verify", "--quiet", f"refs/{namespace}/{name}"],
+        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
         cwd=repo_root,
         check=False,
     )
@@ -172,7 +168,7 @@ def checkout_main(repo_root: Path) -> None:
 
 def detect_main_branch(repo_root: Path) -> str:
     for branch_name in ("main", "master"):
-        if _git_head_ref_exists(repo_root, "heads", branch_name):
+        if branch_exists(repo_root, branch_name):
             return branch_name
     raise ContinuousRefactorError(
         "Cannot detect main branch (neither 'main' nor 'master' found)"

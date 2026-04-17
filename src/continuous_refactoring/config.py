@@ -18,7 +18,6 @@ __all__ = [
     "config_is_current",
     "default_taste_text",
     "ensure_taste_file",
-    "ensure_project",
     "failure_snapshots_dir",
     "find_project",
     "global_dir",
@@ -244,22 +243,12 @@ def _project_dir(uid: str) -> Path:
     return app_data_dir() / "projects" / uid
 
 
-def ensure_project(path: Path) -> ResolvedProject:
-    manifest = load_manifest()
-    existing = find_project(path.resolve(), manifest)
-    if existing is not None:
-        project_dir = _project_dir(existing.uuid)
-        project_dir.mkdir(parents=True, exist_ok=True)
-        return ResolvedProject(entry=existing, project_dir=project_dir)
-    return register_project(path)
-
-
 def reason_for_failure_path(path: Path) -> Path:
-    return ensure_project(path).project_dir / "reason-for-failure.md"
+    return register_project(path).project_dir / "reason-for-failure.md"
 
 
 def failure_snapshots_dir(path: Path) -> Path:
-    snapshot_dir = ensure_project(path).project_dir / "failures"
+    snapshot_dir = register_project(path).project_dir / "failures"
     snapshot_dir.mkdir(parents=True, exist_ok=True)
     return snapshot_dir
 

@@ -33,10 +33,10 @@ from continuous_refactoring.agent import (
     summarize_output,
 )
 from continuous_refactoring.config import (
-    ensure_project,
     failure_snapshots_dir,
     load_taste,
     reason_for_failure_path,
+    register_project,
     resolve_live_migrations_dir,
     resolve_project,
 )
@@ -371,7 +371,7 @@ def _write_reason_for_failure(
     validation_command: str,
     record: DecisionRecord,
 ) -> Path:
-    project = ensure_project(repo_root)
+    project = register_project(repo_root)
     latest_path = reason_for_failure_path(repo_root)
     snapshot_dir = failure_snapshots_dir(repo_root)
     snapshot_name = (

@@ -39,6 +39,30 @@ def _init_repo(path: Path) -> None:
     )
 
 
+def _make_perform_args(migration: str) -> argparse.Namespace:
+    return argparse.Namespace(
+        migration=migration,
+        agent="codex",
+        model="test-model",
+        effort="low",
+    )
+
+
+def _init_review_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[Path, Path]:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    monkeypatch.chdir(repo)
+
+    project = register_project(repo)
+    live_dir = repo / ".migrations"
+    live_dir.mkdir()
+    set_live_migrations_dir(project.entry.uuid, ".migrations")
+    return repo, live_dir
+
+
 def _make_manifest(
     name: str,
     *,
@@ -64,15 +88,7 @@ def test_review_list_filters_flagged_migrations(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    monkeypatch.chdir(repo)
-
-    project = register_project(repo)
-    live_dir = repo / ".migrations"
-    live_dir.mkdir()
-    set_live_migrations_dir(project.entry.uuid, ".migrations")
+    _, live_dir = _init_review_project(tmp_path, monkeypatch)
 
     save_migration(
         _make_manifest(
@@ -150,31 +166,13 @@ def test_review_perform_exits_2_when_project_not_initialized(
     assert "project not initialized" in err
 
 
-def _make_perform_args(migration: str) -> argparse.Namespace:
-    return argparse.Namespace(
-        migration=migration,
-        agent="codex",
-        model="test-model",
-        effort="low",
-    )
-
-
 def _setup_review_project(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     *,
     awaiting: bool = True,
 ) -> tuple[Path, Path]:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    monkeypatch.chdir(repo)
-
-    project = register_project(repo)
-    live_dir = repo / ".migrations"
-    live_dir.mkdir()
-    set_live_migrations_dir(project.entry.uuid, ".migrations")
-
+    repo, live_dir = _init_review_project(tmp_path, monkeypatch)
     save_migration(
         _make_manifest("my-mig", awaiting_human_review=awaiting, status="ready"),
         live_dir / "my-mig" / "manifest.json",
@@ -235,15 +233,7 @@ def test_review_perform_exits_2_when_migration_missing(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    monkeypatch.chdir(repo)
-
-    project = register_project(repo)
-    live_dir = repo / ".migrations"
-    live_dir.mkdir()
-    set_live_migrations_dir(project.entry.uuid, ".migrations")
+    _init_review_project(tmp_path, monkeypatch)
 
     with pytest.raises(SystemExit) as exc_info:
         _handle_review_perform(_make_perform_args("nonexistent"))

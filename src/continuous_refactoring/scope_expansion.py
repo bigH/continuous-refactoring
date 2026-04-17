@@ -402,12 +402,10 @@ def parse_scope_selection(
     stdout: str,
     candidate_kinds: tuple[ScopeCandidateKind, ...],
 ) -> ScopeSelection:
-    last_output_line: str | None = None
-    for line in reversed(stdout.splitlines()):
-        stripped = line.strip()
-        if not stripped:
-            continue
-        last_output_line = stripped
+    non_blank = [line.strip() for line in stdout.splitlines() if line.strip()]
+    if not non_blank:
+        raise ContinuousRefactorError("Scope selection produced no output")
+    for stripped in reversed(non_blank):
         match = _SELECTION_RE.match(stripped)
         if not match:
             continue
@@ -418,10 +416,8 @@ def parse_scope_selection(
             )
         reason = match.group(2).strip() if match.group(2) else kind
         return ScopeSelection(kind=kind, reason=reason)
-    if last_output_line is None:
-        raise ContinuousRefactorError("Scope selection produced no output")
     raise ContinuousRefactorError(
-        f"Scope selection produced unrecognised output: {last_output_line!r}"
+        f"Scope selection produced unrecognised output: {non_blank[-1]!r}"
     )
 
 

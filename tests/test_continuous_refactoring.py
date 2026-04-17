@@ -552,29 +552,18 @@ def test_compose_full_prompt_orders_previous_failure_then_fix_amendment() -> Non
         fix_amendment="FIX-AMENDMENT-TEXT",
     )
 
-    positions = {
-        "attempt": prompt.index("Attempt 2"),
-        "base": prompt.index("BASE-PROMPT"),
-        "preamble": prompt.index(continuous_refactoring.REQUIRED_PREAMBLE),
-        "taste": prompt.index("TASTE-TEXT"),
-        "files": prompt.index("## Target Files"),
-        "scope": prompt.index("## Scope"),
-        "validation": prompt.index("## Validation"),
-        "previous": prompt.index("PREV-FAIL-OUTPUT"),
-        "amendment": prompt.index("FIX-AMENDMENT-TEXT"),
-    }
-    ordered = [
-        positions["attempt"],
-        positions["base"],
-        positions["preamble"],
-        positions["taste"],
-        positions["files"],
-        positions["scope"],
-        positions["validation"],
-        positions["previous"],
-        positions["amendment"],
+    positions = [
+        prompt.index("Attempt 2"),
+        prompt.index("BASE-PROMPT"),
+        prompt.index(continuous_refactoring.REQUIRED_PREAMBLE),
+        prompt.index("TASTE-TEXT"),
+        prompt.index("## Target Files"),
+        prompt.index("## Scope"),
+        prompt.index("## Validation"),
+        prompt.index("PREV-FAIL-OUTPUT"),
+        prompt.index("FIX-AMENDMENT-TEXT"),
     ]
-    assert ordered == sorted(ordered)
+    assert positions == sorted(positions)
 
 
 def test_attempt_dir_rejects_retry_below_one(

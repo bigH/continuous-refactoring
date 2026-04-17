@@ -23,7 +23,6 @@ __all__ = [
 ]
 
 from continuous_refactoring.artifacts import (
-    CommandCapture,
     ContinuousRefactorError,
     create_run_artifacts,
 )
@@ -266,17 +265,6 @@ def _sanitize_text(text: str | None, repo_root: Path) -> str | None:
     if not lines:
         return None
     return " ".join(lines)[:240]
-
-
-def _capture_highlight(capture: CommandCapture | None, repo_root: Path) -> str | None:
-    if capture is None:
-        return None
-    text = "\n".join([capture.stdout, capture.stderr])
-    for line in reversed(text.splitlines()):
-        sanitized = _sanitize_text(line, repo_root)
-        if sanitized:
-            return sanitized
-    return None
 
 
 def _relative_path(path: Path | None, root: Path) -> str:

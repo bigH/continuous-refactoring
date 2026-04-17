@@ -116,15 +116,6 @@ def _load_manifest_payload() -> dict[str, object]:
     return raw
 
 
-def _load_manifest_projects(payload: dict[str, object]) -> dict[str, object]:
-    projects_raw = payload.get("projects", {})
-    if not isinstance(projects_raw, dict):
-        raise ContinuousRefactorError(
-            "Manifest file is malformed: 'projects' must be a JSON object."
-        )
-    return projects_raw
-
-
 def _require_str_field(data: dict[str, object], key: str, *, project_id: str) -> str:
     value = data.get(key)
     if value is None:
@@ -167,18 +158,13 @@ def _entry_from_dict(uid: str, data: object) -> ProjectEntry:
     )
 
 
-def _require_project_entry(
-    manifest: dict[str, ProjectEntry], project_uuid: str
-) -> ProjectEntry:
-    entry = manifest.get(project_uuid)
-    if entry is None:
-        raise ContinuousRefactorError(f"Project not registered: {project_uuid}")
-    return entry
-
-
 def load_manifest() -> dict[str, ProjectEntry]:
     payload = _load_manifest_payload()
-    projects_raw = _load_manifest_projects(payload)
+    projects_raw = payload.get("projects", {})
+    if not isinstance(projects_raw, dict):
+        raise ContinuousRefactorError(
+            "Manifest file is malformed: 'projects' must be a JSON object."
+        )
     return {uid: _entry_from_dict(uid, entry) for uid, entry in projects_raw.items()}
 
 
@@ -302,7 +288,9 @@ def resolve_live_migrations_dir(project: ResolvedProject) -> Path | None:
 
 def set_live_migrations_dir(project_uuid: str, relative_dir: str) -> None:
     manifest = load_manifest()
-    old = _require_project_entry(manifest, project_uuid)
+    old = manifest.get(project_uuid)
+    if old is None:
+        raise ContinuousRefactorError(f"Project not registered: {project_uuid}")
     manifest[project_uuid] = replace(old, live_migrations_dir=relative_dir)
     save_manifest(manifest)
 

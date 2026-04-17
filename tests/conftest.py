@@ -220,6 +220,13 @@ def failing_tests(
     )
 
 
+def _default_validation_command(repo_root: Path) -> str:
+    test_script = repo_root.parent / "check_tests.py"
+    if not test_script.exists():
+        test_script.write_text("print('tests ok')\n", encoding="utf-8")
+    return f"{sys.executable} {test_script}"
+
+
 def make_run_once_args(
     repo_root: Path,
     *,
@@ -237,10 +244,7 @@ def make_run_once_args(
     use_branch: str | None = None,
 ) -> argparse.Namespace:
     if validation_command is None:
-        test_script = repo_root.parent / "check_tests.py"
-        if not test_script.exists():
-            test_script.write_text("print('tests ok')\n", encoding="utf-8")
-        validation_command = f"{sys.executable} {test_script}"
+        validation_command = _default_validation_command(repo_root)
     return argparse.Namespace(
         agent=agent,
         model=model,
@@ -288,10 +292,7 @@ def make_run_loop_args(
     show_command_logs: bool = False,
 ) -> argparse.Namespace:
     if validation_command is None:
-        test_script = repo_root.parent / "check_tests.py"
-        if not test_script.exists():
-            test_script.write_text("print('tests ok')\n", encoding="utf-8")
-        validation_command = f"{sys.executable} {test_script}"
+        validation_command = _default_validation_command(repo_root)
 
     return argparse.Namespace(
         agent=agent,

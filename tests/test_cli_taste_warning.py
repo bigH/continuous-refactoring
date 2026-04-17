@@ -88,7 +88,6 @@ def xdg_root(
     ids=["stale", "current"],
 )
 def test_taste_warning_behavior(
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
     xdg_root: Path,
@@ -118,13 +117,11 @@ def test_taste_warning_behavior(
 
 
 def test_warning_preserves_exit_code(
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    xdg_root: Path,
 ) -> None:
-    xdg = tmp_path / "xdg"
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
-    _write_stale_taste(xdg)
+    _write_stale_taste(xdg_root)
     monkeypatch.setattr(sys, "argv", ["cr", "upgrade"])
 
     def fake_upgrade(_: object) -> None:
@@ -146,14 +143,12 @@ def test_warning_preserves_exit_code(
 
 
 def test_warning_does_not_mutate_taste(
-    tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    xdg_root: Path,
 ) -> None:
-    xdg = tmp_path / "xdg"
-    monkeypatch.setenv("XDG_DATA_HOME", str(xdg))
-    _write_stale_taste(xdg)
+    _write_stale_taste(xdg_root)
 
-    taste_path = xdg / "continuous-refactoring" / "global" / "taste.md"
+    taste_path = xdg_root / "continuous-refactoring" / "global" / "taste.md"
     before = taste_path.read_text(encoding="utf-8")
 
     monkeypatch.setattr(sys, "argv", ["cr", "upgrade"])

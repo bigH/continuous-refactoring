@@ -17,7 +17,11 @@ from continuous_refactoring.agent import (
     run_agent_interactive_until_settled,
 )
 from continuous_refactoring.artifacts import ContinuousRefactorError
-from continuous_refactoring.loop import run_loop, run_once
+from continuous_refactoring.loop import (
+    run_loop,
+    run_migrations_focused_loop,
+    run_once,
+)
 
 _TASTE_WARNING = "warning: taste out of date — run `continuous-refactoring taste --upgrade`"
 _GLOBAL_TASTE_WARNING = (
@@ -182,6 +186,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         help="Distinct targets to process.",
+    )
+    run_parser.add_argument(
+        "--focus-on-live-migrations",
+        action="store_true",
+        help=(
+            "Iterate only on live migrations until every one is done or blocked. "
+            "Bypasses targeting and --max-refactors requirements."
+        ),
     )
     run_parser.add_argument(
         "--no-push",
@@ -568,6 +580,9 @@ def _handle_run_once(args: argparse.Namespace) -> None:
 
 
 def _handle_run(args: argparse.Namespace) -> None:
+    if getattr(args, "focus_on_live_migrations", False):
+        _run_with_loop_errors(run_migrations_focused_loop, args)
+        return
     _validate_targeting(args)
     if args.max_refactors is None and not args.targets:
         print(

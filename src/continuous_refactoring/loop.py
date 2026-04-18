@@ -19,6 +19,7 @@ if TYPE_CHECKING:
 __all__ = [
     "run_baseline_checks",
     "run_loop",
+    "run_migrations_focused_loop",
     "run_once",
 ]
 
@@ -1630,6 +1631,151 @@ def run_loop(args: argparse.Namespace) -> int:
 
         final_status = "completed"
         return 0
+
+    except ContinuousRefactorError as error:
+        if final_status == "running":
+            final_status = "failed"
+        error_message = str(error)
+        raise
+    except KeyboardInterrupt:
+        final_status = "interrupted"
+        artifacts.log("WARN", "Interrupted", event="interrupted")
+        discard_workspace_changes(repo_root)
+        print(f"\nArtifact logs: {artifacts.root}", file=sys.stderr)
+        return 130
+    finally:
+        artifacts.finish(final_status, error_message=error_message)
+
+
+def _focus_eligible_manifests(
+    live_dir: Path, now: datetime,
+) -> list[tuple[MigrationManifest, Path]]:
+    return [
+        pair for pair in _enumerate_eligible_manifests(live_dir, now)
+        if not pair[0].awaiting_human_review
+    ]
+
+
+def run_migrations_focused_loop(args: argparse.Namespace) -> int:
+    repo_root = args.repo_root.resolve()
+    timeout = args.timeout or 1800
+    sleep_seconds = getattr(args, "sleep", 0.0)
+    max_consecutive = args.max_consecutive_failures
+    taste = _load_taste_safe(repo_root)
+
+    live_dir = _resolve_live_migrations_dir(repo_root)
+    if live_dir is None:
+        raise ContinuousRefactorError(
+            "no live-migrations-dir configured for this project; "
+            "run `continuous-refactoring init --live-migrations-dir <dir>` first."
+        )
+
+    artifacts = create_run_artifacts(
+        repo_root,
+        agent=args.agent,
+        model=args.model,
+        effort=args.effort,
+        test_command=args.validation_command,
+    )
+    artifacts.log("INFO", f"run artifacts: {artifacts.root}", event="artifacts_ready")
+    artifacts.log(
+        "INFO",
+        f"focus-on-live-migrations: {live_dir}",
+        event="focus_on_live_migrations",
+    )
+
+    final_status = "running"
+    error_message: str | None = None
+    consecutive_failures = 0
+    iteration = 0
+
+    try:
+        require_clean_worktree(repo_root)
+
+        prepare_run_branch(
+            repo_root,
+            args.use_branch,
+            generate_run_branch_name(),
+        )
+
+        baseline_ok, baseline_context = run_baseline_checks(
+            args.validation_command,
+            repo_root,
+            stdout_path=artifacts.baseline_dir("initial") / "tests.stdout.log",
+            stderr_path=artifacts.baseline_dir("initial") / "tests.stderr.log",
+        )
+        if not baseline_ok:
+            final_status = "baseline_failed"
+            raise ContinuousRefactorError(
+                f"Baseline validation failed\n{baseline_context}"
+            )
+
+        while True:
+            now = datetime.now(timezone.utc)
+            eligible = _focus_eligible_manifests(live_dir, now)
+            if not eligible:
+                print("Focused migrations loop: nothing eligible — every migration is done or blocked.")
+                artifacts.log(
+                    "INFO",
+                    "No eligible migrations remain; terminating.",
+                    event="focus_eligible_empty",
+                )
+                final_status = "completed"
+                return 0
+
+            iteration += 1
+            artifacts.mark_attempt_started(iteration)
+            names = ", ".join(m.name for m, _ in eligible)
+            print(f"\n── Migration tick {iteration} (eligible: {names}) ──")
+
+            outcome, record = _try_migration_tick(
+                live_dir, taste, repo_root, artifacts,
+                agent=args.agent,
+                model=args.model,
+                effort=args.effort,
+                timeout=timeout,
+                commit_message_prefix=args.commit_message_prefix,
+                attempt=iteration,
+            )
+
+            if record is not None:
+                _persist_decision(
+                    repo_root,
+                    artifacts,
+                    attempt=iteration,
+                    retry=1,
+                    validation_command=args.validation_command,
+                    record=record,
+                )
+
+            if outcome == "commit":
+                consecutive_failures = 0
+            elif outcome in {"abandon", "blocked"}:
+                consecutive_failures += 1
+                if consecutive_failures >= max_consecutive:
+                    final_status = "max_consecutive_failures"
+                    raise ContinuousRefactorError(
+                        f"Stopping: {max_consecutive} consecutive failures"
+                    )
+            else:
+                artifacts.log(
+                    "INFO",
+                    "Migration tick returned not-routed; terminating loop.",
+                    event="focus_tick_not_routed",
+                )
+                final_status = "completed"
+                return 0
+
+            if sleep_seconds > 0:
+                artifacts.log(
+                    "INFO",
+                    f"Sleeping {sleep_seconds:g}s before next tick",
+                    event="sleep_between_ticks",
+                    attempt=iteration,
+                    sleep_seconds=sleep_seconds,
+                )
+                print(f"Sleeping {sleep_seconds:g}s before next tick")
+                time.sleep(sleep_seconds)
 
     except ContinuousRefactorError as error:
         if final_status == "running":

@@ -33,9 +33,18 @@ From `loop.py` to `routing_pipeline.py`:
 
 ## Out of Scope
 
-- `run_once`, `run_loop`, `_run_refactor_attempt`, `run_baseline_checks`,
+- `run_once`, `run_loop`, `run_migrations_focused_loop`,
+  `_focus_eligible_manifests`, `_run_refactor_attempt`, `run_baseline_checks`,
   arg-parsing helpers, `_finalize_commit`, `_retry_context`,
   `_load_taste_safe`, `_resolve_live_migrations_dir` — all stay in `loop.py`.
+  `run_migrations_focused_loop` is orchestration (calls
+  `run_baseline_checks`, `prepare_run_branch`, `require_clean_worktree`) and
+  belongs with `run_once`/`run_loop`. `_focus_eligible_manifests` is a thin
+  filter over `enumerate_eligible_manifests` kept co-located with its sole
+  caller. Both MUST be carried through phase 3 unchanged — update their call
+  sites from `_enumerate_eligible_manifests` / `_try_migration_tick` to the
+  new FQNs `routing_pipeline.enumerate_eligible_manifests` /
+  `routing_pipeline.try_migration_tick`.
 
 ## Instructions
 
@@ -48,12 +57,15 @@ From `loop.py` to `routing_pipeline.py`:
    each via grep.
 3. In `loop.py`, import the public surface:
    `from continuous_refactoring.routing_pipeline import try_migration_tick, route_and_run, RouteResult, migration_name_from_target`.
-4. Update `tests/test_loop_migration_tick.py` — every monkeypatch currently
-   on `continuous_refactoring.loop.<symbol>` that targets a moved symbol must
+4. Update `tests/test_loop_migration_tick.py` and
+   `tests/test_focus_on_live_migrations.py` — every monkeypatch currently on
+   `continuous_refactoring.loop.<symbol>` that targets a moved symbol must
    move to `continuous_refactoring.routing_pipeline.<new_name>`. Specifically
    verified targets to update: `classify_target` (if patched via loop — check),
-   `check_phase_ready`, `execute_phase`, `_resolve_live_migrations_dir` (stays
-   on `loop` — don't move).
+   `check_phase_ready`, `execute_phase`, `_try_migration_tick` (three
+   monkeypatches in `test_focus_on_live_migrations.py` → `try_migration_tick`
+   on routing_pipeline), `_resolve_live_migrations_dir` (stays on `loop` —
+   don't move).
 5. No re-exports in `loop.py`. Taste: no shims in non-shipped code.
 
 ## Ready When

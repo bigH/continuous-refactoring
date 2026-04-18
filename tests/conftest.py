@@ -290,6 +290,7 @@ def make_run_loop_args(
     use_branch: str | None = None,
     show_agent_logs: bool = False,
     show_command_logs: bool = False,
+    focus_on_live_migrations: bool = False,
 ) -> argparse.Namespace:
     if validation_command is None:
         validation_command = _default_validation_command(repo_root)
@@ -318,6 +319,7 @@ def make_run_loop_args(
         max_consecutive_failures=max_consecutive_failures,
         sleep=sleep,
         use_branch=use_branch,
+        focus_on_live_migrations=focus_on_live_migrations,
     )
 
 

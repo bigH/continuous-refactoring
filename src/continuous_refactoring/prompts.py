@@ -458,25 +458,54 @@ Your final line MUST be exactly one of:
   decision: needs-plan \u2014 <short reason>\
 """
 
-SCOPE_SELECTION_PROMPT = """\
+SCOPE_SELECTION_PREAMBLE = """\
 You are selecting the best scope candidate for refactoring classification.
 
-Choose the smallest candidate that still captures the real cleanup cluster. Prefer:
-- `seed` when evidence is weak, conflicting, or mostly speculative.
-- `local-cluster` when one nearby cluster shares one rationale and validation path.
-- `cross-cluster` only when repo-local evidence clearly shows the work crosses
-  module clusters and should be classified together.
+Choose the smallest candidate that still captures the real cleanup cluster.\
+"""
 
+_SCOPE_SELECTION_PREFER_BULLETS: dict[str, str] = {
+    "seed": "- `seed` when evidence is weak, conflicting, or mostly speculative.",
+    "local-cluster": (
+        "- `local-cluster` when one nearby cluster shares one rationale and "
+        "validation path."
+    ),
+    "cross-cluster": (
+        "- `cross-cluster` only when repo-local evidence clearly shows the work "
+        "crosses\n  module clusters and should be classified together."
+    ),
+}
+
+_SCOPE_SELECTION_TAIL = """\
 Do not invent evidence beyond the provided candidate data.
 Refactoring taste is injected by the caller. Respect it when deciding how much
-scope is justified.
-
-## Output Contract
-Your final line MUST be exactly one of:
-  selected-candidate: seed \u2014 <short reason>
-  selected-candidate: local-cluster \u2014 <short reason>
-  selected-candidate: cross-cluster \u2014 <short reason>\
+scope is justified.\
 """
+
+
+def build_scope_selection_prompt(kinds: tuple[str, ...]) -> str:
+    present = tuple(dict.fromkeys(kinds))
+    prefer_bullets = "\n".join(
+        _SCOPE_SELECTION_PREFER_BULLETS[kind]
+        for kind in present
+        if kind in _SCOPE_SELECTION_PREFER_BULLETS
+    )
+    contract_lines = "\n".join(
+        f"  selected-candidate: {kind} \u2014 <short reason>"
+        for kind in present
+        if kind in _SCOPE_SELECTION_PREFER_BULLETS
+    )
+    sections = [SCOPE_SELECTION_PREAMBLE]
+    if prefer_bullets:
+        sections.append(f"Prefer:\n{prefer_bullets}")
+    sections.append(_SCOPE_SELECTION_TAIL)
+    if contract_lines:
+        sections.append(
+            "## Output Contract\n"
+            "Your final line MUST be exactly one of:\n"
+            f"{contract_lines}"
+        )
+    return "\n\n".join(sections)
 
 PLANNING_APPROACHES_PROMPT = """\
 You are a planning agent generating candidate approaches for a refactoring migration.
@@ -622,8 +651,9 @@ def compose_scope_selection_prompt(
     candidates: tuple[ScopeCandidate, ...],
     taste: str,
 ) -> str:
+    kinds = tuple(candidate.kind for candidate in candidates)
     return _join_sections(
-        SCOPE_SELECTION_PROMPT,
+        build_scope_selection_prompt(kinds),
         f"## Seed Target\n{target.description}",
         _format_target_files(target.files),
         _heading_section("Candidates", _format_scope_candidates(candidates)),

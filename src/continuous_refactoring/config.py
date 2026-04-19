@@ -29,7 +29,6 @@ __all__ = [
     "manifest_path",
     "parse_taste_version",
     "register_project",
-    "reason_for_failure_path",
     "resolve_live_migrations_dir",
     "resolve_project",
     "save_manifest",
@@ -227,10 +226,6 @@ def _resolved(entry: ProjectEntry) -> ResolvedProject:
     project_dir = app_data_dir() / "projects" / entry.uuid
     project_dir.mkdir(parents=True, exist_ok=True)
     return ResolvedProject(entry=entry, project_dir=project_dir)
-
-
-def reason_for_failure_path(path: Path) -> Path:
-    return register_project(path).project_dir / "reason-for-failure.md"
 
 
 def failure_snapshots_dir(path: Path) -> Path:

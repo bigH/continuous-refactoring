@@ -42,7 +42,7 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 - **Settle protocol** — `<file>.done` + sha256 handshake confirming an interactive agent is finished.
 - **Status block** — the driver's end-of-attempt summary written to artifacts.
 - **Call role** — `classifier | planner | editor | reviewer` slot filled in a prompt.
-- **Reason-for-failure doc** — per-project failure record at `…/projects/<uuid>/reason-for-failure.md`.
+- **Failure snapshot** — per-attempt failure record at `…/projects/<uuid>/failures/<run_id>-attempt-NNN-retry-NN-<role>.md`. One file per failed attempt; sort to find the latest.
 
 ## 6. Code conventions
 
@@ -96,7 +96,7 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 
 ## 12. XDG + artifacts
 
-- Durable: `~/.local/share/continuous-refactoring/manifest.json`, `projects/<uuid>/taste.md`, `…/reason-for-failure.md`, `…/failures/`, `global/taste.md`.
+- Durable: `~/.local/share/continuous-refactoring/manifest.json`, `projects/<uuid>/taste.md`, `…/failures/<snapshot>.md`, `global/taste.md`.
 - Per-run (ephemeral): `$TMPDIR/continuous-refactoring/<run-id>/summary.json`, `events.jsonl`, `run.log`.
 
 ## 13. Commit & branch conventions

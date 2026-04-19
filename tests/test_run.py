@@ -1140,15 +1140,14 @@ def test_run_records_retry_and_abandon_transitions_with_failure_docs(
     assert ("retry", "same-target") in transitions
     assert ("abandon", "new-target") in transitions
 
-    reason_path = continuous_refactoring.config.reason_for_failure_path(repo_root)
-    assert reason_path.exists()
-    reason_doc = reason_path.read_text(encoding="utf-8")
+    snapshots = sorted(
+        continuous_refactoring.config.failure_snapshots_dir(repo_root).glob("*.md")
+    )
+    assert len(snapshots) == 2
+    reason_doc = snapshots[-1].read_text(encoding="utf-8")
     assert 'decision: "abandon"' in reason_doc
     assert 'retry_recommendation: "new-target"' in reason_doc
     assert 'call_role: "validation"' in reason_doc
-
-    snapshots = sorted((reason_path.parent / "failures").glob("*.md"))
-    assert len(snapshots) == 2
 
 
 def test_run_successful_retry_clears_reason_doc_from_summary(
@@ -1227,9 +1226,10 @@ def test_run_planning_failure_writes_reason_doc_and_logs_stage(
     assert planning_events
     assert any(event.get("call_status") == "failed" for event in planning_events)
 
-    reason_doc = continuous_refactoring.config.reason_for_failure_path(repo_root).read_text(
-        encoding="utf-8"
+    snapshots = sorted(
+        continuous_refactoring.config.failure_snapshots_dir(repo_root).glob("*.md")
     )
+    reason_doc = snapshots[-1].read_text(encoding="utf-8")
     assert 'call_role: "planning.approaches"' in reason_doc
     assert 'decision: "abandon"' in reason_doc
 
@@ -1270,9 +1270,10 @@ def test_run_phase_ready_check_failure_logs_phase_ready_role(
         for event in events
     )
 
-    reason_doc = continuous_refactoring.config.reason_for_failure_path(repo_root).read_text(
-        encoding="utf-8"
+    snapshots = sorted(
+        continuous_refactoring.config.failure_snapshots_dir(repo_root).glob("*.md")
     )
+    reason_doc = snapshots[-1].read_text(encoding="utf-8")
     assert 'call_role: "phase.ready-check"' in reason_doc
 
 
@@ -1333,9 +1334,10 @@ def test_run_phase_execute_validation_failure_logs_phase_validation_role(
         for event in events
     )
 
-    reason_doc = continuous_refactoring.config.reason_for_failure_path(repo_root).read_text(
-        encoding="utf-8"
+    snapshots = sorted(
+        continuous_refactoring.config.failure_snapshots_dir(repo_root).glob("*.md")
     )
+    reason_doc = snapshots[-1].read_text(encoding="utf-8")
     assert 'call_role: "phase.validation"' in reason_doc
 
 

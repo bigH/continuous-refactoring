@@ -35,7 +35,6 @@ from continuous_refactoring.agent import (
 from continuous_refactoring.config import (
     failure_snapshots_dir,
     load_taste,
-    reason_for_failure_path,
     register_project,
     resolve_live_migrations_dir,
     resolve_project,
@@ -334,12 +333,12 @@ def _write_reason_for_failure(
     record: DecisionRecord,
 ) -> Path:
     project = register_project(repo_root)
-    latest_path = reason_for_failure_path(repo_root)
     snapshot_dir = failure_snapshots_dir(repo_root)
     snapshot_name = (
         f"{artifacts.run_id}-attempt-{attempt:03d}-retry-{retry:02d}-"
         f"{record.call_role.replace('.', '-')}.md"
     )
+    snapshot_path = snapshot_dir / snapshot_name
     agent_last_message = _relative_path(record.agent_last_message_path, artifacts.root)
     agent_stdout = _relative_path(record.agent_stdout_path, artifacts.root)
     agent_stderr = _relative_path(record.agent_stderr_path, artifacts.root)
@@ -393,10 +392,8 @@ def _write_reason_for_failure(
         f"- Tests stderr: {tests_stderr or '(not available)'}",
         "",
     ])
-    latest_path.parent.mkdir(parents=True, exist_ok=True)
-    latest_path.write_text(content, encoding="utf-8")
-    (snapshot_dir / snapshot_name).write_text(content, encoding="utf-8")
-    return latest_path
+    snapshot_path.write_text(content, encoding="utf-8")
+    return snapshot_path
 
 
 def _next_step_text(record: DecisionRecord) -> str:
@@ -463,7 +460,7 @@ def _persist_decision(
     )
     artifacts.log(
         "WARN",
-        f"reason-for-failure written: {reason_doc}",
+        f"failure snapshot written: {reason_doc}",
         event="failure_doc_written",
         attempt=attempt,
         retry=retry,

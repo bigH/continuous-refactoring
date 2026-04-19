@@ -414,6 +414,7 @@ def run_planning(
             manifest_path,
             status="ready",
             awaiting_human_review=True,
+            human_review_reason=reason,
         )
         return PlanningOutcome(status="awaiting_human_review", reason=reason)
 

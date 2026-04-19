@@ -50,6 +50,7 @@ class MigrationManifest:
     status: MigrationStatus
     current_phase: int
     phases: tuple[PhaseSpec, ...]
+    human_review_reason: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -168,6 +169,9 @@ def load_manifest(path: Path) -> MigrationManifest:
         status=status,
         current_phase=_require_int(raw.get("current_phase"), field="current_phase"),
         phases=phases,
+        human_review_reason=_optional_str(
+            raw.get("human_review_reason"), field="human_review_reason"
+        ),
     )
 
 

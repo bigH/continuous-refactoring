@@ -611,14 +611,20 @@ def _handle_review_list() -> None:
             continue
         manifest = load_migration_manifest(manifest_file)
         if manifest.awaiting_human_review:
+            reason = manifest.human_review_reason or "(no reason recorded)"
             print(
                 f"{manifest.name}\t{manifest.status}\t"
-                f"{manifest.current_phase}\t{manifest.last_touch}"
+                f"{manifest.current_phase}\t{manifest.last_touch}\t"
+                f"{reason}"
             )
 
 
 def _handle_review_perform(args: argparse.Namespace) -> None:
-    from continuous_refactoring.migrations import load_manifest as load_migration_manifest
+    from dataclasses import replace
+    from continuous_refactoring.migrations import (
+        load_manifest as load_migration_manifest,
+        save_manifest as save_migration_manifest,
+    )
     from continuous_refactoring.prompts import compose_review_perform_prompt
 
     live_dir = _resolve_review_context(
@@ -670,6 +676,11 @@ def _handle_review_perform(args: argparse.Namespace) -> None:
             file=sys.stderr,
         )
         raise SystemExit(1)
+
+    if reloaded.human_review_reason is not None:
+        save_migration_manifest(
+            replace(reloaded, human_review_reason=None), manifest_path,
+        )
 
 
 def _handle_review(args: argparse.Namespace) -> None:

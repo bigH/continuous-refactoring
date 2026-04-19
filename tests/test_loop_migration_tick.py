@@ -10,7 +10,7 @@ if TYPE_CHECKING:
 
 import continuous_refactoring
 import continuous_refactoring.loop
-from continuous_refactoring.artifacts import CommandCapture
+from continuous_refactoring.artifacts import CommandCapture, ContinuousRefactorError
 from continuous_refactoring.migrations import (
     MigrationManifest,
     PhaseSpec,
@@ -323,6 +323,34 @@ def test_6h_invariant_blocks_execution(
 
     assert exit_code == 0
     _assert_fell_through(classifier_calls, prompts)
+
+
+def test_unverifiable_phase_stores_human_review_reason(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import pytest
+
+    now = _utc_now()
+    live_dir, _, manifest_path = _seed_manifest(
+        run_once_env,
+        name="rework-auth",
+        last_touch=now - timedelta(hours=24),
+        commit=True,
+    )
+
+    reason = "hit external dependency — can't check locally"
+    _patch_live_dir(monkeypatch, live_dir)
+    _patch_classifier_cohesive(monkeypatch)
+    _patch_check_ready(monkeypatch, "unverifiable", reason)
+    _patch_execute_phase_trap(monkeypatch)
+    _patch_one_shot(monkeypatch)
+
+    with pytest.raises(ContinuousRefactorError, match="external dependency"):
+        _run_once(run_once_env)
+
+    reloaded = load_manifest(manifest_path)
+    assert reloaded.awaiting_human_review is True
+    assert reloaded.human_review_reason == reason
 
 
 def test_negative_current_phase_skips_migration_path(

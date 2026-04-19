@@ -70,6 +70,7 @@ def _make_manifest(
     status: str = "ready",
     current_phase: int = 0,
     last_touch: str = "2025-01-01T00:00:00+00:00",
+    human_review_reason: str | None = None,
 ) -> MigrationManifest:
     return MigrationManifest(
         name=name,
@@ -80,6 +81,7 @@ def _make_manifest(
         status=status,
         current_phase=current_phase,
         phases=(),
+        human_review_reason=human_review_reason,
     )
 
 
@@ -97,6 +99,7 @@ def test_review_list_filters_flagged_migrations(
             status="ready",
             current_phase=1,
             last_touch="2025-03-01T12:00:00+00:00",
+            human_review_reason="needs security audit",
         ),
         live_dir / "mig-a" / "manifest.json",
     )
@@ -122,10 +125,15 @@ def test_review_list_filters_flagged_migrations(
     assert len(lines) == 2
 
     fields_a = lines[0].split("\t")
-    assert fields_a == ["mig-a", "ready", "1", "2025-03-01T12:00:00+00:00"]
+    assert fields_a == [
+        "mig-a", "ready", "1", "2025-03-01T12:00:00+00:00", "needs security audit",
+    ]
 
     fields_b = lines[1].split("\t")
-    assert fields_b == ["mig-b", "in-progress", "2", "2025-03-02T14:00:00+00:00"]
+    assert fields_b == [
+        "mig-b", "in-progress", "2", "2025-03-02T14:00:00+00:00",
+        "(no reason recorded)",
+    ]
 
 
 def test_review_list_exits_1_when_no_live_migrations_dir(
@@ -171,10 +179,16 @@ def _setup_review_project(
     monkeypatch: pytest.MonkeyPatch,
     *,
     awaiting: bool = True,
+    human_review_reason: str | None = None,
 ) -> tuple[Path, Path]:
     repo, live_dir = _init_review_project(tmp_path, monkeypatch)
     save_migration(
-        _make_manifest("my-mig", awaiting_human_review=awaiting, status="ready"),
+        _make_manifest(
+            "my-mig",
+            awaiting_human_review=awaiting,
+            status="ready",
+            human_review_reason=human_review_reason,
+        ),
         live_dir / "my-mig" / "manifest.json",
     )
     return repo, live_dir
@@ -185,12 +199,18 @@ def test_review_perform_happy_path(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo, live_dir = _setup_review_project(tmp_path, monkeypatch, awaiting=True)
+    repo, live_dir = _setup_review_project(
+        tmp_path, monkeypatch,
+        awaiting=True,
+        human_review_reason="needs security audit",
+    )
     manifest_path = live_dir / "my-mig" / "manifest.json"
+    captured_prompt: dict[str, str] = {}
 
     def fake_interactive(
         agent: str, model: str, effort: str, prompt: str, repo_root: Path,
     ) -> int:
+        captured_prompt["prompt"] = prompt
         manifest = load_migration_manifest(manifest_path)
         from dataclasses import replace
         updated = replace(manifest, awaiting_human_review=False)
@@ -202,6 +222,12 @@ def test_review_perform_happy_path(
     )
 
     _handle_review_perform(_make_perform_args("my-mig"))
+
+    assert "needs security audit" in captured_prompt["prompt"]
+
+    reloaded = load_migration_manifest(manifest_path)
+    assert reloaded.awaiting_human_review is False
+    assert reloaded.human_review_reason is None
 
 
 def test_review_perform_exits_1_when_flag_not_cleared(

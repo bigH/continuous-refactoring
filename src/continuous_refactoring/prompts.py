@@ -628,12 +628,16 @@ def _format_manifest_summary(manifest: MigrationManifest) -> str:
         f"  {i}. {p.name} ({'done' if p.done else 'pending'}) \u2014 {p.ready_when}"
         for i, p in enumerate(manifest.phases)
     )
-    return (
-        f"Name: {manifest.name}\n"
-        f"Status: {manifest.status}\n"
-        f"Current phase: {manifest.current_phase}\n"
-        f"Phases:\n{phases}"
-    )
+    lines = [
+        f"Name: {manifest.name}",
+        f"Status: {manifest.status}",
+        f"Current phase: {manifest.current_phase}",
+    ]
+    if manifest.awaiting_human_review:
+        reason = manifest.human_review_reason or "(no reason recorded)"
+        lines.append(f"Human review reason: {reason}")
+    lines.append(f"Phases:\n{phases}")
+    return "\n".join(lines)
 
 
 def compose_classifier_prompt(target: Target, taste: str) -> str:
@@ -702,14 +706,29 @@ REVIEW_PERFORM_PROMPT = """\
 You are conducting a human review of a refactoring migration that was flagged
 for human input during planning.
 
+The plan and phase files were written at an earlier point in time. The
+repository may have drifted since then: files referenced in the plan may have
+moved, been renamed, been deleted, or changed in shape. Line numbers, symbol
+names, and surrounding code cited in the plan are not reliable until verified
+against the current tree.
+
 Your job:
 1. Read the migration plan (plan.md), the current phase file, and the manifest.
-2. Present the situation to the user: what the migration does, what phase it is
-   on, and why it was flagged for review.
-3. Ask the user whatever questions are needed to unblock the migration.
-4. Based on the user's answers, update plan.md and/or phase files as needed.
-5. When the review is complete and the user approves, update manifest.json:
-   set "awaiting_human_review" to false.
+2. Check the plan against the current repo state. For each file, symbol, or
+   line reference the plan relies on, confirm it still exists and still means
+   what the plan assumes. Note any drift you find — stale assumptions change
+   what is worth asking the user.
+3. Present the situation to the user: what the migration does, what phase it is
+   on, and why it was flagged for review. The manifest's "Human review reason"
+   field (shown below) is the exact reason the driver flagged this migration —
+   surface it verbatim so the user can see what triggered the hand-off.
+   Include any drift you found so the user sees the current shape, not the
+   shape the plan was written against.
+4. Ask the user whatever questions are needed to unblock the migration.
+5. Based on the user's answers, update plan.md and/or phase files as needed.
+   Fix drifted references while you are there.
+6. When the review is complete and the user approves, update manifest.json:
+   set "awaiting_human_review" to false and set "human_review_reason" to null.
 
 If the user wants to abort or cannot resolve the review, leave
 awaiting_human_review as true and exit cleanly.
@@ -717,6 +736,7 @@ awaiting_human_review as true and exit cleanly.
 ## Output Contract
 When the review is successfully completed:
 - manifest.json MUST have "awaiting_human_review": false
+- manifest.json MUST have "human_review_reason": null
 - Any plan or phase file updates MUST be written before exiting\
 """
 

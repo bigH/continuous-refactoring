@@ -923,7 +923,11 @@ def _try_migration_tick(
             wake = (now + timedelta(days=7)).isoformat(timespec="milliseconds")
             updated = replace(updated, wake_up_on=wake)
         if verdict == "unverifiable":
-            updated = replace(updated, awaiting_human_review=True)
+            updated = replace(
+                updated,
+                awaiting_human_review=True,
+                human_review_reason=reason,
+            )
         save_manifest(updated, manifest_path)
         if verdict == "unverifiable":
             summary = _sanitize_text(reason, repo_root) or "Phase requires human review"

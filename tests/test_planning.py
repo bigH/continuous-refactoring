@@ -192,6 +192,10 @@ def test_initial_decisions(
     manifest = load_manifest(mig_root / "manifest.json")
     assert manifest.status == manifest_status
     assert manifest.awaiting_human_review is awaiting
+    if awaiting:
+        assert manifest.human_review_reason == reason
+    else:
+        assert manifest.human_review_reason is None
 
     if should_skip:
         skip_file = intentional_skips_dir(live_dir) / f"{_MIGRATION}.md"

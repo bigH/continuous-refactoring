@@ -40,17 +40,11 @@ from continuous_refactoring.config import (
     resolve_project,
 )
 from continuous_refactoring.git import (
-    checkout_branch,
     current_branch,
-    detect_main_branch,
     discard_workspace_changes,
-    generate_run_branch_name,
-    generate_run_once_branch_name,
     get_head_sha,
     git_commit,
     git_push,
-    prepare_phase_branch,
-    prepare_run_branch,
     repo_change_count,
     require_clean_worktree,
     revert_to,
@@ -66,7 +60,6 @@ from continuous_refactoring.migrations import (
 from continuous_refactoring.phases import (
     check_phase_ready,
     execute_phase,
-    generate_phase_branch_name,
 )
 from continuous_refactoring.planning import run_planning
 from continuous_refactoring.prompts import (
@@ -512,7 +505,6 @@ def _run_refactor_attempt(
     show_agent_logs: bool,
     show_command_logs: bool,
     commit_message_prefix: str,
-    branch_name: str,
     no_push: bool,
     push_remote: str,
 ) -> DecisionRecord:
@@ -762,7 +754,7 @@ def _run_refactor_attempt(
         phase="refactor",
     )
     if commit is not None and not no_push:
-        git_push(repo_root, push_remote, branch_name)
+        git_push(repo_root, push_remote, current_branch(repo_root))
         artifacts.record_push(attempt)
 
     return DecisionRecord(
@@ -853,11 +845,6 @@ def _try_migration_tick(
             )
 
         if verdict == "yes":
-            phase_branch = generate_phase_branch_name(
-                manifest.name, manifest.current_phase, phase.name,
-            )
-            saved_branch = current_branch(repo_root)
-            prepare_phase_branch(repo_root, phase_branch)
             head_before = get_head_sha(repo_root)
 
             outcome = execute_phase(
@@ -885,8 +872,6 @@ def _try_migration_tick(
                     attempt=attempt,
                     phase="migration",
                 )
-
-            checkout_branch(repo_root, saved_branch)
 
             print(
                 f"Migration: {outcome.status}"
@@ -1303,11 +1288,6 @@ def run_once(args: argparse.Namespace) -> int:
     try:
         require_clean_worktree(repo_root)
 
-        branch_name = prepare_run_branch(
-            repo_root,
-            args.use_branch,
-            generate_run_once_branch_name(),
-        )
         artifacts.mark_attempt_started(1)
 
         print(f"\n── Target: {target.description} ──")
@@ -1387,13 +1367,11 @@ def run_once(args: argparse.Namespace) -> int:
             phase="run_once",
         )
 
-        main_branch = detect_main_branch(repo_root)
         diff_stat = run_command(
-            ["git", "diff", f"{main_branch}...HEAD", "--stat"],
+            ["git", "show", "--stat", "HEAD"],
             cwd=repo_root,
             check=False,
         )
-        print(f"Branch: {branch_name}")
         print(diff_stat.stdout)
         final_status = "completed"
         return 0
@@ -1467,12 +1445,6 @@ def run_loop(args: argparse.Namespace) -> int:
 
     try:
         require_clean_worktree(repo_root)
-
-        branch_name = prepare_run_branch(
-            repo_root,
-            args.use_branch,
-            generate_run_branch_name(),
-        )
 
         baseline_ok, baseline_context = run_baseline_checks(
             args.validation_command,
@@ -1576,7 +1548,6 @@ def run_loop(args: argparse.Namespace) -> int:
                     show_agent_logs=args.show_agent_logs,
                     show_command_logs=args.show_command_logs,
                     commit_message_prefix=args.commit_message_prefix,
-                    branch_name=branch_name,
                     no_push=args.no_push,
                     push_remote=args.push_remote,
                 )
@@ -1692,12 +1663,6 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
 
     try:
         require_clean_worktree(repo_root)
-
-        prepare_run_branch(
-            repo_root,
-            args.use_branch,
-            generate_run_branch_name(),
-        )
 
         baseline_ok, baseline_context = run_baseline_checks(
             args.validation_command,

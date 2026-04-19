@@ -3,26 +3,16 @@ from __future__ import annotations
 import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
-from datetime import datetime
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
 __all__ = [
-    "branch_exists",
-    "checkout_branch",
-    "checkout_main",
-    "create_branch",
     "current_branch",
-    "detect_main_branch",
     "discard_workspace_changes",
-    "generate_run_branch_name",
-    "generate_run_once_branch_name",
     "get_head_sha",
     "git_commit",
     "git_push",
-    "prepare_phase_branch",
-    "prepare_run_branch",
     "repo_change_count",
     "repo_has_changes",
     "require_clean_worktree",
@@ -116,65 +106,6 @@ def git_push(repo_root: Path, remote: str, branch: str) -> None:
     run_command(["git", "push", remote, branch], cwd=repo_root)
 
 
-def create_branch(repo_root: Path, branch_name: str) -> None:
-    run_command(["git", "checkout", "-b", branch_name], cwd=repo_root)
-
-
-def checkout_branch(repo_root: Path, branch_name: str) -> None:
-    run_command(["git", "checkout", branch_name], cwd=repo_root)
-
-
-def branch_exists(repo_root: Path, branch_name: str) -> bool:
-    result = run_command(
-        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch_name}"],
-        cwd=repo_root,
-        check=False,
-    )
-    return result.returncode == 0
-
-
-def prepare_run_branch(
-    repo_root: Path,
-    use_branch: str | None,
-    default_name: str,
-) -> str:
-    if use_branch and branch_exists(repo_root, use_branch):
-        checkout_branch(repo_root, use_branch)
-        return use_branch
-    return _prepare_branch_from_main(repo_root, use_branch or default_name)
-
-
-def prepare_phase_branch(repo_root: Path, branch_name: str) -> str:
-    return _prepare_branch_from_main(repo_root, branch_name)
-
-
-def _prepare_branch_from_main(repo_root: Path, branch_name: str) -> str:
-    checkout_main(repo_root)
-    return _create_or_checkout_branch(repo_root, branch_name)
-
-
-def _create_or_checkout_branch(repo_root: Path, branch_name: str) -> str:
-    if branch_exists(repo_root, branch_name):
-        checkout_branch(repo_root, branch_name)
-    else:
-        create_branch(repo_root, branch_name)
-    return branch_name
-
-
-def checkout_main(repo_root: Path) -> None:
-    main_branch = detect_main_branch(repo_root)
-    run_command(["git", "checkout", main_branch], cwd=repo_root)
-
-
-def detect_main_branch(repo_root: Path) -> str:
-    for branch_name in ("main", "master"):
-        if branch_exists(repo_root, branch_name):
-            return branch_name
-    raise ContinuousRefactorError(
-        "Cannot detect main branch (neither 'main' nor 'master' found)"
-    )
-
-
 def undo_last_commit(repo_root: Path) -> None:
     run_command(["git", "reset", "--soft", "HEAD~1"], cwd=repo_root)
     discard_workspace_changes(repo_root)
@@ -187,19 +118,7 @@ def revert_to(repo_root: Path, expected_head: str) -> None:
         discard_workspace_changes(repo_root)
 
 
-def generate_run_branch_name() -> str:
-    return f"refactor-{_local_timestamp()}"
-
-
-def generate_run_once_branch_name() -> str:
-    return f"cr/{_local_timestamp()}"
-
-
 def get_head_sha(repo_root: Path) -> str:
     return run_command(
         ["git", "rev-parse", "HEAD"], cwd=repo_root
     ).stdout.strip()
-
-
-def _local_timestamp() -> str:
-    return datetime.now().astimezone().strftime("%Y%m%dT%H%M%S")

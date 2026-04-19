@@ -91,18 +91,16 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 
 - Targeting is **first-match-wins** across `--targets > --globs > --extensions > --paths`. Multiple flags silently use the highest.
 - `--max-attempts 0` means **unlimited**, not zero. A WARN fires at startup.
-- `run-once` never pushes. `run` pushes to `origin` unless `--no-push`.
-- `git.py:detect_main_branch` only recognizes `main` and `master`. Other trunks fail at startup.
+- `run-once` never pushes. `run` pushes to the current branch unless `--no-push` is set; remote is `--push-remote` (default `origin`).
 
 ## 12. XDG + artifacts
 
 - Durable: `~/.local/share/continuous-refactoring/manifest.json`, `projects/<uuid>/taste.md`, `…/failures/<snapshot>.md`, `global/taste.md`.
 - Per-run (ephemeral): `$TMPDIR/continuous-refactoring/<run-id>/summary.json`, `events.jsonl`, `run.log`.
 
-## 13. Commit & branch conventions
+## 13. Commit conventions
 
 - Commit prefix: `continuous refactor: <path>` (dominant pattern).
-- Branches: `cr/<ts>` (run-once), `refactor-<ts>` (run), `migration/<slug>/phase-N-<slug>` (migration phases).
 
 ## 14. What NOT to do
 
@@ -113,7 +111,7 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 - Do not simplify the ANSI terminal reset in `agent.py`.
 - Do not refactor `loop.py` without reading the live migration plan.
 - Do not amend commits in the driver path (driver uses `git reset --soft`).
-- Do not assume non-`main`/`master` trunks work.
+- Driver never creates, switches, or deletes branches. The user controls branching.
 
 ## 15. Read-first pointers
 

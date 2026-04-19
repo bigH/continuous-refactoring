@@ -38,7 +38,7 @@ From `loop.py` to `routing_pipeline.py`:
   arg-parsing helpers, `_finalize_commit`, `_retry_context`,
   `_load_taste_safe`, `_resolve_live_migrations_dir` — all stay in `loop.py`.
   `run_migrations_focused_loop` is orchestration (calls
-  `run_baseline_checks`, `prepare_run_branch`, `require_clean_worktree`) and
+  `run_baseline_checks`, `require_clean_worktree`) and
   belongs with `run_once`/`run_loop`. `_focus_eligible_manifests` is a thin
   filter over `enumerate_eligible_manifests` kept co-located with its sole
   caller. Both MUST be carried through phase 3 unchanged — update their call

@@ -58,14 +58,13 @@ def test_e2e_init_then_run_once(
     monkeypatch.setenv("FAKE_CODEX_TOUCH_CONTENT", "e2e content\n")
 
     register_project(run_once_env)
+    starting_branch = continuous_refactoring.current_branch(run_once_env)
 
     args = make_run_once_args(run_once_env)
     exit_code = continuous_refactoring.run_once(args)
 
     assert exit_code == 0
-
-    branch = continuous_refactoring.current_branch(run_once_env)
-    assert branch.startswith("cr/")
+    assert continuous_refactoring.current_branch(run_once_env) == starting_branch
 
     log_output = subprocess.run(
         ["git", "log", "--oneline"], cwd=run_once_env,

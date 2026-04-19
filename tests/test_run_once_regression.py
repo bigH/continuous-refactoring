@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -94,11 +93,11 @@ def test_run_once_paths_arg_trims_whitespace(
 
 
 # ---------------------------------------------------------------------------
-# Case B: run_once branch pattern + "Branch: cr/" output
+# Case B: run_once stays on the user's branch and produces a diffstat
 # ---------------------------------------------------------------------------
 
 
-def test_run_once_branch_and_output_unchanged(
+def test_run_once_stays_on_invoked_branch(
     run_once_env: Path,
     prompt_capture: list[str],
     monkeypatch: pytest.MonkeyPatch,
@@ -107,13 +106,13 @@ def test_run_once_branch_and_output_unchanged(
     monkeypatch.setattr(
         "continuous_refactoring.loop.classify_target", _classifier_trap,
     )
+    starting_branch = continuous_refactoring.current_branch(run_once_env)
     args = make_run_once_args(run_once_env)
     exit_code = continuous_refactoring.run_once(args)
 
     assert exit_code == 0
-    branch = continuous_refactoring.current_branch(run_once_env)
-    assert re.match(r"^cr/\d{8}T\d{6}$", branch)
-    assert "Branch: cr/" in capsys.readouterr().out
+    assert continuous_refactoring.current_branch(run_once_env) == starting_branch
+    assert "Branch:" not in capsys.readouterr().out
 
 
 # ---------------------------------------------------------------------------
@@ -215,6 +214,4 @@ def test_cohesive_cleanup_matches_one_shot(
     expected = _expected_one_shot_prompt(run_once_env, args.validation_command)
     assert prompt_capture[0] == expected
 
-    branch = continuous_refactoring.current_branch(run_once_env)
-    assert re.match(r"^cr/\d{8}T\d{6}$", branch)
-    assert "Branch: cr/" in capsys.readouterr().out
+    assert "Branch:" not in capsys.readouterr().out

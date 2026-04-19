@@ -24,7 +24,6 @@ from continuous_refactoring.phases import (
     ExecutePhaseOutcome,
     check_phase_ready,
     execute_phase,
-    generate_phase_branch_name,
 )
 
 
@@ -144,25 +143,6 @@ def _failing_tests(
     return CommandCapture(
         command=("pytest",), returncode=1, stdout="FAILED\n", stderr="",
         stdout_path=stdout_path, stderr_path=stderr_path,
-    )
-
-
-# ---------------------------------------------------------------------------
-# generate_phase_branch_name
-# ---------------------------------------------------------------------------
-
-
-def test_generate_phase_branch_name_simple() -> None:
-    assert (
-        generate_phase_branch_name("rework-auth", 0, "setup")
-        == "migration/rework-auth/phase-0-setup"
-    )
-
-
-def test_generate_phase_branch_name_slugifies() -> None:
-    assert (
-        generate_phase_branch_name("Rework Auth Module!", 1, "Core Migration")
-        == "migration/rework-auth-module/phase-1-core-migration"
     )
 
 

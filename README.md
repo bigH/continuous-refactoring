@@ -15,7 +15,7 @@ continuous-refactoring run-once \
   --extensions .py
 ```
 
-That gives you one pass on a fresh branch. If validation passes, it leaves you with a local commit to inspect.
+That gives you one pass on the current branch. If validation passes, it leaves you with a local commit to inspect.
 
 ## Got tokens to burn?
 
@@ -42,7 +42,7 @@ That keeps sweeping targets until it runs out, hits your caps, or starts failing
 - Python 3.10+
 - [uv](https://github.com/astral-sh/uv)
 - `codex` or `claude` CLI on your `PATH` (whichever backend you pick)
-- A git repo with a clean worktree and a `main` or `master` branch
+- A git repo with a clean worktree
 
 ## Install
 
@@ -84,7 +84,7 @@ continuous-refactoring run \
 |---|---|
 | `init` | Registers this directory as a project, creates a default `taste.md`, and can store `--live-migrations-dir`. |
 | `taste` | Prints the active taste file path. Add `--interview` to have an agent author it, `--refine` to iteratively improve an existing taste doc, `--upgrade` to refresh stale taste dimensions, `--global` for the shared file, and `--force` to let `--interview` overwrite custom content after writing a `.bak`. |
-| `run-once` | Single pass on one resolved target. No retry, no push. If there is a diff and validation passes, it commits locally and prints the branch + diffstat. |
+| `run-once` | Single pass on one resolved target. No retry, no push. If there is a diff and validation passes, it commits locally and prints the diffstat. |
 | `run` | The loop. Iterates targets, retries on failure, commits successful targets, and pushes unless `--no-push` is set. |
 | `upgrade` | Checks that the global config manifest is current, rewrites it idempotently, and warns if the global taste file is stale. |
 | `review list` | Lists migrations flagged for human review (`awaiting_human_review`). |
@@ -118,7 +118,6 @@ If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`, the
 
 - `--with`, `--model`, `--effort` — required agent backend/model/effort selection.
 - `--repo-root PATH` — repository root; defaults to the current directory.
-- `--use-branch NAME` — reuse an existing branch or create it from `main` / `master` instead of using a timestamped branch name.
 - `--validation-command` — defaults to `uv run pytest`. Swap it for whatever keeps your repo honest.
 - `--timeout` — per-agent-call timeout in seconds.
 - `--show-agent-logs` / `--show-command-logs` — mirror output to your terminal instead of just logging.
@@ -138,7 +137,7 @@ If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`, the
 ## Safety behaviors
 
 - Refuses to start with a dirty worktree.
-- By default, runs on a fresh branch (`refactor-<timestamp>` or `cr/<timestamp>`). With `--use-branch`, it reuses or creates the named branch instead.
+- Runs on the current branch. Commits land there. Push target is also the current branch (unless `--no-push`).
 - `run` baselines your validation command before touching anything. If the baseline is already red, it stops.
 - On a failed attempt, resets back to the pre-attempt HEAD and cleans workspace changes before retrying or moving on.
 - Watchdog kills any agent or test process that's been silent for 5 minutes.
@@ -181,7 +180,7 @@ Each `run` / `run-once` tick now checks for eligible migration work before falli
 
 1. **Classify** — a classifier agent reads the target and decides: `cohesive-cleanup` (one-shot path) or `needs-plan` (migration path).
 2. **Plan** — for `needs-plan` targets, a six-stage planning workflow runs: generate approaches → pick best → expand into phases → review → revise → final review. Artifacts land under `<live-migrations-dir>/<migration-name>/`.
-3. **Execute** — each phase is a self-contained unit of work. The tick picks the oldest eligible migration, checks whether its current phase is ready, and executes it on a dedicated branch (`migration/<name>/phase-<n>-<phase-name>`).
+3. **Execute** — each phase is a self-contained unit of work. The tick picks the oldest eligible migration, checks whether its current phase is ready, and executes it on the current branch; commit message identifies the migration as `migration/<name>/phase-N/<phase.name>`.
 
 ### Migration directory layout
 

@@ -241,7 +241,6 @@ def make_run_once_args(
     globs: str | None = None,
     targets: Path | None = None,
     paths: str | None = None,
-    use_branch: str | None = None,
 ) -> argparse.Namespace:
     if validation_command is None:
         validation_command = _default_validation_command(repo_root)
@@ -261,7 +260,6 @@ def make_run_once_args(
         show_agent_logs=False,
         show_command_logs=False,
         repo_root=repo_root,
-        use_branch=use_branch,
     )
 
 
@@ -287,7 +285,6 @@ def make_run_loop_args(
     commit_message_prefix: str = "continuous refactor",
     max_consecutive_failures: int = 3,
     sleep: float = 0.0,
-    use_branch: str | None = None,
     show_agent_logs: bool = False,
     show_command_logs: bool = False,
     focus_on_live_migrations: bool = False,
@@ -318,7 +315,6 @@ def make_run_loop_args(
         commit_message_prefix=commit_message_prefix,
         max_consecutive_failures=max_consecutive_failures,
         sleep=sleep,
-        use_branch=use_branch,
         focus_on_live_migrations=focus_on_live_migrations,
     )
 

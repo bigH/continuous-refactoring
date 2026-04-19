@@ -117,7 +117,6 @@ def test_run_parser_accepts_focus_on_live_migrations() -> None:
             "--effort", "medium",
             "--validation-command", "uv run pytest",
             "--focus-on-live-migrations",
-            "--use-branch", "x",
         ],
     )
     assert args.focus_on_live_migrations is True
@@ -169,7 +168,6 @@ def _make_handle_run_args(
         commit_message_prefix="continuous refactor",
         max_consecutive_failures=3,
         sleep=0.0,
-        use_branch="x",
         focus_on_live_migrations=focus,
     )
 
@@ -239,7 +237,7 @@ def test_focused_loop_exits_zero_when_no_live_migrations_remain(
     _install_focused_loop_env(run_loop_env, monkeypatch, live_dir)
 
     args = make_run_loop_args(
-        run_loop_env, focus_on_live_migrations=True, use_branch="focus-branch",
+        run_loop_env, focus_on_live_migrations=True,
     )
     exit_code = continuous_refactoring.run_migrations_focused_loop(args)
     assert exit_code == 0
@@ -254,7 +252,7 @@ def test_focused_loop_raises_when_live_dir_unconfigured(
     )
 
     args = make_run_loop_args(
-        run_loop_env, focus_on_live_migrations=True, use_branch="focus-branch",
+        run_loop_env, focus_on_live_migrations=True,
     )
     with pytest.raises(ContinuousRefactorError, match="no live-migrations-dir"):
         continuous_refactoring.run_migrations_focused_loop(args)
@@ -288,7 +286,7 @@ def test_focused_loop_ticks_each_eligible_migration_until_done(
     )
 
     args = make_run_loop_args(
-        run_loop_env, focus_on_live_migrations=True, use_branch="focus-branch",
+        run_loop_env, focus_on_live_migrations=True,
     )
     exit_code = continuous_refactoring.run_migrations_focused_loop(args)
 
@@ -333,7 +331,6 @@ def test_focused_loop_terminates_when_only_awaiting_human_review_remains(
     args = make_run_loop_args(
         run_loop_env,
         focus_on_live_migrations=True,
-        use_branch="focus-branch",
         max_consecutive_failures=5,
     )
     exit_code = continuous_refactoring.run_migrations_focused_loop(args)
@@ -377,7 +374,6 @@ def test_focused_loop_aborts_after_max_consecutive_failures(
     args = make_run_loop_args(
         run_loop_env,
         focus_on_live_migrations=True,
-        use_branch="focus-branch",
         max_consecutive_failures=2,
     )
     with pytest.raises(ContinuousRefactorError, match="2 consecutive failures"):

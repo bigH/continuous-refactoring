@@ -14,7 +14,6 @@ __all__ = [
     "ReadyVerdict",
     "check_phase_ready",
     "execute_phase",
-    "generate_phase_branch_name",
 ]
 
 from continuous_refactoring.agent import maybe_run_agent, run_tests, summarize_output
@@ -57,19 +56,6 @@ def _parse_ready_verdict(stdout: str) -> tuple[ReadyVerdict, str]:
         return verdict, reason
     raise ContinuousRefactorError(
         f"Phase ready-check produced unrecognised output: {nonempty_lines[-1]!r}"
-    )
-
-
-def _slugify(text: str) -> str:
-    return re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")
-
-
-def generate_phase_branch_name(
-    migration_name: str, phase_index: int, phase_name: str,
-) -> str:
-    return (
-        f"migration/{_slugify(migration_name)}"
-        f"/phase-{phase_index}-{_slugify(phase_name)}"
     )
 
 

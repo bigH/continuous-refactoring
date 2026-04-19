@@ -231,10 +231,6 @@ def test_eligible_ready_migration_advances_phase(
     assert check_calls == ["setup"]
     assert exec_calls == ["setup"]
 
-    continuous_refactoring.run_command(
-        ["git", "checkout", "migration/rework-auth/phase-0-setup"],
-        cwd=run_once_env,
-    )
     reloaded = load_manifest(manifest_path)
     assert reloaded.phases[0].done is True
     assert reloaded.current_phase == 1

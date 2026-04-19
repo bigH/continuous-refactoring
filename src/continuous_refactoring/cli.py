@@ -82,14 +82,6 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         default=Path.cwd(),
         help="Repository root.",
     )
-    parser.add_argument(
-        "--use-branch",
-        default=None,
-        help=(
-            "Branch to use for this run (checked out if it exists, "
-            "created from main otherwise). Default: fresh timestamped branch."
-        ),
-    )
 
 
 def build_parser() -> argparse.ArgumentParser:

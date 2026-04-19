@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -85,22 +84,6 @@ def _failing_agent(**kwargs: object) -> CommandCapture:
         stdout_path=Path(stdout_path) if stdout_path else Path("/dev/null"),
         stderr_path=Path(stderr_path) if stderr_path else Path("/dev/null"),
     )
-
-
-def test_run_creates_branch(
-    run_loop_env: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo_root = run_loop_env
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
-
-    args = make_run_loop_args(repo_root, max_refactors=1)
-    exit_code = continuous_refactoring.run_loop(args)
-
-    assert exit_code == 0
-    branch = continuous_refactoring.current_branch(repo_root)
-    assert re.match(r"^refactor-\d{8}T\d{6}$", branch)
 
 
 def test_run_parser_accepts_sleep_flag() -> None:
@@ -702,7 +685,6 @@ def test_cli_does_not_cap_max_refactors(
         push_remote="origin",
         commit_message_prefix="continuous refactor",
         max_consecutive_failures=3,
-        use_branch=None,
     )
 
     calls: list[argparse.Namespace] = []
@@ -1661,56 +1643,3 @@ def test_run_agent_failure_undoes_commit_before_retry(
     assert len(refactor_commits) == 1
 
 
-def test_run_use_branch_creates_when_absent(
-    run_loop_env: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo_root = run_loop_env
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
-
-    args = make_run_loop_args(repo_root, max_refactors=1, use_branch="long-lived-refactor")
-    exit_code = continuous_refactoring.run_loop(args)
-
-    assert exit_code == 0
-    assert continuous_refactoring.current_branch(repo_root) == "long-lived-refactor"
-
-
-def test_run_use_branch_reuses_existing(
-    run_loop_env: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo_root = run_loop_env
-
-    # Pre-create the branch with a distinct commit so we can verify reuse.
-    continuous_refactoring.run_command(
-        ["git", "checkout", "-b", "long-lived-refactor"], cwd=repo_root,
-    )
-    (repo_root / "marker.txt").write_text("marker\n", encoding="utf-8")
-    continuous_refactoring.run_command(["git", "add", "marker.txt"], cwd=repo_root)
-    continuous_refactoring.run_command(
-        ["git", "commit", "-m", "marker commit"], cwd=repo_root,
-    )
-    continuous_refactoring.run_command(["git", "checkout", "main"], cwd=repo_root)
-
-    def touching_agent(**kwargs: object) -> CommandCapture:
-        rr = Path(str(kwargs.get("repo_root", "")))
-        (rr / "agent_change.txt").write_text("x\n", encoding="utf-8")
-        return noop_agent(**kwargs)
-
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
-
-    args = make_run_loop_args(
-        repo_root, max_refactors=1, use_branch="long-lived-refactor",
-    )
-    exit_code = continuous_refactoring.run_loop(args)
-
-    assert exit_code == 0
-    assert continuous_refactoring.current_branch(repo_root) == "long-lived-refactor"
-    # Branch history retains the pre-existing marker commit and gains the new one.
-    log = continuous_refactoring.run_command(
-        ["git", "log", "--oneline"], cwd=repo_root,
-    ).stdout
-    assert "marker commit" in log
-    assert "continuous refactor" in log

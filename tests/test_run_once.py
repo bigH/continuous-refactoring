@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 import pytest
@@ -25,18 +24,6 @@ def _read_single_run_summary(run_once_env: Path) -> dict[str, object]:
     return json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
 
 
-def _install_noop_driver(monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
-
-
-def _run_once_with_noop(
-    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, **kwargs: object
-) -> int:
-    _install_noop_driver(monkeypatch)
-    return continuous_refactoring.run_once(make_run_once_args(run_once_env, **kwargs))
-
-
 def _run_once_prompt_capture(
     run_once_env: Path, prompt_capture: list[str], **kwargs: object
 ) -> str:
@@ -44,17 +31,6 @@ def _run_once_prompt_capture(
     continuous_refactoring.run_once(args)
     assert len(prompt_capture) == 1
     return prompt_capture[0]
-
-
-def test_run_once_creates_branch(
-    run_once_env: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    exit_code = _run_once_with_noop(run_once_env, monkeypatch)
-
-    assert exit_code == 0
-    branch = continuous_refactoring.current_branch(run_once_env)
-    assert re.match(r"^cr/\d{8}T\d{6}$", branch)
 
 
 @pytest.mark.parametrize(
@@ -129,16 +105,25 @@ def test_run_once_no_fix_retry(
     assert agent_call_count == 1
 
 
-def test_run_once_prints_branch_and_diff(
+def test_run_once_prints_diff(
     run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    exit_code = _run_once_with_noop(run_once_env, monkeypatch)
+    def touching_agent(**kwargs: object) -> CommandCapture:
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / "new_file.txt").write_text("x\n", encoding="utf-8")
+        return noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+
+    exit_code = continuous_refactoring.run_once(make_run_once_args(run_once_env))
 
     assert exit_code == 0
     output = capsys.readouterr().out
-    assert "Branch: cr/" in output
+    assert "Branch:" not in output
+    assert "new_file.txt" in output
 
 
 def test_run_once_prints_and_records_commit(
@@ -159,7 +144,6 @@ def test_run_once_prints_and_records_commit(
     assert exit_code == 0
     output = capsys.readouterr().out
     assert "Committed: " in output
-    assert "Branch: cr/" in output
 
     log = continuous_refactoring.run_command(
         ["git", "log", "--oneline"], cwd=run_once_env,
@@ -216,48 +200,3 @@ def test_ctrl_c_prints_file_paths(
     assert "Artifact logs:" in captured.err
 
 
-def test_run_once_use_branch_creates_when_absent(
-    run_once_env: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    _install_noop_driver(monkeypatch)
-
-    args = make_run_once_args(run_once_env, use_branch="my-cleanup")
-    exit_code = continuous_refactoring.run_once(args)
-
-    assert exit_code == 0
-    assert continuous_refactoring.current_branch(run_once_env) == "my-cleanup"
-
-
-def test_run_once_use_branch_reuses_existing(
-    run_once_env: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    continuous_refactoring.run_command(
-        ["git", "checkout", "-b", "my-cleanup"], cwd=run_once_env,
-    )
-    (run_once_env / "marker.txt").write_text("marker\n", encoding="utf-8")
-    continuous_refactoring.run_command(["git", "add", "marker.txt"], cwd=run_once_env)
-    continuous_refactoring.run_command(
-        ["git", "commit", "-m", "marker commit"], cwd=run_once_env,
-    )
-    expected_head = continuous_refactoring.run_command(
-        ["git", "rev-parse", "HEAD"], cwd=run_once_env,
-    ).stdout.strip()
-    continuous_refactoring.run_command(["git", "checkout", "main"], cwd=run_once_env)
-
-    _install_noop_driver(monkeypatch)
-
-    args = make_run_once_args(run_once_env, use_branch="my-cleanup")
-    exit_code = continuous_refactoring.run_once(args)
-
-    assert exit_code == 0
-    assert continuous_refactoring.current_branch(run_once_env) == "my-cleanup"
-    log = continuous_refactoring.run_command(
-        ["git", "log", "--oneline"], cwd=run_once_env,
-    ).stdout
-    assert "marker commit" in log
-    current_head = continuous_refactoring.run_command(
-        ["git", "rev-parse", "HEAD"], cwd=run_once_env,
-    ).stdout.strip()
-    assert current_head == expected_head

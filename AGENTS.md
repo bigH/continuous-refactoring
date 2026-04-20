@@ -38,6 +38,7 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 - **Classifier / routing** — picks which agent handles a target (`routing.py`).
 - **Migration** — a multi-phase plan living under `migrations/<slug>/`.
 - **Phase** — one step of a migration; state transitions in `phases.py`.
+- **Phase cursor** — `manifest.current_phase` stores the active phase `name`; human-facing references use the relative phase file path; phase names must be unique within a migration.
 - **Wake-up rule** — schedule for when the driver reconsiders an idle target.
 - **Settle protocol** — `<file>.done` + sha256 handshake confirming an interactive agent is finished.
 - **Status block** — the driver's end-of-attempt summary written to artifacts.

@@ -178,7 +178,7 @@ Each `run` / `run-once` tick now checks for eligible migration work before falli
 
 1. **Classify** — a classifier agent reads the target and decides: `cohesive-cleanup` (one-shot path) or `needs-plan` (migration path).
 2. **Plan** — for `needs-plan` targets, a six-stage planning workflow runs: generate approaches → pick best → expand into phases → review → revise → final review. Artifacts land under `<live-migrations-dir>/<migration-name>/`.
-3. **Execute** — each phase is a self-contained unit of work. The tick picks the oldest eligible migration, checks whether its current phase is ready, and executes it on the current branch; commit message identifies the migration as `migration/<name>/phase-N/<phase.name>`.
+3. **Execute** — each phase is a self-contained unit of work. The tick picks the oldest eligible migration, checks whether its current phase is ready, and executes it on the current branch; commit message identifies the migration as `migration/<name>/<phase-file>.md`.
 
 ### Migration directory layout
 
@@ -210,6 +210,8 @@ Each migration moves through phases sequentially. Before executing a phase, a re
 - **ready: yes** — phase executes; on green tests, the phase is marked done and the migration advances.
 - **ready: no** — manifest is bumped with a future `wake_up_on`; the tick moves on.
 - **ready: unverifiable** — the migration is flagged `awaiting_human_review`. Use `review list` to find it and `review perform <migration> --with ... --model ... --effort ...` to resolve it interactively.
+
+Human-facing migration references use the relative phase spec path, for example `phase-2-failure-report.md`. The manifest cursor stores the phase `name`, not a numeric index.
 
 ### What the CLI doesn't do
 

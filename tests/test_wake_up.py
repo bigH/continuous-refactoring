@@ -36,7 +36,7 @@ def _manifest(
         wake_up_on=wake_up_on.isoformat(timespec="milliseconds") if wake_up_on else None,
         awaiting_human_review=False,
         status="ready",
-        current_phase=0,
+        current_phase="setup",
         phases=(_PHASE,),
     )
 
@@ -97,4 +97,3 @@ def test_bump_last_touch_preserves_other_fields() -> None:
     assert bumped.wake_up_on == original.wake_up_on
     assert bumped.phases == original.phases
     assert bumped.status == original.status
-

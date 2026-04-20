@@ -37,6 +37,8 @@ __all__ = [
     "scope_candidate_detail_lines",
 ]
 
+from continuous_refactoring.migrations import phase_file_reference, resolve_current_phase
+
 
 def _strip_or_none(value: str | None) -> str | None:
     if value is None:
@@ -625,14 +627,24 @@ _PLANNING_STAGE_PROMPTS: dict[str, str] = {
 
 def _format_manifest_summary(manifest: MigrationManifest) -> str:
     phases = "\n".join(
-        f"  {i}. {p.name} ({'done' if p.done else 'pending'}) \u2014 {p.ready_when}"
-        for i, p in enumerate(manifest.phases)
+        (
+            f"  - {phase_file_reference(phase)}"
+            f" ({phase.name}, {'done' if phase.done else 'pending'})"
+            f" \u2014 {phase.ready_when}"
+        )
+        for phase in manifest.phases
     )
+    current_phase = resolve_current_phase(manifest) if manifest.current_phase else None
     lines = [
         f"Name: {manifest.name}",
         f"Status: {manifest.status}",
-        f"Current phase: {manifest.current_phase}",
     ]
+    if current_phase is None:
+        lines.append("Current phase file: (none)")
+        lines.append("Current phase name: (none)")
+    else:
+        lines.append(f"Current phase file: {phase_file_reference(current_phase)}")
+        lines.append(f"Current phase name: {current_phase.name}")
     if manifest.awaiting_human_review:
         reason = manifest.human_review_reason or "(no reason recorded)"
         lines.append(f"Human review reason: {reason}")
@@ -745,7 +757,7 @@ def compose_review_perform_prompt(
     migration_name: str,
     manifest_path: Path,
     plan_path: Path,
-    phase_file: str | None,
+    phase: PhaseSpec | None,
     manifest: MigrationManifest,
 ) -> str:
     sections: list[str] = [
@@ -754,6 +766,10 @@ def compose_review_perform_prompt(
         f"## Manifest\nPath: {manifest_path}\n{_format_manifest_summary(manifest)}",
         f"## Plan\nPath: {plan_path}",
     ]
-    if phase_file:
-        sections.append(f"## Current Phase File\n{phase_file}")
+    if phase is not None:
+        sections.append(
+            "## Current Phase\n"
+            f"Name: {phase.name}\n"
+            f"File: {phase_file_reference(phase)}"
+        )
     return _join_sections(*sections)

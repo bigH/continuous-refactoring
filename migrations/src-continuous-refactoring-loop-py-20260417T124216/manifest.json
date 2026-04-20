@@ -1,7 +1,7 @@
 {
   "awaiting_human_review": false,
   "created_at": "2026-04-17T12:42:16.268-07:00",
-  "current_phase": 1,
+  "current_phase": "failure-report",
   "human_review_reason": null,
   "last_touch": "2026-04-20T13:19:29.841-07:00",
   "name": "src-continuous-refactoring-loop-py-20260417T124216",
@@ -10,25 +10,25 @@
       "done": true,
       "file": "phase-1-decisions.md",
       "name": "decisions",
-      "ready_when": "phase 1 prerequisites met"
+      "ready_when": "prerequisites in phase-1-decisions.md are met"
     },
     {
       "done": false,
       "file": "phase-2-failure-report.md",
       "name": "failure-report",
-      "ready_when": "phase 2 prerequisites met"
+      "ready_when": "prerequisites in phase-2-failure-report.md are met"
     },
     {
       "done": false,
       "file": "phase-3-routing-pipeline.md",
       "name": "routing-pipeline",
-      "ready_when": "phase 3 prerequisites met"
+      "ready_when": "prerequisites in phase-3-routing-pipeline.md are met"
     },
     {
       "done": false,
       "file": "phase-4-trim-loop.md",
       "name": "trim-loop",
-      "ready_when": "phase 4 prerequisites met"
+      "ready_when": "prerequisites in phase-4-trim-loop.md are met"
     }
   ],
   "status": "ready",

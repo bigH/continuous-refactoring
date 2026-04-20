@@ -67,7 +67,7 @@ def _make_manifest(
         wake_up_on=wake_up_on.isoformat(timespec="milliseconds") if wake_up_on else None,
         awaiting_human_review=False,
         status="in-progress",
-        current_phase=0,
+        current_phase="setup",
         phases=(_PHASE_0, _PHASE_1),
     )
 
@@ -166,14 +166,25 @@ def _patch_execute_phase(
         artifacts: object, **kwargs: object,
     ) -> ExecutePhaseOutcome:
         calls.append(phase.name)
+        phase_index = next(
+            index
+            for index, manifest_phase in enumerate(manifest.phases)
+            if manifest_phase.name == phase.name
+        )
         updated_phases = tuple(
-            replace(p, done=True) if i == manifest.current_phase else p
+            replace(p, done=True) if i == phase_index else p
             for i, p in enumerate(manifest.phases)
+        )
+        next_phase_name = (
+            manifest.phases[phase_index + 1].name
+            if phase_index + 1 < len(manifest.phases)
+            else ""
         )
         updated = replace(
             manifest,
             phases=updated_phases,
-            current_phase=manifest.current_phase + 1,
+            current_phase=next_phase_name,
+            status="done" if next_phase_name == "" else manifest.status,
             last_touch=_utc_now().isoformat(timespec="milliseconds"),
         )
         mp = migration_root(live_dir, manifest.name) / "manifest.json"
@@ -233,7 +244,42 @@ def test_eligible_ready_migration_advances_phase(
 
     reloaded = load_manifest(manifest_path)
     assert reloaded.phases[0].done is True
-    assert reloaded.current_phase == 1
+    assert reloaded.current_phase == "migrate"
+
+
+def test_migration_labels_use_phase_file_not_numeric_cursor(
+    run_once_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    now = _utc_now()
+    live_dir, _, _ = _seed_manifest(
+        run_once_env,
+        name="rework-auth",
+        last_touch=now - timedelta(hours=24),
+        commit=True,
+    )
+
+    commit_messages: list[str] = []
+
+    _patch_live_dir(monkeypatch, live_dir)
+    _patch_classifier_trap(monkeypatch)
+    _patch_check_ready(monkeypatch, "yes")
+    _patch_execute_phase(monkeypatch, status="done")
+    _patch_one_shot(monkeypatch)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._finalize_commit",
+        lambda _repo_root, _head_before, message, **_kwargs: commit_messages.append(message),
+    )
+
+    exit_code = _run_once(run_once_env)
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "phase-0/setup" not in out
+    assert "phase-0/setup" not in commit_messages[0]
+    assert "phase-0-setup.md" in out
+    assert "migration/rework-auth/phase-0-setup.md" in commit_messages[0]
 
 
 # ---------------------------------------------------------------------------
@@ -286,7 +332,7 @@ def test_eligible_not_ready_bumps_wake_up_on(
     reloaded = load_manifest(manifest_path)
     assert reloaded.wake_up_on is not None
     assert reloaded.phases[0].done is False
-    assert reloaded.current_phase == 0
+    assert reloaded.current_phase == "setup"
 
     _assert_fell_through(classifier_calls, prompts)
 
@@ -349,7 +395,7 @@ def test_unverifiable_phase_stores_human_review_reason(
     assert reloaded.human_review_reason == reason
 
 
-def test_negative_current_phase_skips_migration_path(
+def test_empty_current_phase_skips_migration_path(
     run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     now = _utc_now()
@@ -359,7 +405,7 @@ def test_negative_current_phase_skips_migration_path(
         last_touch=now - timedelta(hours=24),
         commit=False,
     )
-    manifest = replace(manifest, current_phase=-1)
+    manifest = replace(manifest, current_phase="")
     save_manifest(manifest, manifest_path)
     _git_commit_all(run_once_env)
 
@@ -376,4 +422,4 @@ def test_negative_current_phase_skips_migration_path(
     _assert_fell_through(classifier_calls, prompts)
 
     reloaded = load_manifest(manifest_path)
-    assert reloaded.current_phase == -1
+    assert reloaded.current_phase == ""

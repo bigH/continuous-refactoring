@@ -86,22 +86,30 @@ def _discover_phase_files(mig_root: Path) -> tuple[PhaseSpec, ...]:
 
     phase_files.sort(key=lambda item: item[0])
     phases: list[PhaseSpec] = []
+    seen_names: set[str] = set()
     for _, pf in phase_files:
         parts = pf.stem.split("-", 2)
         name = parts[2]
+        if name in seen_names:
+            raise ContinuousRefactorError(
+                f"Duplicate phase names are not allowed in {mig_root.name}: {name}"
+            )
+        seen_names.add(name)
         content = pf.read_text(encoding="utf-8")
         ready_match = _READY_WHEN_RE.search(content)
         ready_when = (
             ready_match.group(1).strip()
             if ready_match
-            else f"phase {parts[1]} prerequisites met"
+            else f"prerequisites in {pf.name} are met"
         )
-        phases.append(PhaseSpec(
-            name=name,
-            file=pf.name,
-            done=False,
-            ready_when=ready_when,
-        ))
+        phases.append(
+            PhaseSpec(
+                name=name,
+                file=pf.name,
+                done=False,
+                ready_when=ready_when,
+            )
+        )
     return tuple(phases)
 
 
@@ -252,7 +260,15 @@ def _touch_manifest(
     **changes: object,
 ) -> MigrationManifest:
     if mig_root is not None:
-        changes["phases"] = _discover_phase_files(mig_root)
+        phases = _discover_phase_files(mig_root)
+        changes["phases"] = phases
+        current_phase = changes.get("current_phase", manifest.current_phase)
+        if isinstance(current_phase, str):
+            phase_names = {phase.name for phase in phases}
+            if not current_phase and phases:
+                changes["current_phase"] = phases[0].name
+            elif current_phase and current_phase not in phase_names:
+                changes["current_phase"] = phases[0].name if phases else ""
     updated = replace(manifest, last_touch=iso_timestamp(), **changes)
     save_manifest(updated, manifest_path)
     return updated
@@ -292,7 +308,7 @@ def run_planning(
         wake_up_on=None,
         awaiting_human_review=False,
         status="planning",
-        current_phase=0,
+        current_phase="",
         phases=(),
     )
     save_manifest(manifest, manifest_path)

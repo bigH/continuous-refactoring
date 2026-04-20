@@ -52,7 +52,7 @@ def _make_manifest(*, last_touch: str | None = None) -> MigrationManifest:
         wake_up_on=None,
         awaiting_human_review=False,
         status="in-progress",
-        current_phase=0,
+        current_phase="setup",
         phases=(_PHASE_0, _PHASE_1),
     )
 
@@ -270,7 +270,39 @@ def test_ready_yes_green_tests_flips_phase_done(
     reloaded = load_manifest(manifest_path)
     assert reloaded.phases[0].done is True
     assert reloaded.phases[1].done is False
-    assert reloaded.current_phase == 1
+    assert reloaded.current_phase == "migrate"
+
+
+def test_final_phase_completion_marks_migration_done(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = tmp_path / "live"
+    manifest = replace(
+        _make_manifest(),
+        current_phase="migrate",
+        phases=(replace(_PHASE_0, done=True), _PHASE_1),
+    )
+    manifest_path = _save_manifest_to_disk(manifest, live_dir)
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.get_head_sha", lambda _: "abc123",
+    )
+    _patch_agent(monkeypatch, "executed final phase\n", tmp_path)
+    monkeypatch.setattr("continuous_refactoring.phases.run_tests", _passing_tests)
+
+    outcome = execute_phase(
+        _PHASE_1, manifest, _TASTE, tmp_path, live_dir,
+        _make_artifacts(tmp_path),
+        agent="codex", model="fake", effort="low", timeout=None,
+    )
+
+    assert outcome.status == "done"
+
+    reloaded = load_manifest(manifest_path)
+    assert reloaded.status == "done"
+    assert reloaded.current_phase == ""
+    assert reloaded.phases[0].done is True
+    assert reloaded.phases[1].done is True
 
 
 # ---------------------------------------------------------------------------

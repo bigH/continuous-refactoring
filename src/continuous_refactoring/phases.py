@@ -19,7 +19,12 @@ __all__ = [
 from continuous_refactoring.agent import maybe_run_agent, run_tests, summarize_output
 from continuous_refactoring.artifacts import ContinuousRefactorError, iso_timestamp
 from continuous_refactoring.git import get_head_sha, revert_to
-from continuous_refactoring.migrations import migration_root, save_manifest
+from continuous_refactoring.migrations import (
+    advance_phase_cursor,
+    migration_root,
+    phase_file_reference,
+    save_manifest,
+)
 from continuous_refactoring.prompts import (
     compose_phase_execution_prompt,
     compose_phase_ready_prompt,
@@ -40,6 +45,10 @@ class ExecutePhaseOutcome:
     call_role: str | None = None
     phase_reached: str | None = None
     failure_kind: str | None = None
+
+
+def _phase_target_label(manifest: MigrationManifest, phase: PhaseSpec) -> str:
+    return f"{manifest.name} {phase_file_reference(phase)} ({phase.name})"
 
 
 def _parse_ready_verdict(stdout: str) -> tuple[ReadyVerdict, str]:
@@ -75,9 +84,7 @@ def check_phase_ready(
     prompt = compose_phase_ready_prompt(phase, manifest)
     check_dir = artifacts.root / "phase-ready-check"
     check_dir.mkdir(parents=True, exist_ok=True)
-    target_label = (
-        f"{manifest.name} phase-{manifest.current_phase}/{phase.name}"
-    )
+    target_label = _phase_target_label(manifest, phase)
     call_role = "phase.ready-check"
 
     artifacts.log_call_started(
@@ -140,13 +147,6 @@ def check_phase_ready(
     return _parse_ready_verdict(result.stdout)
 
 
-def _find_phase_index(manifest: MigrationManifest, phase: PhaseSpec) -> int:
-    for i, p in enumerate(manifest.phases):
-        if p.name == phase.name and p.file == phase.file:
-            return i
-    raise ContinuousRefactorError(f"Phase {phase.name!r} not found in manifest")
-
-
 def _fail_execute(
     artifacts: RunArtifacts,
     *,
@@ -203,9 +203,7 @@ def execute_phase(
     phase_dir.mkdir(parents=True, exist_ok=True)
 
     head_before = get_head_sha(repo_root)
-    target_label = (
-        f"{manifest.name} phase-{manifest.current_phase}/{phase.name}"
-    )
+    target_label = _phase_target_label(manifest, phase)
     execute_role = "phase.execute"
     validation_role = "phase.validation"
 
@@ -307,17 +305,28 @@ def execute_phase(
         returncode=test_result.returncode,
     )
 
-    phase_index = _find_phase_index(manifest, phase)
+    phase_index = None
+    for index, manifest_phase in enumerate(manifest.phases):
+        if manifest_phase.name == phase.name:
+            phase_index = index
+            break
+    if phase_index is None:
+        raise ContinuousRefactorError(f"Phase {phase.name!r} not found in manifest")
     updated_phases = tuple(
         replace(p, done=True) if i == phase_index else p
         for i, p in enumerate(manifest.phases)
     )
     now = iso_timestamp()
     updated_manifest = replace(manifest, phases=updated_phases, last_touch=now)
-    if phase_index == manifest.current_phase:
+    next_phase_name = advance_phase_cursor(manifest, phase.name)
+    if next_phase_name is None:
         updated_manifest = replace(
-            updated_manifest, current_phase=manifest.current_phase + 1,
+            updated_manifest,
+            current_phase="",
+            status="done",
         )
+    else:
+        updated_manifest = replace(updated_manifest, current_phase=next_phase_name)
 
     manifest_path = migration_root(live_dir, manifest.name) / "manifest.json"
     save_manifest(updated_manifest, manifest_path)

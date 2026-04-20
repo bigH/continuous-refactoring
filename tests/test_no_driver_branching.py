@@ -71,7 +71,7 @@ def _seed_live_manifest(live_dir: Path, name: str = "auto-migration") -> None:
         wake_up_on=None,
         awaiting_human_review=False,
         status="ready",
-        current_phase=0,
+        current_phase="setup",
         phases=(
             PhaseSpec(
                 name="setup",
@@ -166,14 +166,19 @@ def test_focused_loop_migration_tick_makes_no_branching_calls(
         from continuous_refactoring.migrations import migration_root
         from continuous_refactoring.phases import ExecutePhaseOutcome
 
+        phase_index = next(
+            index
+            for index, manifest_phase in enumerate(manifest.phases)
+            if manifest_phase.name == phase.name
+        )
         updated_phases = tuple(
-            replace(p, done=True) if i == manifest.current_phase else p
+            replace(p, done=True) if i == phase_index else p
             for i, p in enumerate(manifest.phases)
         )
         updated = replace(
             manifest,
             phases=updated_phases,
-            current_phase=manifest.current_phase + 1,
+            current_phase="",
             status="done",
         )
         save_manifest(

@@ -14,8 +14,19 @@ from continuous_refactoring.cli import (
 from continuous_refactoring.config import register_project, set_live_migrations_dir
 from continuous_refactoring.migrations import (
     MigrationManifest,
+    PhaseSpec,
     load_manifest as load_migration_manifest,
     save_manifest as save_migration,
+)
+
+_PHASES = (
+    PhaseSpec(name="setup", file="phase-1-setup.md", done=True, ready_when="always"),
+    PhaseSpec(
+        name="review-target",
+        file="phase-2-review-target.md",
+        done=False,
+        ready_when="setup complete",
+    ),
 )
 
 
@@ -68,7 +79,7 @@ def _make_manifest(
     *,
     awaiting_human_review: bool = False,
     status: str = "ready",
-    current_phase: int = 0,
+    current_phase: str = "review-target",
     last_touch: str = "2025-01-01T00:00:00+00:00",
     human_review_reason: str | None = None,
 ) -> MigrationManifest:
@@ -80,7 +91,7 @@ def _make_manifest(
         awaiting_human_review=awaiting_human_review,
         status=status,
         current_phase=current_phase,
-        phases=(),
+        phases=_PHASES,
         human_review_reason=human_review_reason,
     )
 
@@ -97,7 +108,7 @@ def test_review_list_filters_flagged_migrations(
             "mig-a",
             awaiting_human_review=True,
             status="ready",
-            current_phase=1,
+            current_phase="review-target",
             last_touch="2025-03-01T12:00:00+00:00",
             human_review_reason="needs security audit",
         ),
@@ -108,7 +119,7 @@ def test_review_list_filters_flagged_migrations(
             "mig-b",
             awaiting_human_review=True,
             status="in-progress",
-            current_phase=2,
+            current_phase="setup",
             last_touch="2025-03-02T14:00:00+00:00",
         ),
         live_dir / "mig-b" / "manifest.json",
@@ -126,12 +137,21 @@ def test_review_list_filters_flagged_migrations(
 
     fields_a = lines[0].split("\t")
     assert fields_a == [
-        "mig-a", "ready", "1", "2025-03-01T12:00:00+00:00", "needs security audit",
+        "mig-a",
+        "ready",
+        "phase-2-review-target.md",
+        "review-target",
+        "2025-03-01T12:00:00+00:00",
+        "needs security audit",
     ]
 
     fields_b = lines[1].split("\t")
     assert fields_b == [
-        "mig-b", "in-progress", "2", "2025-03-02T14:00:00+00:00",
+        "mig-b",
+        "in-progress",
+        "phase-1-setup.md",
+        "setup",
+        "2025-03-02T14:00:00+00:00",
         "(no reason recorded)",
     ]
 
@@ -224,6 +244,8 @@ def test_review_perform_happy_path(
     _handle_review_perform(_make_perform_args("my-mig"))
 
     assert "needs security audit" in captured_prompt["prompt"]
+    assert "phase-2-review-target.md" in captured_prompt["prompt"]
+    assert "Name: review-target" in captured_prompt["prompt"]
 
     reloaded = load_migration_manifest(manifest_path)
     assert reloaded.awaiting_human_review is False

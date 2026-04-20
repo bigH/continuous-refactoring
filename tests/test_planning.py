@@ -206,6 +206,7 @@ def test_initial_decisions(
     else:
         assert len(manifest.phases) == 2
         assert tuple(phase.name for phase in manifest.phases) == phase_names
+        assert manifest.current_phase == phase_names[0]
         assert manifest.phases[0].ready_when == "always"
         assert (mig_root / "plan.md").exists()
         assert (mig_root / "approaches" / "incremental.md").exists()
@@ -265,6 +266,7 @@ def test_review_findings_trigger_revise(
     manifest = load_manifest(mig_root / "manifest.json")
     assert manifest.status == "ready"
     assert len(manifest.phases) == 2
+    assert manifest.current_phase == "prep"
     assert manifest.phases[0].name == "prep"
     assert manifest.phases[1].name == "rollback"
     assert manifest.phases[1].ready_when == "phase 0 done"
@@ -347,3 +349,22 @@ def test_discover_phase_files_orders_by_numeric_phase_number(tmp_path: Path) -> 
     phases = _discover_phase_files(mig_root)
 
     assert tuple(phase.name for phase in phases) == ("start", "middle", "final")
+
+
+def test_discover_phase_files_rejects_duplicate_phase_names(tmp_path: Path) -> None:
+    mig_root = tmp_path / "live" / "duplicate-names"
+    mig_root.mkdir(parents=True)
+
+    (mig_root / "phase-1-setup.md").write_text(
+        "Ready when: always\nFirst setup phase.",
+        encoding="utf-8",
+    )
+    (mig_root / "phase-2-setup.md").write_text(
+        "Ready when: after setup\nDuplicate setup phase.",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ContinuousRefactorError, match="Duplicate phase names are not allowed",
+    ):
+        _discover_phase_files(mig_root)

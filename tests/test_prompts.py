@@ -81,7 +81,7 @@ def _manifest() -> MigrationManifest:
         wake_up_on=None,
         awaiting_human_review=False,
         status="in-progress",
-        current_phase=1,
+        current_phase="migrate",
         phases=(
             PhaseSpec(name="prep", file="phase-0-prep.md", done=True, ready_when="always"),
             PhaseSpec(
@@ -414,6 +414,9 @@ def test_phase_ready_contains_manifest_name() -> None:
     manifest = _manifest()
     result = compose_phase_ready_prompt(manifest.phases[1], manifest)
     assert manifest.name in result
+    assert "Current phase file: phase-1-migrate.md" in result
+    assert "Current phase name: migrate" in result
+    assert "Current phase:" not in result
 
 
 def test_phase_ready_contains_output_contract() -> None:
@@ -452,6 +455,8 @@ def test_phase_execution_contains_manifest_name() -> None:
     manifest = _manifest()
     result = compose_phase_execution_prompt(manifest.phases[1], manifest, _TASTE)
     assert manifest.name in result
+    assert "Current phase file: phase-1-migrate.md" in result
+    assert "Current phase name: migrate" in result
 
 
 def test_phase_execution_contains_taste() -> None:

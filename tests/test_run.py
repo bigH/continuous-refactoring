@@ -52,7 +52,7 @@ def _write_live_manifest(
         wake_up_on=None,
         awaiting_human_review=False,
         status=status,
-        current_phase=0,
+        current_phase="cleanup",
         phases=(
             PhaseSpec(
                 name="cleanup",

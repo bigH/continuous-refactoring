@@ -32,6 +32,7 @@ def _random_phase(rng: random.Random, index: int) -> PhaseSpec:
 def _random_manifest(rng: random.Random) -> MigrationManifest:
     num_phases = rng.randint(1, 8)
     phases = tuple(_random_phase(rng, i) for i in range(num_phases))
+    current_phase = rng.choice(phases).name
     return MigrationManifest(
         name="".join(rng.choices("abcdef-", k=rng.randint(5, 15))),
         created_at=f"2025-{rng.randint(1,12):02d}-{rng.randint(1,28):02d}T00:00:00.000+00:00",
@@ -39,7 +40,7 @@ def _random_manifest(rng: random.Random) -> MigrationManifest:
         wake_up_on=rng.choice([None, "2025-06-01T00:00:00.000+00:00"]),
         awaiting_human_review=rng.choice([True, False]),
         status=rng.choice(MIGRATION_STATUSES),
-        current_phase=rng.randint(0, num_phases - 1),
+        current_phase=current_phase,
         phases=phases,
     )
 
@@ -58,7 +59,7 @@ def test_manifest_roundtrip_property(tmp_path: Path) -> None:
         assert loaded == manifest
 
 
-def test_has_executable_phase_rejects_invalid_indices() -> None:
+def test_has_executable_phase_rejects_invalid_phase_names() -> None:
     manifest_zero_phase = MigrationManifest(
         name="empty-phases",
         created_at="2025-01-01T00:00:00.000+00:00",
@@ -66,17 +67,17 @@ def test_has_executable_phase_rejects_invalid_indices() -> None:
         wake_up_on=None,
         awaiting_human_review=False,
         status="ready",
-        current_phase=0,
+        current_phase="",
         phases=(),
     )
-    manifest_negative = MigrationManifest(
-        name="negative-phase",
+    manifest_missing_phase = MigrationManifest(
+        name="missing-phase",
         created_at="2025-01-01T00:00:00.000+00:00",
         last_touch="2025-01-01T00:00:00.000+00:00",
         wake_up_on=None,
         awaiting_human_review=False,
         status="ready",
-        current_phase=-1,
+        current_phase="missing",
         phases=(
             PhaseSpec(name="setup", file="phase-0-setup.md", done=False, ready_when="always"),
         ),
@@ -88,7 +89,7 @@ def test_has_executable_phase_rejects_invalid_indices() -> None:
         wake_up_on=None,
         awaiting_human_review=False,
         status="ready",
-        current_phase=0,
+        current_phase="setup",
         phases=(
             PhaseSpec(
                 name="setup", file="phase-0-setup.md", done=False, ready_when="always"
@@ -97,7 +98,7 @@ def test_has_executable_phase_rejects_invalid_indices() -> None:
     )
 
     assert has_executable_phase(manifest_zero_phase) is False
-    assert has_executable_phase(manifest_negative) is False
+    assert has_executable_phase(manifest_missing_phase) is False
     assert has_executable_phase(manifest_valid) is True
 
 
@@ -113,7 +114,7 @@ def test_save_manifest_no_tmp_files(tmp_path: Path) -> None:
         wake_up_on=None,
         awaiting_human_review=False,
         status="planning",
-        current_phase=0,
+        current_phase="setup",
         phases=(
             PhaseSpec(name="setup", file="phase-0-setup.md", done=False, ready_when="always"),
         ),
@@ -139,7 +140,7 @@ def test_load_manifest_rejects_unknown_status(tmp_path: Path) -> None:
         "created_at": "2025-01-01T00:00:00.000+00:00",
         "last_touch": "2025-01-01T00:00:00.000+00:00",
         "status": "exploded",
-        "current_phase": 0,
+        "current_phase": "",
         "phases": [],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -165,7 +166,7 @@ def test_load_manifest_rejects_invalid_phases_field(tmp_path: Path) -> None:
         "created_at": "2025-01-01T00:00:00.000+00:00",
         "last_touch": "2025-01-01T00:00:00.000+00:00",
         "status": "planning",
-        "current_phase": 0,
+        "current_phase": "",
         "phases": {"bad": True},
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -182,7 +183,7 @@ def test_load_manifest_rejects_non_mapping_phase_entry(tmp_path: Path) -> None:
         "created_at": "2025-01-01T00:00:00.000+00:00",
         "last_touch": "2025-01-01T00:00:00.000+00:00",
         "status": "planning",
-        "current_phase": 0,
+        "current_phase": "",
         "phases": ["not-a-phase"],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -198,7 +199,7 @@ def test_load_manifest_rejects_missing_required_field(tmp_path: Path) -> None:
         "created_at": "2025-01-01T00:00:00.000+00:00",
         "last_touch": "2025-01-01T00:00:00.000+00:00",
         "status": "planning",
-        "current_phase": 0,
+        "current_phase": "",
         "phases": [],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -215,7 +216,7 @@ def test_load_manifest_rejects_non_string_status(tmp_path: Path) -> None:
         "created_at": "2025-01-01T00:00:00.000+00:00",
         "last_touch": "2025-01-01T00:00:00.000+00:00",
         "status": ["planning"],
-        "current_phase": 0,
+        "current_phase": "",
         "phases": [],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -237,7 +238,54 @@ def test_load_manifest_rejects_bool_current_phase(tmp_path: Path) -> None:
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(ContinuousRefactorError, match="must be an int"):
+    with pytest.raises(
+        ContinuousRefactorError, match="must be a string or legacy int",
+    ):
+        load_manifest(path)
+
+
+def test_load_manifest_maps_legacy_integer_cursor_to_phase_name(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "legacy-current-phase" / "manifest.json"
+    path.parent.mkdir(parents=True)
+    payload = {
+        "name": "legacy-migration",
+        "created_at": "2025-01-01T00:00:00.000+00:00",
+        "last_touch": "2025-01-01T00:00:00.000+00:00",
+        "status": "ready",
+        "current_phase": 1,
+        "phases": [
+            {"name": "setup", "file": "phase-1-setup.md", "done": True, "ready_when": "always"},
+            {"name": "migrate", "file": "phase-2-migrate.md", "done": False, "ready_when": "setup complete"},
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = load_manifest(path)
+
+    assert loaded.current_phase == "migrate"
+
+
+def test_load_manifest_rejects_duplicate_phase_names(tmp_path: Path) -> None:
+    path = tmp_path / "duplicate-phases" / "manifest.json"
+    path.parent.mkdir(parents=True)
+    payload = {
+        "name": "duplicate-migration",
+        "created_at": "2025-01-01T00:00:00.000+00:00",
+        "last_touch": "2025-01-01T00:00:00.000+00:00",
+        "status": "ready",
+        "current_phase": "setup",
+        "phases": [
+            {"name": "setup", "file": "phase-1-setup.md", "done": False, "ready_when": "always"},
+            {"name": "setup", "file": "phase-2-setup.md", "done": False, "ready_when": "again"},
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(
+        ContinuousRefactorError, match="Duplicate phase names are not allowed",
+    ):
         load_manifest(path)
 
 
@@ -253,7 +301,7 @@ def test_load_manifest_defaults_optional_fields(tmp_path: Path) -> None:
         "created_at": "2025-01-01T00:00:00.000+00:00",
         "last_touch": "2025-01-01T00:00:00.000+00:00",
         "status": "planning",
-        "current_phase": 0,
+        "current_phase": "init",
         "phases": [
             {"name": "init", "file": "phase-0-init.md", "done": False, "ready_when": "always"},
         ],
@@ -296,7 +344,7 @@ def test_save_manifest_uses_indent_and_sorted_keys(tmp_path: Path) -> None:
         wake_up_on=None,
         awaiting_human_review=False,
         status="ready",
-        current_phase=0,
+        current_phase="",
         phases=(),
     )
     path = tmp_path / "fmt" / "manifest.json"

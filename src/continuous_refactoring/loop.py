@@ -63,6 +63,8 @@ from continuous_refactoring.migrations import (
     eligible_now,
     has_executable_phase,
     load_manifest,
+    phase_file_reference,
+    resolve_current_phase,
     save_manifest,
 )
 from continuous_refactoring.phases import (
@@ -649,8 +651,10 @@ def _try_migration_tick(
     deferred_record: DecisionRecord | None = None
 
     for manifest, manifest_path in candidates:
-        phase = manifest.phases[manifest.current_phase]
-        target_label = f"{manifest.name} phase-{manifest.current_phase}/{phase.name}"
+        phase = resolve_current_phase(manifest)
+        target_label = (
+            f"{manifest.name} {phase_file_reference(phase)} ({phase.name})"
+        )
         try:
             verdict, reason = check_phase_ready(
                 phase,
@@ -702,7 +706,7 @@ def _try_migration_tick(
                     repo_root,
                     head_before,
                     f"{commit_message_prefix}: migration/{manifest.name}"
-                    f"/phase-{manifest.current_phase}/{phase.name}",
+                    f"/{phase_file_reference(phase)}",
                     artifacts=artifacts,
                     attempt=attempt,
                     phase="migration",
@@ -710,7 +714,7 @@ def _try_migration_tick(
 
             print(
                 f"Migration: {outcome.status}"
-                f" — {manifest.name} phase-{manifest.current_phase}/{phase.name}"
+                f" — {manifest.name} {phase_file_reference(phase)} ({phase.name})"
             )
             if outcome.status == "failed":
                 return (

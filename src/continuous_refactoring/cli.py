@@ -576,7 +576,11 @@ def _handle_run(args: argparse.Namespace) -> None:
 
 
 def _handle_review_list() -> None:
-    from continuous_refactoring.migrations import load_manifest as load_migration_manifest
+    from continuous_refactoring.migrations import (
+        load_manifest as load_migration_manifest,
+        phase_file_reference,
+        resolve_current_phase,
+    )
 
     live_dir = _resolve_review_context(
         error_code=1,
@@ -594,9 +598,12 @@ def _handle_review_list() -> None:
         manifest = load_migration_manifest(manifest_file)
         if manifest.awaiting_human_review:
             reason = manifest.human_review_reason or "(no reason recorded)"
+            phase = resolve_current_phase(manifest) if manifest.current_phase else None
+            phase_file = phase_file_reference(phase) if phase is not None else "(none)"
+            phase_name = phase.name if phase is not None else "(none)"
             print(
                 f"{manifest.name}\t{manifest.status}\t"
-                f"{manifest.current_phase}\t{manifest.last_touch}\t"
+                f"{phase_file}\t{phase_name}\t{manifest.last_touch}\t"
                 f"{reason}"
             )
 
@@ -605,6 +612,7 @@ def _handle_review_perform(args: argparse.Namespace) -> None:
     from dataclasses import replace
     from continuous_refactoring.migrations import (
         load_manifest as load_migration_manifest,
+        resolve_current_phase,
         save_manifest as save_migration_manifest,
     )
     from continuous_refactoring.prompts import compose_review_perform_prompt
@@ -632,12 +640,10 @@ def _handle_review_perform(args: argparse.Namespace) -> None:
         raise SystemExit(2)
 
     plan_path = migration_dir / "plan.md"
-    phase_file: str | None = None
-    if 0 <= manifest.current_phase < len(manifest.phases):
-        phase_file = manifest.phases[manifest.current_phase].file
+    phase = resolve_current_phase(manifest) if manifest.current_phase else None
 
     prompt = compose_review_perform_prompt(
-        migration_name, manifest_path, plan_path, phase_file, manifest,
+        migration_name, manifest_path, plan_path, phase, manifest,
     )
     repo_root = Path.cwd().resolve()
     returncode = run_agent_interactive(

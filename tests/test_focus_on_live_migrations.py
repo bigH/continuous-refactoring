@@ -48,7 +48,7 @@ def _seed_manifest(
         wake_up_on=None,
         awaiting_human_review=awaiting_review,
         status="ready",
-        current_phase=0,
+        current_phase="setup",
         phases=(_PHASE,),
     )
     root = migration_root(live_dir, name)
@@ -63,7 +63,7 @@ def _mark_done(path: Path) -> None:
     updated = replace(
         manifest,
         status="done",
-        current_phase=len(manifest.phases),
+        current_phase="",
         last_touch=_utc_now().isoformat(timespec="milliseconds"),
     )
     save_manifest(updated, path)

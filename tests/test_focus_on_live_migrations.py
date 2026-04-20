@@ -10,7 +10,7 @@ import pytest
 import continuous_refactoring
 from continuous_refactoring.artifacts import ContinuousRefactorError
 from continuous_refactoring.cli import build_parser
-from continuous_refactoring.loop import DecisionRecord, RouteOutcome
+from continuous_refactoring.decisions import DecisionRecord, RouteOutcome
 from continuous_refactoring.migrations import (
     MigrationManifest,
     PhaseSpec,

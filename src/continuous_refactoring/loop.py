@@ -8,7 +8,7 @@ import time
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     import argparse
@@ -39,6 +39,16 @@ from continuous_refactoring.config import (
     resolve_live_migrations_dir,
     resolve_project,
 )
+from continuous_refactoring.decisions import (
+    DecisionRecord,
+    RouteOutcome,
+    default_retry_recommendation,
+    error_failure_kind,
+    read_status,
+    resolved_phase_reached,
+    sanitize_text,
+    status_summary,
+)
 from continuous_refactoring.git import (
     current_branch,
     discard_workspace_changes,
@@ -63,8 +73,6 @@ from continuous_refactoring.phases import (
 )
 from continuous_refactoring.planning import run_planning
 from continuous_refactoring.prompts import (
-    CONTINUOUS_REFACTORING_STATUS_BEGIN,
-    CONTINUOUS_REFACTORING_STATUS_END,
     DEFAULT_FIX_AMENDMENT,
     DEFAULT_REFACTORING_PROMPT,
     compose_full_prompt,
@@ -123,141 +131,12 @@ def _migration_name_from_target(target: Target) -> str:
     return f"{prefix}-{ts}"
 
 
-RunnerDecision = Literal["commit", "retry", "abandon", "blocked"]
-RetryRecommendation = Literal["same-target", "new-target", "none", "human-review"]
-RouteOutcome = Literal["not-routed", "commit", "abandon", "blocked"]
-
-
-@dataclass(frozen=True)
-class AgentStatus:
-    phase_reached: str | None = None
-    decision: RunnerDecision | None = None
-    retry_recommendation: RetryRecommendation | None = None
-    failure_kind: str | None = None
-    summary: str | None = None
-    next_retry_focus: str | None = None
-    tests_run: str | None = None
-    evidence: tuple[str, ...] = ()
-
-
-@dataclass(frozen=True)
-class DecisionRecord:
-    decision: RunnerDecision
-    retry_recommendation: RetryRecommendation
-    target: str
-    call_role: str
-    phase_reached: str
-    failure_kind: str
-    summary: str
-    next_retry_focus: str | None = None
-    agent_last_message_path: Path | None = None
-    agent_stdout_path: Path | None = None
-    agent_stderr_path: Path | None = None
-    tests_stdout_path: Path | None = None
-    tests_stderr_path: Path | None = None
-
-
 @dataclass(frozen=True)
 class RouteResult:
     outcome: RouteOutcome
     target: Target
     planning_context: str = ""
     decision_record: DecisionRecord | None = None
-
-
-def _status_path_text(path: Path | None) -> str | None:
-    if path is None or not path.exists():
-        return None
-    return path.read_text(encoding="utf-8")
-
-
-def _parse_agent_status_block(text: str | None) -> AgentStatus | None:
-    if not text:
-        return None
-    begin = text.rfind(CONTINUOUS_REFACTORING_STATUS_BEGIN)
-    if begin < 0:
-        return None
-    end = text.find(CONTINUOUS_REFACTORING_STATUS_END, begin)
-    if end < 0:
-        return None
-    block = text[begin + len(CONTINUOUS_REFACTORING_STATUS_BEGIN):end].strip()
-    if not block:
-        return None
-
-    data: dict[str, str] = {}
-    evidence: list[str] = []
-    current_key: str | None = None
-    for raw_line in block.splitlines():
-        line = raw_line.strip()
-        if not line:
-            continue
-        if current_key == "evidence" and line.startswith("- "):
-            evidence.append(line[2:].strip())
-            continue
-        if ":" not in line:
-            continue
-        key, value = line.split(":", 1)
-        current_key = key.strip()
-        if current_key == "evidence":
-            if value.strip():
-                evidence.append(value.strip())
-            continue
-        data[current_key] = value.strip()
-
-    decision = data.get("decision", "").lower() or None
-    if decision not in {"commit", "retry", "abandon", "blocked", None}:
-        decision = None
-    retry_recommendation = data.get("retry_recommendation", "").lower() or None
-    if retry_recommendation not in {
-        "same-target",
-        "new-target",
-        "none",
-        "human-review",
-        None,
-    }:
-        retry_recommendation = None
-
-    return AgentStatus(
-        phase_reached=data.get("phase_reached") or None,
-        decision=decision,
-        retry_recommendation=retry_recommendation,
-        failure_kind=data.get("failure_kind") or None,
-        summary=data.get("summary") or None,
-        next_retry_focus=data.get("next_retry_focus") or None,
-        tests_run=data.get("tests_run") or None,
-        evidence=tuple(evidence),
-    )
-
-
-def _read_agent_status(
-    agent: str,
-    *,
-    last_message_path: Path | None,
-    fallback_text: str | None,
-) -> AgentStatus | None:
-    if agent == "codex":
-        status = _parse_agent_status_block(_status_path_text(last_message_path))
-        if status is not None:
-            return status
-    return _parse_agent_status_block(fallback_text)
-
-
-def _sanitize_text(text: str | None, repo_root: Path) -> str | None:
-    if not text:
-        return None
-    lines: list[str] = []
-    for raw_line in text.splitlines():
-        line = raw_line.strip()
-        if not line or "codex exec" in line:
-            continue
-        line = line.replace(str(repo_root), "<repo>")
-        line = re.sub(r"/tmp/[^ ]+", "<tmp>", line)
-        line = re.sub(r"\s+", " ", line).strip()
-        if line:
-            lines.append(line)
-    if not lines:
-        return None
-    return " ".join(lines)[:240]
 
 
 def _relative_path(path: Path | None, root: Path) -> str:
@@ -267,32 +146,6 @@ def _relative_path(path: Path | None, root: Path) -> str:
         return str(path.relative_to(root))
     except ValueError:
         return str(path)
-
-
-def _status_summary(
-    status: AgentStatus | None,
-    *,
-    fallback: str,
-    repo_root: Path,
-) -> tuple[str, str | None]:
-    summary = _sanitize_text(status.summary if status else None, repo_root) or fallback
-    focus = _sanitize_text(status.next_retry_focus if status else None, repo_root)
-    return summary, focus
-
-
-def _resolved_phase_reached(status: AgentStatus | None, fallback: str) -> str:
-    if status is None:
-        return fallback
-    return status.phase_reached or fallback
-
-
-def _error_failure_kind(message: str) -> str:
-    lowered = message.lower()
-    if "timed out" in lowered:
-        return "timeout"
-    if "produced no output" in lowered:
-        return "stuck"
-    return "agent-infra-failure"
 
 
 def _retry_context(record: DecisionRecord) -> str:
@@ -477,18 +330,6 @@ def _persist_decision(
     return reason_doc
 
 
-def _default_retry_recommendation(
-    decision: RunnerDecision,
-) -> RetryRecommendation:
-    if decision == "retry":
-        return "same-target"
-    if decision == "abandon":
-        return "new-target"
-    if decision == "blocked":
-        return "human-review"
-    return "none"
-
-
 def _run_refactor_attempt(
     *,
     repo_root: Path,
@@ -555,14 +396,14 @@ def _run_refactor_attempt(
             summary=str(error),
         )
         revert_to(repo_root, head_before)
-        agent_status = _read_agent_status(
+        agent_status = read_status(
             agent,
             last_message_path=last_message_path,
             fallback_text=None,
         )
-        summary, focus = _status_summary(
+        summary, focus = status_summary(
             agent_status,
-            fallback=_sanitize_text(str(error), repo_root) or str(error),
+            fallback=sanitize_text(str(error), repo_root) or str(error),
             repo_root=repo_root,
         )
         return DecisionRecord(
@@ -570,8 +411,8 @@ def _run_refactor_attempt(
             retry_recommendation="same-target",
             target=target.description,
             call_role=call_role,
-            phase_reached=_resolved_phase_reached(agent_status, phase_reached),
-            failure_kind=_error_failure_kind(str(error)),
+            phase_reached=resolved_phase_reached(agent_status, phase_reached),
+            failure_kind=error_failure_kind(str(error)),
             summary=summary,
             next_retry_focus=focus,
             agent_last_message_path=last_message_path,
@@ -579,13 +420,13 @@ def _run_refactor_attempt(
             agent_stderr_path=agent_stderr,
         )
 
-    agent_status = _read_agent_status(
+    agent_status = read_status(
         agent,
         last_message_path=last_message_path,
         fallback_text=agent_result.stdout,
     )
     if agent_result.returncode != 0:
-        summary, focus = _status_summary(
+        summary, focus = status_summary(
             agent_status,
             fallback=f"{agent} exited with code {agent_result.returncode}",
             repo_root=repo_root,
@@ -606,7 +447,7 @@ def _run_refactor_attempt(
             retry_recommendation="same-target",
             target=target.description,
             call_role=call_role,
-            phase_reached=_resolved_phase_reached(agent_status, phase_reached),
+            phase_reached=resolved_phase_reached(agent_status, phase_reached),
             failure_kind="agent-exited-nonzero",
             summary=summary,
             next_retry_focus=focus,
@@ -630,7 +471,7 @@ def _run_refactor_attempt(
         retry=retry,
         target=target.description,
         call_role=validation_role,
-        phase_reached=_resolved_phase_reached(agent_status, phase_reached),
+        phase_reached=resolved_phase_reached(agent_status, phase_reached),
     )
     try:
         validation_result = run_tests(
@@ -646,15 +487,15 @@ def _run_refactor_attempt(
             retry=retry,
             target=target.description,
             call_role=validation_role,
-            phase_reached=_resolved_phase_reached(agent_status, phase_reached),
+            phase_reached=resolved_phase_reached(agent_status, phase_reached),
             status="failed",
             level="WARN",
             summary=str(error),
         )
         revert_to(repo_root, head_before)
-        summary, focus = _status_summary(
+        summary, focus = status_summary(
             agent_status,
-            fallback=_sanitize_text(str(error), repo_root) or str(error),
+            fallback=sanitize_text(str(error), repo_root) or str(error),
             repo_root=repo_root,
         )
         return DecisionRecord(
@@ -662,7 +503,7 @@ def _run_refactor_attempt(
             retry_recommendation="same-target",
             target=target.description,
             call_role=validation_role,
-            phase_reached=_resolved_phase_reached(agent_status, phase_reached),
+            phase_reached=resolved_phase_reached(agent_status, phase_reached),
             failure_kind="validation-infra-failure",
             summary=summary,
             next_retry_focus=focus,
@@ -674,7 +515,7 @@ def _run_refactor_attempt(
         )
 
     if validation_result.returncode != 0:
-        summary, focus = _status_summary(
+        summary, focus = status_summary(
             agent_status,
             fallback="validation failed after refactor",
             repo_root=repo_root,
@@ -684,7 +525,7 @@ def _run_refactor_attempt(
             retry=retry,
             target=target.description,
             call_role=validation_role,
-            phase_reached=_resolved_phase_reached(agent_status, phase_reached),
+            phase_reached=resolved_phase_reached(agent_status, phase_reached),
             status="failed",
             level="WARN",
             returncode=validation_result.returncode,
@@ -696,7 +537,7 @@ def _run_refactor_attempt(
             retry_recommendation="same-target",
             target=target.description,
             call_role=validation_role,
-            phase_reached=_resolved_phase_reached(agent_status, phase_reached),
+            phase_reached=resolved_phase_reached(agent_status, phase_reached),
             failure_kind="validation-failed",
             summary=summary,
             next_retry_focus=focus,
@@ -712,14 +553,14 @@ def _run_refactor_attempt(
         retry=retry,
         target=target.description,
         call_role=validation_role,
-        phase_reached=_resolved_phase_reached(agent_status, phase_reached),
+        phase_reached=resolved_phase_reached(agent_status, phase_reached),
         status="finished",
         returncode=validation_result.returncode,
     )
 
     if agent_status and agent_status.decision in {"retry", "abandon", "blocked"}:
         revert_to(repo_root, head_before)
-        summary, focus = _status_summary(
+        summary, focus = status_summary(
             agent_status,
             fallback=f"agent requested {agent_status.decision}",
             repo_root=repo_root,
@@ -727,7 +568,7 @@ def _run_refactor_attempt(
         decision = agent_status.decision
         retry_recommendation = (
             agent_status.retry_recommendation
-            or _default_retry_recommendation(decision)
+            or default_retry_recommendation(decision)
         )
         return DecisionRecord(
             decision=decision,
@@ -762,7 +603,7 @@ def _run_refactor_attempt(
         retry_recommendation="none",
         target=target.description,
         call_role=validation_role,
-        phase_reached=_resolved_phase_reached(agent_status, phase_reached),
+        phase_reached=resolved_phase_reached(agent_status, phase_reached),
         failure_kind="none",
         summary="Validated refactor ready to commit",
         agent_last_message_path=last_message_path,
@@ -831,7 +672,7 @@ def _try_migration_tick(
                 timeout=timeout,
             )
         except ContinuousRefactorError as error:
-            summary = _sanitize_text(str(error), repo_root) or str(error)
+            summary = sanitize_text(str(error), repo_root) or str(error)
             return (
                 "abandon",
                 DecisionRecord(
@@ -840,7 +681,7 @@ def _try_migration_tick(
                     target=target_label,
                     call_role="phase.ready-check",
                     phase_reached="phase.ready-check",
-                    failure_kind=_error_failure_kind(str(error)),
+                    failure_kind=error_failure_kind(str(error)),
                     summary=summary,
                 ),
             )
@@ -888,7 +729,7 @@ def _try_migration_tick(
                         call_role=outcome.call_role or "phase.execute",
                         phase_reached=outcome.phase_reached or "phase.execute",
                         failure_kind=outcome.failure_kind or "phase-failed",
-                        summary=_sanitize_text(outcome.reason, repo_root) or outcome.reason,
+                        summary=sanitize_text(outcome.reason, repo_root) or outcome.reason,
                     ),
                 )
             return (
@@ -916,7 +757,7 @@ def _try_migration_tick(
             )
         save_manifest(updated, manifest_path)
         if verdict == "unverifiable":
-            summary = _sanitize_text(reason, repo_root) or "Phase requires human review"
+            summary = sanitize_text(reason, repo_root) or "Phase requires human review"
             return (
                 "blocked",
                 DecisionRecord(
@@ -936,7 +777,7 @@ def _try_migration_tick(
             call_role="phase.ready-check",
             phase_reached="phase.ready-check",
             failure_kind="phase-ready-no",
-            summary=_sanitize_text(reason, repo_root) or "Migration phase not ready",
+            summary=sanitize_text(reason, repo_root) or "Migration phase not ready",
         )
 
     return "not-routed", deferred_record
@@ -1060,7 +901,7 @@ def _route_and_run(
             timeout=timeout,
         )
     except ContinuousRefactorError as error:
-        summary = _sanitize_text(str(error), repo_root) or str(error)
+        summary = sanitize_text(str(error), repo_root) or str(error)
         return RouteResult(
             outcome="abandon",
             target=target,
@@ -1071,7 +912,7 @@ def _route_and_run(
                 target=target.description,
                 call_role="classify",
                 phase_reached="classify",
-                failure_kind=_error_failure_kind(str(error)),
+                failure_kind=error_failure_kind(str(error)),
                 summary=summary,
             ),
         )
@@ -1103,7 +944,7 @@ def _route_and_run(
             extra_context=planning_context,
         )
     except ContinuousRefactorError as error:
-        summary = _sanitize_text(str(error), repo_root) or str(error)
+        summary = sanitize_text(str(error), repo_root) or str(error)
         call_role = "planning.final-review"
         match = re.match(r"^(planning\.[a-z0-9-]+)\s+failed:", str(error))
         if match:
@@ -1118,7 +959,7 @@ def _route_and_run(
                 target=target.description,
                 call_role=call_role,
                 phase_reached=call_role,
-                failure_kind=_error_failure_kind(str(error)),
+                failure_kind=error_failure_kind(str(error)),
                 summary=summary,
             ),
         )
@@ -1145,7 +986,7 @@ def _route_and_run(
                 call_role="planning.final-review",
                 phase_reached="planning.final-review",
                 failure_kind="planning-rejected",
-                summary=_sanitize_text(outcome.reason, repo_root) or outcome.reason,
+                summary=sanitize_text(outcome.reason, repo_root) or outcome.reason,
             ),
         )
     return RouteResult(
@@ -1159,7 +1000,7 @@ def _route_and_run(
             call_role="planning.final-review",
             phase_reached="planning.final-review",
             failure_kind="none",
-            summary=_sanitize_text(outcome.reason, repo_root) or outcome.reason,
+            summary=sanitize_text(outcome.reason, repo_root) or outcome.reason,
         ),
     )
 

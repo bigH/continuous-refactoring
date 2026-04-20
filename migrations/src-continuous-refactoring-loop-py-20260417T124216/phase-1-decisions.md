@@ -4,7 +4,7 @@
 
 Move pure status/decision types and parsing out of `loop.py` into a new
 `src/continuous_refactoring/decisions.py`. Zero behavior change; pure relocation
-plus property-based tests for the parser.
+plus focused parser tests that stay within the repo's stdlib-only test setup.
 
 ## Scope — Symbols to Move
 
@@ -42,10 +42,10 @@ glue — it stays until phase 4 revisits).
 5. Update `tests/conftest.py` and any test using
    `monkeypatch.setattr("continuous_refactoring.loop.<moved_symbol>", ...)` to
    point at `continuous_refactoring.decisions.<new_name>`.
-6. Add `tests/test_decisions.py` with property-based tests (hypothesis):
-   - `parse_status_block` invariants: never raises on arbitrary text; returns
-     `None` iff no recognizable header; parsed `phase` and `status` fields are
-     normalized (stripped, lowercased where applicable — match current behavior).
+6. Add `tests/test_decisions.py` with focused stdlib-only tests:
+   - `parse_status_block` invariants: table-driven cases plus a small
+     stdlib-generated corpus that never raises on arbitrary text; returns
+     `None` iff no recognizable header; parsed fields match current behavior.
    - `sanitize_text`: idempotent; never expands length beyond a bound tied to
      repo_root substitution; returns `None` iff input is `None`.
    - `error_failure_kind`: total over `str`; output is one of the known kinds.
@@ -56,7 +56,7 @@ glue — it stays until phase 4 revisits).
 - `src/continuous_refactoring/decisions.py` exists and contains every listed symbol.
 - `loop.py` no longer defines any of the moved symbols.
 - `grep -rn "loop\.\(AgentStatus\|DecisionRecord\|_parse_agent_status_block\|_sanitize_text\|_status_summary\|_resolved_phase_reached\|_error_failure_kind\|_default_retry_recommendation\|_read_agent_status\)" src tests` returns nothing.
-- `tests/test_decisions.py` exists with at least one property test per moved pure function listed above.
+- `tests/test_decisions.py` exists with focused stdlib-only coverage for each moved pure function listed above.
 - `pytest` is green.
 - `python -m continuous_refactoring --help` runs without error.
 - `loop.py` dropped by ~250–350 lines; `decisions.py` is 200–350 lines.

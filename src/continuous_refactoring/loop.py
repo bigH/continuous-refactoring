@@ -812,6 +812,7 @@ def _try_migration_tick(
 ) -> tuple[RouteOutcome, DecisionRecord | None]:
     now = datetime.now(timezone.utc)
     candidates = _enumerate_eligible_manifests(live_dir, now)
+    deferred_record: DecisionRecord | None = None
 
     for manifest, manifest_path in candidates:
         phase = manifest.phases[manifest.current_phase]
@@ -928,8 +929,17 @@ def _try_migration_tick(
                     summary=summary,
                 ),
             )
+        deferred_record = DecisionRecord(
+            decision="retry",
+            retry_recommendation="same-target",
+            target=target_label,
+            call_role="phase.ready-check",
+            phase_reached="phase.ready-check",
+            failure_kind="phase-ready-no",
+            summary=_sanitize_text(reason, repo_root) or "Migration phase not ready",
+        )
 
-    return "not-routed", None
+    return "not-routed", deferred_record
 
 
 def _scope_bypass_context(target: Target, reason: str) -> str:
@@ -1724,11 +1734,21 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
                         f"Stopping: {max_consecutive} consecutive failures"
                     )
             else:
+                message = (
+                    "Migration tick deferred all eligible migrations; "
+                    "terminating until a wake-up window or manifest change."
+                )
+                if record is not None:
+                    message = (
+                        "Migration tick deferred all eligible migrations: "
+                        f"{record.summary}"
+                    )
                 artifacts.log(
                     "INFO",
-                    "Migration tick returned not-routed; terminating loop.",
-                    event="focus_tick_not_routed",
+                    message,
+                    event="focus_tick_deferred",
                 )
+                print(message)
                 final_status = "completed"
                 return 0
 

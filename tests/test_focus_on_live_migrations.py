@@ -339,6 +339,50 @@ def test_focused_loop_terminates_when_only_awaiting_human_review_remains(
     assert tick_calls == ["needs-review"]
 
 
+def test_focused_loop_reports_deferred_phase_reason(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    live_dir = tmp_path / "live-migrations"
+    live_dir.mkdir()
+    _seed_manifest(live_dir, "deferred")
+
+    _install_focused_loop_env(run_loop_env, monkeypatch, live_dir)
+
+    def fake_tick(
+        live_dir: Path, taste: str, repo_root: Path, artifacts: object,
+        **_kwargs: object,
+    ) -> tuple[RouteOutcome, DecisionRecord | None]:
+        return (
+            "not-routed",
+            DecisionRecord(
+                decision="retry",
+                retry_recommendation="same-target",
+                target="migration/deferred",
+                call_role="phase.ready-check",
+                phase_reached="phase.ready-check",
+                failure_kind="phase-ready-no",
+                summary="phase spec contradicts repo invariants",
+            ),
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._try_migration_tick", fake_tick,
+    )
+
+    args = make_run_loop_args(
+        run_loop_env, focus_on_live_migrations=True,
+    )
+    exit_code = continuous_refactoring.run_migrations_focused_loop(args)
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "Migration tick deferred all eligible migrations" in captured.out
+    assert "phase spec contradicts repo invariants" in captured.out
+
+
 def test_focused_loop_aborts_after_max_consecutive_failures(
     run_loop_env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

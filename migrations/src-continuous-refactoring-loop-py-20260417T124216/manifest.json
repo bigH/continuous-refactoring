@@ -2,6 +2,7 @@
   "awaiting_human_review": false,
   "created_at": "2026-04-17T12:42:16.268-07:00",
   "current_phase": 0,
+  "human_review_reason": null,
   "last_touch": "2026-04-17T13:00:00.000-07:00",
   "name": "src-continuous-refactoring-loop-py-20260417T124216",
   "phases": [

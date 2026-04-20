@@ -10,7 +10,7 @@ Each phase is a single commit / single PR, leaves the repo shippable, and is val
 
 Phases progress from purest (no side effects, no deps) to most entangled (orchestration glue). Earlier phases de-risk later ones:
 
-1. **decisions** — pure types + parsing. Zero imports from siblings. Lowest risk. Earns property-based tests that harden the status parser and YAML scalar escaping before anything else depends on them.
+1. **decisions** — pure types + parsing. Zero imports from siblings. Lowest risk. Earns table-driven and stdlib-generated invariant tests that harden the status parser before anything else depends on it.
 2. **failure_report** — filesystem writes; imports `decisions`. Depends on phase 1 landing so the types it consumes are already stable at their new FQN.
 3. **routing_pipeline** — imports `decisions` + `failure_report`. Moves the largest single chunk (~400 lines) but only after its dependencies are in their final homes.
 4. **trim loop.py** — delete dead imports, tidy ordering, verify `run_once`/`run_loop` read top-to-bottom. Pure cleanup; only runs after the three extractions are green.
@@ -49,10 +49,10 @@ Every phase must pass:
 
 Phase-specific checks are in each `phase-<n>-<name>.md`.
 
-Property-based tests are added where the domain shape is pure:
-- `decisions`: round-trip / invariants for `parse_status_block`; escaping invariants for YAML scalar rendering (phase 1 owns the `_yaml_scalar` tests even though the function itself moves to `failure_report` in phase 2 — it's pure and belongs in the earlier, safer phase for testing, then re-homes with its caller).
+Pure-domain tests are added where they pay for themselves:
+- `decisions`: table-driven and stdlib-generated invariants for `parse_status_block`.
 
-Correction: keep `_yaml_scalar` tests co-located with its module. Add them in phase 2.
+Keep `_yaml_scalar` tests co-located with its module. Add them in phase 2.
 
 ## Shippability Invariant
 

@@ -31,8 +31,8 @@ writer to `failure_report.py`. Stop there.
   that would exist in every variant of this refactor anyway. Good
   first step regardless of end state.
 - **Pro**: The extracted surfaces are pure enough to earn
-  property-based tests (status-block parser round-trips, YAML scalar
-  escaping). Matches taste's test-shape guidance.
+  tight table-driven and stdlib-generated invariant tests without
+  pulling in new dependencies.
 - **Con**: `loop.py` remains large. Routing + run orchestration still
   tangled. Leaves the main readability problem unsolved — the file
   still mixes "what should this attempt do next" with "how do we run

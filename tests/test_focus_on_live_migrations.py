@@ -163,8 +163,6 @@ def _make_handle_run_args(
         repo_root=repo_root,
         max_attempts=None,
         max_refactors=None,
-        no_push=True,
-        push_remote="origin",
         commit_message_prefix="continuous refactor",
         max_consecutive_failures=3,
         sleep=0.0,

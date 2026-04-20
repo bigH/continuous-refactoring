@@ -50,11 +50,9 @@ from continuous_refactoring.decisions import (
     status_summary,
 )
 from continuous_refactoring.git import (
-    current_branch,
     discard_workspace_changes,
     get_head_sha,
     git_commit,
-    git_push,
     repo_change_count,
     require_clean_worktree,
     revert_to,
@@ -346,8 +344,6 @@ def _run_refactor_attempt(
     show_agent_logs: bool,
     show_command_logs: bool,
     commit_message_prefix: str,
-    no_push: bool,
-    push_remote: str,
 ) -> DecisionRecord:
     discard_workspace_changes(repo_root)
     head_before = get_head_sha(repo_root)
@@ -594,9 +590,6 @@ def _run_refactor_attempt(
         attempt=attempt,
         phase="refactor",
     )
-    if commit is not None and not no_push:
-        git_push(repo_root, push_remote, current_branch(repo_root))
-        artifacts.record_push(attempt)
 
     return DecisionRecord(
         decision="commit",
@@ -1399,8 +1392,6 @@ def run_loop(args: argparse.Namespace) -> int:
                     show_agent_logs=args.show_agent_logs,
                     show_command_logs=args.show_command_logs,
                     commit_message_prefix=args.commit_message_prefix,
-                    no_push=args.no_push,
-                    push_remote=args.push_remote,
                 )
                 effective_record = _effective_record(
                     record,

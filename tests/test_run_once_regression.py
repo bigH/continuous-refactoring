@@ -116,7 +116,7 @@ def test_run_once_stays_on_invoked_branch(
 
 
 # ---------------------------------------------------------------------------
-# Case C: run_loop 2-target batch — invocations, commit prefix, push
+# Case C: run_loop 2-target batch — invocations, commit prefix, local commits
 # ---------------------------------------------------------------------------
 
 
@@ -135,20 +135,14 @@ def test_run_loop_two_targets_unchanged(
     )
 
     agent_calls: list[str] = []
-    push_calls: list[tuple[str, str]] = []
-
     def tracking_agent(**kwargs: object) -> CommandCapture:
         agent_calls.append(str(kwargs.get("prompt", "")))
         rr = Path(str(kwargs.get("repo_root", "")))
         (rr / f"change{len(agent_calls)}.txt").write_text("x\n", encoding="utf-8")
         return noop_agent(**kwargs)
 
-    def tracking_push(repo_root: Path, remote: str, branch: str) -> None:
-        push_calls.append((remote, branch))
-
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", tracking_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
-    monkeypatch.setattr("continuous_refactoring.loop.git_push", tracking_push)
 
     targets_file = tmp_path / "targets.jsonl"
     lines = [
@@ -160,14 +154,12 @@ def test_run_loop_two_targets_unchanged(
     args = make_run_loop_args(
         repo_root,
         targets=targets_file,
-        no_push=False,
         commit_message_prefix="continuous refactor",
     )
     exit_code = continuous_refactoring.run_loop(args)
 
     assert exit_code == 0
     assert len(agent_calls) == 2
-    assert len(push_calls) == 2
 
     log = continuous_refactoring.run_command(
         ["git", "log", "--oneline"], cwd=repo_root,

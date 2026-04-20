@@ -132,7 +132,6 @@ def test_run_loop_makes_no_branching_calls(
             repo_root,
             targets=targets_file,
             scope_instruction=None,
-            no_push=True,
         )
     )
 

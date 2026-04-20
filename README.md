@@ -34,7 +34,7 @@ That keeps sweeping targets until it runs out, hits your caps, or starts failing
 - Resolves a target from `--targets`, `--globs`, `--extensions`, or `--paths`, with optional natural-language scoping via `--scope-instruction`.
 - Runs the agent with a refactoring prompt + your "taste" guidelines.
 - Runs your validation command (default: `uv run pytest`).
-- In `run`, if green and there's a diff, commits and pushes. In `run-once`, it commits locally and leaves the branch for you to inspect.
+- If green and there's a diff, it commits locally and leaves the branch for you to inspect.
 - Repeats until it runs out of targets, hits the retry budget, or stacks too many failures.
 
 ## Requirements
@@ -84,8 +84,8 @@ continuous-refactoring run \
 |---|---|
 | `init` | Registers this directory as a project, creates a default `taste.md`, and can store `--live-migrations-dir`. |
 | `taste` | Prints the active taste file path. Add `--interview` to have an agent author it, `--refine` to iteratively improve an existing taste doc, `--upgrade` to refresh stale taste dimensions, `--global` for the shared file, and `--force` to let `--interview` overwrite custom content after writing a `.bak`. |
-| `run-once` | Single pass on one resolved target. No retry, no push. If there is a diff and validation passes, it commits locally and prints the diffstat. |
-| `run` | The loop. Iterates targets, retries on failure, commits successful targets, and pushes unless `--no-push` is set. |
+| `run-once` | Single pass on one resolved target. No retry. If there is a diff and validation passes, it commits locally and prints the diffstat. |
+| `run` | The loop. Iterates targets, retries on failure, and commits successful targets locally. |
 | `upgrade` | Checks that the global config manifest is current, rewrites it idempotently, and warns if the global taste file is stale. |
 | `review list` | Lists migrations flagged for human review (`awaiting_human_review`). |
 | `review perform <migration>` | Starts an interactive agent session to resolve a flagged migration's review. Requires `--with`, `--model`, and `--effort`. |
@@ -130,14 +130,12 @@ If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`, the
 - `--max-refactors N` — cap the number of targets per run. Required unless you use `--targets`.
 - `--max-consecutive-failures N` — bail after N targets fail in a row. Default 3.
 - `--sleep SECONDS` — pause between completed targets. Useful when you want a long batch without hammering the repo or your agent budget.
-- `--no-push` — keep commits local.
-- `--push-remote NAME` — remote used when pushing. Default `origin`.
 - `--commit-message-prefix TEXT` — prefix for successful refactor or migration-plan commits. Default `continuous refactor`.
 
 ## Safety behaviors
 
 - Refuses to start with a dirty worktree.
-- Runs on the current branch. Commits land there. Push target is also the current branch (unless `--no-push`).
+- Runs on the current branch. Commits land there.
 - `run` baselines your validation command before touching anything. If the baseline is already red, it stops.
 - On a failed attempt, resets back to the pre-attempt HEAD and cleans workspace changes before retrying or moving on.
 - Watchdog kills any agent or test process that's been silent for 5 minutes.

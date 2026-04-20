@@ -50,7 +50,6 @@ class AttemptStats:
     reason_doc_path: str | None = None
     commit_sha: str | None = None
     commit_phase: str | None = None
-    pushed: bool = False
 
 
 @dataclass
@@ -74,7 +73,6 @@ class RunArtifacts:
         default_factory=lambda: {
             "attempts_started": 0,
             "commits_created": 0,
-            "pushes_completed": 0,
         }
     )
 
@@ -260,12 +258,6 @@ class RunArtifacts:
         stats.commit_sha = commit_sha
         stats.commit_phase = phase
         self.counts["commits_created"] += 1
-        self.write_summary()
-
-    def record_push(self, attempt: int) -> None:
-        stats = self.ensure_attempt(attempt)
-        stats.pushed = True
-        self.counts["pushes_completed"] += 1
         self.write_summary()
 
     def finish(self, status: str, error_message: str | None = None) -> None:

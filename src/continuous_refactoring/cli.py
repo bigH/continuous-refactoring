@@ -188,16 +188,6 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     run_parser.add_argument(
-        "--no-push",
-        action="store_true",
-        help="Skip push after successful commit.",
-    )
-    run_parser.add_argument(
-        "--push-remote",
-        default="origin",
-        help="Git remote for pushing.",
-    )
-    run_parser.add_argument(
         "--commit-message-prefix",
         default="continuous refactor",
         help="Prefix for commit messages.",

@@ -16,7 +16,7 @@ Unify them around a single `execute_target` function; make `run_once` a
   (max_attempts=1, no sleep) and per target from `run_loop`.
 - A small `LoopContext` frozen dataclass carrying `repo_root, artifacts,
   taste, agent, model, effort, timeout, validation_command,
-  commit_message_prefix, branch_name, push_remote, no_push, show_*`.
+  commit_message_prefix, branch_name, show_*`.
   (Single call site today, but two after unification — justifies the type.)
 - `run_once` becomes ~40 lines: resolve target, build context, call
   `execute_target`, print diff-stat, return.

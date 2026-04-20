@@ -91,7 +91,7 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 
 - Targeting is **first-match-wins** across `--targets > --globs > --extensions > --paths`. Multiple flags silently use the highest.
 - `--max-attempts 0` means **unlimited**, not zero. A WARN fires at startup.
-- `run-once` never pushes. `run` pushes to the current branch unless `--no-push` is set; remote is `--push-remote` (default `origin`).
+- `run-once` and `run` both create local commits only; the driver never publishes branch updates.
 
 ## 12. XDG + artifacts
 

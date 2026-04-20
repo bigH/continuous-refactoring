@@ -102,32 +102,28 @@ def test_run_parser_accepts_sleep_flag() -> None:
     assert args.sleep == 0.25
 
 
-def test_run_pushes_after_commit(
+def test_run_commits_after_successful_change(
     run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = run_loop_env
-
-    push_calls: list[tuple[str, str]] = []
 
     def touching_agent(**kwargs: object) -> CommandCapture:
         rr = Path(str(kwargs.get("repo_root", "")))
         (rr / "touched.txt").write_text("touched\n", encoding="utf-8")
         return noop_agent(**kwargs)
 
-    def tracking_push(repo_root: Path, remote: str, branch: str) -> None:
-        push_calls.append((remote, branch))
-
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
-    monkeypatch.setattr("continuous_refactoring.loop.git_push", tracking_push)
 
-    args = make_run_loop_args(repo_root, max_refactors=1, no_push=False)
+    args = make_run_loop_args(repo_root, max_refactors=1)
     exit_code = continuous_refactoring.run_loop(args)
 
     assert exit_code == 0
-    assert len(push_calls) == 1
-    assert push_calls[0][0] == "origin"
+    log = continuous_refactoring.run_command(
+        ["git", "log", "--oneline"], cwd=repo_root,
+    ).stdout
+    assert "continuous refactor: random files" in log
 
 
 def test_run_sleeps_only_between_targets(
@@ -163,31 +159,41 @@ def test_run_sleeps_only_between_targets(
     assert sleep_calls == [0.25, 0.25]
 
 
-def test_run_no_push_flag(
+def test_run_summary_has_no_publish_fields(
     run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = run_loop_env
-
-    push_calls: list[tuple[str, str]] = []
 
     def touching_agent(**kwargs: object) -> CommandCapture:
         rr = Path(str(kwargs.get("repo_root", "")))
         (rr / "touched.txt").write_text("touched\n", encoding="utf-8")
         return noop_agent(**kwargs)
 
-    def tracking_push(repo_root: Path, remote: str, branch: str) -> None:
-        push_calls.append((remote, branch))
-
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
-    monkeypatch.setattr("continuous_refactoring.loop.git_push", tracking_push)
 
-    args = make_run_loop_args(repo_root, max_refactors=1, no_push=True)
+    args = make_run_loop_args(repo_root, max_refactors=1)
     exit_code = continuous_refactoring.run_loop(args)
 
+    summary = _read_single_run_summary(repo_root)
+
     assert exit_code == 0
-    assert len(push_calls) == 0
+    assert set(summary["counts"]) == {"attempts_started", "commits_created"}
+    assert set(summary["attempts"][0]) >= {
+        "attempt",
+        "call_role",
+        "commit_phase",
+        "commit_sha",
+        "decision",
+        "failure_kind",
+        "failure_summary",
+        "phase_reached",
+        "reason_doc_path",
+        "retry",
+        "retry_recommendation",
+        "target",
+    }
 
 
 def test_run_does_not_sleep_between_retries(
@@ -681,8 +687,6 @@ def test_cli_does_not_cap_max_refactors(
         repo_root=repo_root,
         max_attempts=None,
         max_refactors=20,
-        no_push=True,
-        push_remote="origin",
         commit_message_prefix="continuous refactor",
         max_consecutive_failures=3,
     )
@@ -1641,5 +1645,3 @@ def test_run_agent_failure_undoes_commit_before_retry(
         line for line in log.stdout.splitlines() if "continuous refactor" in line
     ]
     assert len(refactor_commits) == 1
-
-

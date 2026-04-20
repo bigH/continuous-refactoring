@@ -12,7 +12,6 @@ __all__ = [
     "discard_workspace_changes",
     "get_head_sha",
     "git_commit",
-    "git_push",
     "repo_change_count",
     "repo_has_changes",
     "require_clean_worktree",
@@ -100,10 +99,6 @@ def git_commit(repo_root: Path, message: str) -> str:
         raise ContinuousRefactorError("No changes to commit.")
     run_command(["git", "commit", "-m", message], cwd=repo_root)
     return get_head_sha(repo_root)
-
-
-def git_push(repo_root: Path, remote: str, branch: str) -> None:
-    run_command(["git", "push", remote, branch], cwd=repo_root)
 
 
 def undo_last_commit(repo_root: Path) -> None:

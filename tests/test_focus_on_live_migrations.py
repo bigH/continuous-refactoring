@@ -344,9 +344,11 @@ def test_focused_loop_advances_multiple_ready_phases_until_deferred(
         repo_root: Path,
         live_dir: Path,
         artifacts: object,
-        **_kwargs: object,
+        **kwargs: object,
     ) -> object:
         execute_calls.append(phase.name)
+        assert kwargs["validation_command"]
+        assert kwargs["max_attempts"] == 1
         updated = replace(
             manifest,
             phases=(replace(manifest.phases[0], done=True), manifest.phases[1]),

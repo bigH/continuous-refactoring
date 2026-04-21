@@ -1303,28 +1303,32 @@ def test_run_phase_execute_validation_failure_logs_phase_validation_role(
     args = make_run_loop_args(
         repo_root,
         max_refactors=1,
+        max_attempts=3,
         max_consecutive_failures=1,
     )
     with pytest.raises(ContinuousRefactorError, match="1 consecutive failures"):
         continuous_refactoring.run_loop(args)
 
     events = _read_single_run_events(repo_root)
-    assert any(
-        event.get("call_role") == "phase.execute"
+    assert sum(
+        1
+        for event in events
+        if event.get("call_role") == "phase.execute"
         and event.get("call_status") == "finished"
+    ) == 3
+    assert sum(
+        1
         for event in events
-    )
-    assert any(
-        event.get("call_role") == "phase.validation"
+        if event.get("call_role") == "phase.validation"
         and event.get("call_status") == "failed"
-        for event in events
-    )
+    ) == 3
 
     snapshots = sorted(
         continuous_refactoring.config.failure_snapshots_dir(repo_root).glob("*.md")
     )
     reason_doc = snapshots[-1].read_text(encoding="utf-8")
     assert 'call_role: "phase.validation"' in reason_doc
+    assert 'retry: 3' in reason_doc
 
 
 def test_run_phase_execute_validation_infra_failure_logs_phase_validation_role(

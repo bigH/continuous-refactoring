@@ -433,27 +433,31 @@ def test_phase_ready_contains_output_contract() -> None:
 
 def test_phase_execution_contains_base_prompt() -> None:
     manifest = _manifest()
-    result = compose_phase_execution_prompt(manifest.phases[1], manifest, _TASTE)
+    result = compose_phase_execution_prompt(
+        manifest.phases[1], manifest, _TASTE, "uv run pytest"
+    )
     assert PHASE_EXECUTION_PROMPT in result
 
 
 def test_phase_execution_contains_phase_name() -> None:
     manifest = _manifest()
     phase = manifest.phases[1]
-    result = compose_phase_execution_prompt(phase, manifest, _TASTE)
+    result = compose_phase_execution_prompt(phase, manifest, _TASTE, "uv run pytest")
     assert phase.name in result
 
 
 def test_phase_execution_contains_phase_file() -> None:
     manifest = _manifest()
     phase = manifest.phases[1]
-    result = compose_phase_execution_prompt(phase, manifest, _TASTE)
+    result = compose_phase_execution_prompt(phase, manifest, _TASTE, "uv run pytest")
     assert phase.file in result
 
 
 def test_phase_execution_contains_manifest_name() -> None:
     manifest = _manifest()
-    result = compose_phase_execution_prompt(manifest.phases[1], manifest, _TASTE)
+    result = compose_phase_execution_prompt(
+        manifest.phases[1], manifest, _TASTE, "uv run pytest"
+    )
     assert manifest.name in result
     assert "Current phase file: phase-1-migrate.md" in result
     assert "Current phase name: migrate" in result
@@ -461,5 +465,19 @@ def test_phase_execution_contains_manifest_name() -> None:
 
 def test_phase_execution_contains_taste() -> None:
     manifest = _manifest()
-    result = compose_phase_execution_prompt(manifest.phases[1], manifest, _TASTE)
+    result = compose_phase_execution_prompt(
+        manifest.phases[1], manifest, _TASTE, "uv run pytest"
+    )
     assert _TASTE in result
+
+
+def test_phase_execution_contains_validation_command() -> None:
+    manifest = _manifest()
+    result = compose_phase_execution_prompt(
+        manifest.phases[1], manifest, _TASTE, "uv run pytest -q"
+    )
+
+    assert "## Validation" in result
+    assert "Run: `uv run pytest -q`" in result
+    assert "Run the full configured validation command before declaring success." in result
+    assert "A phase is done only when the complete validation command is green." in result

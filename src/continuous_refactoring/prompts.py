@@ -608,6 +608,11 @@ You are executing a single phase of a refactoring migration.
 Execute the work described in the phase file. Follow the plan exactly.
 All changes must keep the project in a state where all tests pass.
 Do not modify files outside the scope defined in the phase plan.
+Run the full configured validation command before declaring success.
+Narrow checks may be useful during iteration, but they are not sufficient on
+their own.
+Do not stop after making edits if the full validation command is red.
+A phase is done only when the complete validation command is green.
 
 Refactoring taste is injected by the caller. Respect it in all code changes.
 
@@ -704,14 +709,27 @@ def compose_phase_ready_prompt(
 
 
 def compose_phase_execution_prompt(
-    phase: PhaseSpec, manifest: MigrationManifest, taste: str,
+    phase: PhaseSpec,
+    manifest: MigrationManifest,
+    taste: str,
+    validation_command: str,
+    retry_context: str | None = None,
 ) -> str:
-    return _join_sections(
+    sanitized_retry_context = _strip_or_none(retry_context)
+    sections: list[str] = [
         PHASE_EXECUTION_PROMPT,
         f"## Phase\nName: {phase.name}\nFile: {phase.file}",
         f"## Manifest\n{_format_manifest_summary(manifest)}",
         f"## Taste\n{taste}",
-    )
+        f"## Validation\nRun: `{validation_command}`",
+    ]
+    if sanitized_retry_context:
+        sections.extend([
+            "## Retry Context",
+            sanitized_retry_context,
+            "Use this as focused context only. Do not copy raw failure text into code.",
+        ])
+    return _join_sections(*sections)
 
 
 REVIEW_PERFORM_PROMPT = """\

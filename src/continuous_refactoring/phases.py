@@ -16,8 +16,15 @@ __all__ = [
     "execute_phase",
 ]
 
-from continuous_refactoring.agent import maybe_run_agent, run_tests, summarize_output
+from continuous_refactoring.agent import maybe_run_agent, run_tests
 from continuous_refactoring.artifacts import ContinuousRefactorError, iso_timestamp
+from continuous_refactoring.decisions import (
+    error_failure_kind,
+    read_status,
+    resolved_phase_reached,
+    sanitize_text,
+    status_summary,
+)
 from continuous_refactoring.git import get_head_sha, revert_to
 from continuous_refactoring.migrations import (
     advance_phase_cursor,
@@ -45,6 +52,7 @@ class ExecutePhaseOutcome:
     call_role: str | None = None
     phase_reached: str | None = None
     failure_kind: str | None = None
+    retry: int = 1
 
 
 def _phase_target_label(manifest: MigrationManifest, phase: PhaseSpec) -> str:
@@ -180,7 +188,23 @@ def _fail_execute(
         call_role=call_role,
         phase_reached=phase_reached or call_role,
         failure_kind=failure_kind,
+        retry=retry,
     )
+
+
+def _phase_retry_context(
+    target_label: str,
+    call_role: str,
+    summary: str,
+    focus: str | None,
+) -> str:
+    lines = [
+        f"- Previous attempt on `{target_label}` failed during `{call_role}`.",
+        f"- Summary: {summary}",
+    ]
+    if focus:
+        lines.append(f"- Next retry focus: {focus}")
+    return "\n".join(lines)
 
 
 def execute_phase(
@@ -197,146 +221,247 @@ def execute_phase(
     model: str,
     effort: str,
     timeout: int | None,
+    validation_command: str,
+    max_attempts: int | None,
 ) -> ExecutePhaseOutcome:
-    prompt = compose_phase_execution_prompt(phase, manifest, taste)
-    phase_dir = artifacts.root / "phase-execute"
-    phase_dir.mkdir(parents=True, exist_ok=True)
-
     head_before = get_head_sha(repo_root)
     target_label = _phase_target_label(manifest, phase)
     execute_role = "phase.execute"
     validation_role = "phase.validation"
+    retry_context: str | None = None
+    current_retry = retry - 1
 
-    artifacts.log_call_started(
-        attempt=attempt,
-        retry=retry,
-        target=target_label,
-        call_role=execute_role,
-    )
+    while True:
+        current_retry += 1
+        if current_retry > retry:
+            revert_to(repo_root, head_before)
 
-    try:
-        result = maybe_run_agent(
-            agent=agent,
-            model=model,
-            effort=effort,
-            prompt=prompt,
-            repo_root=repo_root,
-            stdout_path=phase_dir / "agent.stdout.log",
-            stderr_path=phase_dir / "agent.stderr.log",
-            last_message_path=(
-                phase_dir / "agent-last-message.md" if agent == "codex" else None
-            ),
-            mirror_to_terminal=False,
-            timeout=timeout,
+        phase_dir = artifacts.attempt_dir(attempt, retry=current_retry) / "phase-execute"
+        phase_dir.mkdir(parents=True, exist_ok=True)
+        last_message_path = (
+            phase_dir / "agent-last-message.md" if agent == "codex" else None
         )
-    except ContinuousRefactorError as error:
-        return _fail_execute(
-            artifacts,
-            attempt=attempt, retry=retry, target_label=target_label,
-            call_role=execute_role, phase_reached=None,
-            repo_root=repo_root, head_before=head_before,
-            reason=str(error), failure_kind="agent-infra-failure",
-            summary=str(error),
+        prompt = compose_phase_execution_prompt(
+            phase,
+            manifest,
+            taste,
+            validation_command,
+            retry_context=retry_context,
         )
 
-    if result.returncode != 0:
-        reason = f"{agent} exited with code {result.returncode}"
-        return _fail_execute(
-            artifacts,
-            attempt=attempt, retry=retry, target_label=target_label,
-            call_role=execute_role, phase_reached=None,
-            repo_root=repo_root, head_before=head_before,
-            reason=reason, failure_kind="agent-exited-nonzero",
-            returncode=result.returncode, summary=reason,
+        artifacts.log_call_started(
+            attempt=attempt,
+            retry=current_retry,
+            target=target_label,
+            call_role=execute_role,
         )
 
-    artifacts.log_call_finished(
-        attempt=attempt,
-        retry=retry,
-        target=target_label,
-        call_role=execute_role,
-        status="finished",
-        returncode=result.returncode,
-    )
-    artifacts.log_call_started(
-        attempt=attempt,
-        retry=retry,
-        target=target_label,
-        call_role=validation_role,
-        phase_reached=execute_role,
-    )
-    try:
-        test_result = run_tests(
-            artifacts.test_command,
-            repo_root,
-            stdout_path=phase_dir / "tests.stdout.log",
-            stderr_path=phase_dir / "tests.stderr.log",
-            mirror_to_terminal=False,
-        )
-    except ContinuousRefactorError as error:
-        return _fail_execute(
-            artifacts,
-            attempt=attempt, retry=retry, target_label=target_label,
-            call_role=validation_role, phase_reached=execute_role,
-            repo_root=repo_root, head_before=head_before,
-            reason=str(error), failure_kind="validation-infra-failure",
-            summary=str(error),
-        )
+        try:
+            result = maybe_run_agent(
+                agent=agent,
+                model=model,
+                effort=effort,
+                prompt=prompt,
+                repo_root=repo_root,
+                stdout_path=phase_dir / "agent.stdout.log",
+                stderr_path=phase_dir / "agent.stderr.log",
+                last_message_path=last_message_path,
+                mirror_to_terminal=False,
+                timeout=timeout,
+            )
+        except ContinuousRefactorError as error:
+            return _fail_execute(
+                artifacts,
+                attempt=attempt,
+                retry=current_retry,
+                target_label=target_label,
+                call_role=execute_role,
+                phase_reached=None,
+                repo_root=repo_root,
+                head_before=head_before,
+                reason=sanitize_text(str(error), repo_root) or str(error),
+                failure_kind=error_failure_kind(str(error)),
+                summary=sanitize_text(str(error), repo_root) or str(error),
+            )
 
-    if test_result.returncode != 0:
-        return _fail_execute(
-            artifacts,
-            attempt=attempt, retry=retry, target_label=target_label,
-            call_role=validation_role, phase_reached=execute_role,
-            repo_root=repo_root, head_before=head_before,
-            reason=f"Tests failed: {summarize_output(test_result)}",
-            failure_kind="validation-failed",
+        agent_status = read_status(
+            agent,
+            last_message_path=last_message_path,
+            fallback_text=result.stdout,
+        )
+        execute_phase_reached = resolved_phase_reached(agent_status, execute_role)
+
+        if result.returncode != 0:
+            reason = f"{agent} exited with code {result.returncode}"
+            summary, _focus = status_summary(
+                agent_status,
+                fallback=reason,
+                repo_root=repo_root,
+            )
+            return _fail_execute(
+                artifacts,
+                attempt=attempt,
+                retry=current_retry,
+                target_label=target_label,
+                call_role=execute_role,
+                phase_reached=execute_phase_reached,
+                repo_root=repo_root,
+                head_before=head_before,
+                reason=summary,
+                failure_kind="agent-exited-nonzero",
+                returncode=result.returncode,
+                summary=summary,
+            )
+
+        artifacts.log_call_finished(
+            attempt=attempt,
+            retry=current_retry,
+            target=target_label,
+            call_role=execute_role,
+            status="finished",
+            returncode=result.returncode,
+        )
+        artifacts.log_call_started(
+            attempt=attempt,
+            retry=current_retry,
+            target=target_label,
+            call_role=validation_role,
+            phase_reached=execute_phase_reached,
+        )
+        try:
+            test_result = run_tests(
+                validation_command,
+                repo_root,
+                stdout_path=phase_dir / "tests.stdout.log",
+                stderr_path=phase_dir / "tests.stderr.log",
+                mirror_to_terminal=False,
+            )
+        except ContinuousRefactorError as error:
+            summary, focus = status_summary(
+                agent_status,
+                fallback=sanitize_text(str(error), repo_root) or str(error),
+                repo_root=repo_root,
+            )
+            if max_attempts is None or current_retry < max_attempts:
+                artifacts.log_call_finished(
+                    attempt=attempt,
+                    retry=current_retry,
+                    target=target_label,
+                    call_role=validation_role,
+                    phase_reached=execute_phase_reached,
+                    status="failed",
+                    level="WARN",
+                    summary=summary,
+                )
+                revert_to(repo_root, head_before)
+                retry_context = _phase_retry_context(
+                    target_label,
+                    validation_role,
+                    summary,
+                    focus,
+                )
+                continue
+            return _fail_execute(
+                artifacts,
+                attempt=attempt,
+                retry=current_retry,
+                target_label=target_label,
+                call_role=validation_role,
+                phase_reached=execute_phase_reached,
+                repo_root=repo_root,
+                head_before=head_before,
+                reason=summary,
+                failure_kind="validation-infra-failure",
+                summary=summary,
+            )
+
+        if test_result.returncode != 0:
+            summary, focus = status_summary(
+                agent_status,
+                fallback="validation failed after phase execution",
+                repo_root=repo_root,
+            )
+            if max_attempts is None or current_retry < max_attempts:
+                artifacts.log_call_finished(
+                    attempt=attempt,
+                    retry=current_retry,
+                    target=target_label,
+                    call_role=validation_role,
+                    phase_reached=execute_phase_reached,
+                    status="failed",
+                    level="WARN",
+                    returncode=test_result.returncode,
+                    summary=summary,
+                )
+                revert_to(repo_root, head_before)
+                retry_context = _phase_retry_context(
+                    target_label,
+                    validation_role,
+                    summary,
+                    focus,
+                )
+                continue
+            return _fail_execute(
+                artifacts,
+                attempt=attempt,
+                retry=current_retry,
+                target_label=target_label,
+                call_role=validation_role,
+                phase_reached=execute_phase_reached,
+                repo_root=repo_root,
+                head_before=head_before,
+                reason=summary,
+                failure_kind="validation-failed",
+                returncode=test_result.returncode,
+                summary=summary,
+            )
+
+        artifacts.log_call_finished(
+            attempt=attempt,
+            retry=current_retry,
+            target=target_label,
+            call_role=validation_role,
+            phase_reached=execute_phase_reached,
+            status="finished",
             returncode=test_result.returncode,
-            summary="validation failed after phase execution",
         )
 
-    artifacts.log_call_finished(
-        attempt=attempt,
-        retry=retry,
-        target=target_label,
-        call_role=validation_role,
-        phase_reached=execute_role,
-        status="finished",
-        returncode=test_result.returncode,
-    )
-
-    phase_index = None
-    for index, manifest_phase in enumerate(manifest.phases):
-        if manifest_phase.name == phase.name:
-            phase_index = index
-            break
-    if phase_index is None:
-        raise ContinuousRefactorError(f"Phase {phase.name!r} not found in manifest")
-    updated_phases = tuple(
-        replace(p, done=True) if i == phase_index else p
-        for i, p in enumerate(manifest.phases)
-    )
-    now = iso_timestamp()
-    updated_manifest = replace(
-        manifest,
-        phases=updated_phases,
-        last_touch=now,
-        wake_up_on=None,
-        awaiting_human_review=False,
-        human_review_reason=None,
-        cooldown_until=None,
-    )
-    next_phase_name = advance_phase_cursor(manifest, phase.name)
-    if next_phase_name is None:
+        phase_index = None
+        for index, manifest_phase in enumerate(manifest.phases):
+            if manifest_phase.name == phase.name:
+                phase_index = index
+                break
+        if phase_index is None:
+            raise ContinuousRefactorError(f"Phase {phase.name!r} not found in manifest")
+        updated_phases = tuple(
+            replace(p, done=True) if i == phase_index else p
+            for i, p in enumerate(manifest.phases)
+        )
+        now = iso_timestamp()
         updated_manifest = replace(
-            updated_manifest,
-            current_phase="",
-            status="done",
+            manifest,
+            phases=updated_phases,
+            last_touch=now,
+            wake_up_on=None,
+            awaiting_human_review=False,
+            human_review_reason=None,
+            cooldown_until=None,
         )
-    else:
-        updated_manifest = replace(updated_manifest, current_phase=next_phase_name)
+        next_phase_name = advance_phase_cursor(manifest, phase.name)
+        if next_phase_name is None:
+            updated_manifest = replace(
+                updated_manifest,
+                current_phase="",
+                status="done",
+            )
+        else:
+            updated_manifest = replace(updated_manifest, current_phase=next_phase_name)
 
-    manifest_path = migration_root(live_dir, manifest.name) / "manifest.json"
-    save_manifest(updated_manifest, manifest_path)
+        manifest_path = migration_root(live_dir, manifest.name) / "manifest.json"
+        save_manifest(updated_manifest, manifest_path)
 
-    return ExecutePhaseOutcome(status="done", reason="Phase completed successfully")
+        return ExecutePhaseOutcome(
+            status="done",
+            reason="Phase completed successfully",
+            retry=current_retry,
+        )

@@ -212,7 +212,7 @@ def test_check_ready_no(
 ) -> None:
     _patch_agent(
         monkeypatch,
-        "checking...\nready: no \u2014 prerequisites not met\n",
+        "checking...\nready: no — prerequisites not met\n",
         tmp_path,
     )
 
@@ -229,7 +229,7 @@ def test_check_ready_unverifiable(
 ) -> None:
     _patch_agent(
         monkeypatch,
-        "analysis...\nready: unverifiable \u2014 need human judgment\n",
+        "analysis...\nready: unverifiable — need human judgment\n",
         tmp_path,
     )
 
@@ -260,9 +260,18 @@ def test_ready_yes_green_tests_flips_phase_done(
     monkeypatch.setattr("continuous_refactoring.phases.run_tests", _passing_tests)
 
     outcome = execute_phase(
-        _PHASE_0, manifest, _TASTE, tmp_path, live_dir,
+        _PHASE_0,
+        manifest,
+        _TASTE,
+        tmp_path,
+        live_dir,
         _make_artifacts(tmp_path),
-        agent="codex", model="fake", effort="low", timeout=None,
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        validation_command="true",
+        max_attempts=1,
     )
 
     assert outcome.status == "done"
@@ -291,9 +300,18 @@ def test_final_phase_completion_marks_migration_done(
     monkeypatch.setattr("continuous_refactoring.phases.run_tests", _passing_tests)
 
     outcome = execute_phase(
-        _PHASE_1, manifest, _TASTE, tmp_path, live_dir,
+        _PHASE_1,
+        manifest,
+        _TASTE,
+        tmp_path,
+        live_dir,
         _make_artifacts(tmp_path),
-        agent="codex", model="fake", effort="low", timeout=None,
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        validation_command="true",
+        max_attempts=1,
     )
 
     assert outcome.status == "done"
@@ -319,7 +337,7 @@ def test_ready_no_leaves_manifest_untouched(
     manifest_path = _save_manifest_to_disk(manifest, live_dir)
     original = load_manifest(manifest_path)
 
-    _patch_agent(monkeypatch, "ready: no \u2014 not ready yet\n", tmp_path)
+    _patch_agent(monkeypatch, "ready: no — not ready yet\n", tmp_path)
 
     verdict, _reason = check_phase_ready(
         _PHASE_0, manifest, tmp_path, _make_artifacts(tmp_path),
@@ -357,7 +375,7 @@ def test_ready_unverifiable_sets_awaiting_human_review(
     assert load_manifest(manifest_path).awaiting_human_review is False
 
     _patch_agent(
-        monkeypatch, "ready: unverifiable \u2014 external dependency\n", tmp_path,
+        monkeypatch, "ready: unverifiable — external dependency\n", tmp_path,
     )
 
     verdict, _reason = check_phase_ready(
@@ -375,7 +393,7 @@ def test_ready_unverifiable_sets_awaiting_human_review(
 
 
 # ---------------------------------------------------------------------------
-# execute_phase test-failure path reverts workspace
+# execute_phase validation + retry behavior
 # ---------------------------------------------------------------------------
 
 
@@ -399,15 +417,262 @@ def test_execute_phase_test_failure_reverts_workspace(
     monkeypatch.setattr("continuous_refactoring.phases.run_tests", _failing_tests)
 
     outcome = execute_phase(
-        _PHASE_0, manifest, _TASTE, tmp_path, live_dir,
+        _PHASE_0,
+        manifest,
+        _TASTE,
+        tmp_path,
+        live_dir,
         _make_artifacts(tmp_path),
-        agent="codex", model="fake", effort="low", timeout=None,
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        validation_command="true",
+        max_attempts=1,
     )
 
     assert outcome.status == "failed"
-    assert "Tests failed" in outcome.reason
+    assert "validation failed after phase execution" in outcome.reason
     assert reverted == ["abc123"]
 
     reloaded = load_manifest(manifest_path)
     assert reloaded.phases == original.phases
     assert reloaded.current_phase == original.current_phase
+
+
+def test_execute_phase_retries_after_validation_failure_and_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = tmp_path / "live"
+    manifest = _make_manifest()
+    manifest_path = _save_manifest_to_disk(manifest, live_dir)
+
+    prompts: list[str] = []
+    validation_calls = 0
+    reverted: list[str] = []
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.get_head_sha", lambda _: "abc123",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.revert_to",
+        lambda _repo, head: reverted.append(head),
+    )
+
+    def fake_agent(**kwargs: object) -> CommandCapture:
+        prompts.append(str(kwargs.get("prompt", "")))
+        stdout_path = Path(str(kwargs["stdout_path"]))
+        stderr_path = Path(str(kwargs["stderr_path"]))
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stderr_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text("done\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return CommandCapture(
+            command=("fake",),
+            returncode=0,
+            stdout="done\n",
+            stderr="",
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+
+    def fail_once_then_pass(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        nonlocal validation_calls
+        validation_calls += 1
+        assert test_command == "uv run pytest -q"
+        if validation_calls == 1:
+            return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return _passing_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr("continuous_refactoring.phases.maybe_run_agent", fake_agent)
+    monkeypatch.setattr("continuous_refactoring.phases.run_tests", fail_once_then_pass)
+
+    outcome = execute_phase(
+        _PHASE_0,
+        manifest,
+        _TASTE,
+        tmp_path,
+        live_dir,
+        _make_artifacts(tmp_path),
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        validation_command="uv run pytest -q",
+        max_attempts=2,
+    )
+
+    assert outcome.status == "done"
+    assert outcome.retry == 2
+    assert validation_calls == 2
+    assert reverted == ["abc123", "abc123"]
+    assert len(prompts) == 2
+    assert "## Retry Context" not in prompts[0]
+    assert "## Retry Context" in prompts[1]
+    assert "failed during `phase.validation`" in prompts[1]
+    assert "validation failed after phase execution" in prompts[1]
+
+    reloaded = load_manifest(manifest_path)
+    assert reloaded.phases[0].done is True
+
+
+def test_execute_phase_exhausts_retry_budget_on_validation_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = tmp_path / "live"
+    manifest = _make_manifest()
+    manifest_path = _save_manifest_to_disk(manifest, live_dir)
+    original = load_manifest(manifest_path)
+
+    prompts: list[str] = []
+    reverted: list[str] = []
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.get_head_sha", lambda _: "abc123",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.revert_to",
+        lambda _repo, head: reverted.append(head),
+    )
+
+    def fake_agent(**kwargs: object) -> CommandCapture:
+        prompts.append(str(kwargs.get("prompt", "")))
+        stdout_path = Path(str(kwargs["stdout_path"]))
+        stderr_path = Path(str(kwargs["stderr_path"]))
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stderr_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text("done\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return CommandCapture(
+            command=("fake",),
+            returncode=0,
+            stdout="done\n",
+            stderr="",
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+
+    monkeypatch.setattr("continuous_refactoring.phases.maybe_run_agent", fake_agent)
+    monkeypatch.setattr("continuous_refactoring.phases.run_tests", _failing_tests)
+
+    outcome = execute_phase(
+        _PHASE_0,
+        manifest,
+        _TASTE,
+        tmp_path,
+        live_dir,
+        _make_artifacts(tmp_path),
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        validation_command="true",
+        max_attempts=3,
+    )
+
+    assert outcome.status == "failed"
+    assert outcome.call_role == "phase.validation"
+    assert outcome.failure_kind == "validation-failed"
+    assert outcome.retry == 3
+    assert len(prompts) == 3
+    assert reverted == ["abc123", "abc123", "abc123", "abc123", "abc123"]
+
+    reloaded = load_manifest(manifest_path)
+    assert reloaded.phases == original.phases
+    assert reloaded.current_phase == original.current_phase
+
+
+def test_execute_phase_retry_prompt_uses_sanitized_validation_context(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = tmp_path / "live"
+    manifest = _make_manifest()
+
+    prompts: list[str] = []
+    validation_calls = 0
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.get_head_sha", lambda _: "abc123",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.revert_to",
+        lambda _repo, _head: None,
+    )
+
+    def fake_agent(**kwargs: object) -> CommandCapture:
+        prompts.append(str(kwargs.get("prompt", "")))
+        stdout_path = Path(str(kwargs["stdout_path"]))
+        stderr_path = Path(str(kwargs["stderr_path"]))
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stderr_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text("done\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return CommandCapture(
+            command=("fake",),
+            returncode=0,
+            stdout="done\n",
+            stderr="",
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+
+    def fail_with_noise_then_pass(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        nonlocal validation_calls
+        validation_calls += 1
+        if validation_calls == 1:
+            stdout_path.parent.mkdir(parents=True, exist_ok=True)
+            stderr_path.parent.mkdir(parents=True, exist_ok=True)
+            stdout_path.write_text(
+                "codex exec --model fake VERY-HUGE-PROMPT\nFOOBAR-MARKER failed\n",
+                encoding="utf-8",
+            )
+            stderr_path.write_text("", encoding="utf-8")
+            return CommandCapture(
+                command=("pytest",),
+                returncode=1,
+                stdout=(
+                    "codex exec --model fake VERY-HUGE-PROMPT\n"
+                    "FOOBAR-MARKER failed\n"
+                ),
+                stderr="",
+                stdout_path=stdout_path,
+                stderr_path=stderr_path,
+            )
+        return _passing_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr("continuous_refactoring.phases.maybe_run_agent", fake_agent)
+    monkeypatch.setattr("continuous_refactoring.phases.run_tests", fail_with_noise_then_pass)
+
+    outcome = execute_phase(
+        _PHASE_0,
+        manifest,
+        _TASTE,
+        tmp_path,
+        live_dir,
+        _make_artifacts(tmp_path),
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        validation_command="true",
+        max_attempts=2,
+    )
+
+    assert outcome.status == "done"
+    assert len(prompts) == 2
+    assert "## Retry Context" in prompts[1]
+    assert "validation failed after phase execution" in prompts[1]
+    assert "FOOBAR-MARKER" not in prompts[1]
+    assert "VERY-HUGE-PROMPT" not in prompts[1]

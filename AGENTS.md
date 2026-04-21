@@ -88,6 +88,7 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 - **Watchdog** (`agent.py:549-665`) — silent ≥5 min → SIGTERM → SIGKILL → `ContinuousRefactorError`.
 - **Driver owns commits** (`loop.py:1265-1269`) — if an agent commits mid-attempt, driver does `git reset --soft head_before` and re-commits with its own message.
 - **Migration scheduling split** (`migrations.py`, `loop.py`, `phases.py`) — `last_touch` is activity bookkeeping, not the 6-hour retry gate. Deferred/blocked migrations set `cooldown_until`; successful phase completion clears deferral markers so the next ready phase can run immediately.
+- **Phase execution validation gate** (`phases.py`, `prompts.py`, `loop.py`) — a migration phase is complete only after host-side full validation passes. `execute_phase()` retries validation-red attempts from `head_before` up to the effective `--max-attempts` budget, and the phase prompt must include the literal configured validation command.
 - **Taste injection** — every prompt includes a `## Taste` section. `tests/test_prompts.py` enforces this via `_TASTE_INJECTED_PROMPTS`. Do not drop it.
 
 ## 11. Surprising CLI semantics

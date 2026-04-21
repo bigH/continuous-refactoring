@@ -644,6 +644,8 @@ def _try_migration_tick(
     effort: str,
     timeout: int | None,
     commit_message_prefix: str,
+    validation_command: str,
+    max_attempts: int | None,
     attempt: int,
 ) -> tuple[RouteOutcome, DecisionRecord | None]:
     now = datetime.now(timezone.utc)
@@ -699,6 +701,8 @@ def _try_migration_tick(
                 model=model,
                 effort=effort,
                 timeout=timeout,
+                validation_command=validation_command,
+                max_attempts=max_attempts,
             )
 
             if outcome.status != "failed":
@@ -727,6 +731,7 @@ def _try_migration_tick(
                         phase_reached=outcome.phase_reached or "phase.execute",
                         failure_kind=outcome.failure_kind or "phase-failed",
                         summary=sanitize_text(outcome.reason, repo_root) or outcome.reason,
+                        retry_used=outcome.retry,
                     ),
                 )
             return (
@@ -859,6 +864,8 @@ def _route_and_run(
     effort: str,
     timeout: int | None,
     commit_message_prefix: str,
+    validation_command: str,
+    max_attempts: int | None,
     attempt: int,
 ) -> RouteResult:
     live_dir = _resolve_live_migrations_dir(repo_root)
@@ -869,6 +876,8 @@ def _route_and_run(
         live_dir, taste, repo_root, artifacts,
         agent=agent, model=model, effort=effort,
         timeout=timeout, commit_message_prefix=commit_message_prefix,
+        validation_command=validation_command,
+        max_attempts=max_attempts,
         attempt=attempt,
     )
     if migration_result != "not-routed":
@@ -1114,6 +1123,9 @@ def _finalize_commit(
 def run_once(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
     timeout = args.timeout or 900
+    max_attempts_effective = _effective_max_attempts(
+        getattr(args, "max_attempts", None)
+    )
     taste = _load_taste_safe(repo_root)
 
     targets = _resolve_targets_from_args(args, repo_root)
@@ -1149,6 +1161,8 @@ def run_once(args: argparse.Namespace) -> int:
             agent=args.agent, model=model, effort=effort,
             timeout=timeout,
             commit_message_prefix="continuous refactor",
+            validation_command=args.validation_command,
+            max_attempts=max_attempts_effective,
             attempt=1,
         )
         target = route_result.target
@@ -1325,6 +1339,8 @@ def run_loop(args: argparse.Namespace) -> int:
                 agent=args.agent, model=model, effort=effort,
                 timeout=timeout,
                 commit_message_prefix=args.commit_message_prefix,
+                validation_command=args.validation_command,
+                max_attempts=max_attempts_effective,
                 attempt=target_index,
             )
             target = route_result.target
@@ -1334,7 +1350,7 @@ def run_loop(args: argparse.Namespace) -> int:
                         repo_root,
                         artifacts,
                         attempt=target_index,
-                        retry=1,
+                        retry=route_result.decision_record.retry_used,
                         validation_command=args.validation_command,
                         record=route_result.decision_record,
                     )
@@ -1352,7 +1368,7 @@ def run_loop(args: argparse.Namespace) -> int:
                         repo_root,
                         artifacts,
                         attempt=target_index,
-                        retry=1,
+                        retry=route_result.decision_record.retry_used,
                         validation_command=args.validation_command,
                         record=route_result.decision_record,
                     )
@@ -1484,6 +1500,9 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
     timeout = args.timeout or 1800
     sleep_seconds = getattr(args, "sleep", 0.0)
     max_consecutive = args.max_consecutive_failures
+    max_attempts_effective = _effective_max_attempts(
+        getattr(args, "max_attempts", None)
+    )
     taste = _load_taste_safe(repo_root)
 
     live_dir = _resolve_live_migrations_dir(repo_root)
@@ -1506,6 +1525,12 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
         f"focus-on-live-migrations: {live_dir}",
         event="focus_on_live_migrations",
     )
+    if max_attempts_effective is None:
+        artifacts.log(
+            "WARN",
+            "max_attempts=0: unlimited retries; permanently-broken targets will not exit",
+            event="max_attempts_unlimited",
+        )
 
     final_status = "running"
     error_message: str | None = None
@@ -1552,6 +1577,8 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
                 effort=args.effort,
                 timeout=timeout,
                 commit_message_prefix=args.commit_message_prefix,
+                validation_command=args.validation_command,
+                max_attempts=max_attempts_effective,
                 attempt=iteration,
             )
 
@@ -1560,7 +1587,7 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
                     repo_root,
                     artifacts,
                     attempt=iteration,
-                    retry=1,
+                    retry=record.retry_used,
                     validation_command=args.validation_command,
                     record=record,
                 )

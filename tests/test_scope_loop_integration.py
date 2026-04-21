@@ -55,6 +55,8 @@ def _invoke_route_and_run(
         effort="low",
         timeout=None,
         commit_message_prefix="continuous refactor",
+        validation_command="uv run pytest",
+        max_attempts=1,
         attempt=1,
     )
 

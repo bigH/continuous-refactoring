@@ -70,6 +70,7 @@ class DecisionRecord:
     failure_kind: str
     summary: str
     next_retry_focus: str | None = None
+    retry_used: int = 1
     agent_last_message_path: Path | None = None
     agent_stdout_path: Path | None = None
     agent_stderr_path: Path | None = None

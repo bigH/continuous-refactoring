@@ -40,6 +40,7 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 - **Phase** — one step of a migration; state transitions in `phases.py`.
 - **Phase cursor** — `manifest.current_phase` stores the active phase `name`; human-facing references use the relative phase file path; phase names must be unique within a migration.
 - **Wake-up rule** — schedule for when the driver reconsiders an idle target.
+- **Eligibility cooldown** — `manifest.cooldown_until` gates re-checks after a migration was deferred or blocked; `last_touch` records activity only.
 - **Settle protocol** — `<file>.done` + sha256 handshake confirming an interactive agent is finished.
 - **Status block** — the driver's end-of-attempt summary written to artifacts.
 - **Call role** — `classifier | planner | editor | reviewer` slot filled in a prompt.
@@ -86,6 +87,7 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 - **Claude stream-json unwrap** (`agent.py:68-102`) — NDJSON; prefer the last `result` event, else join assistant text blocks, else return raw.
 - **Watchdog** (`agent.py:549-665`) — silent ≥5 min → SIGTERM → SIGKILL → `ContinuousRefactorError`.
 - **Driver owns commits** (`loop.py:1265-1269`) — if an agent commits mid-attempt, driver does `git reset --soft head_before` and re-commits with its own message.
+- **Migration scheduling split** (`migrations.py`, `loop.py`, `phases.py`) — `last_touch` is activity bookkeeping, not the 6-hour retry gate. Deferred/blocked migrations set `cooldown_until`; successful phase completion clears deferral markers so the next ready phase can run immediately.
 - **Taste injection** — every prompt includes a `## Taste` section. `tests/test_prompts.py` enforces this via `_TASTE_INJECTED_PROMPTS`. Do not drop it.
 
 ## 11. Surprising CLI semantics

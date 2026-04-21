@@ -245,6 +245,7 @@ def test_eligible_ready_migration_advances_phase(
     reloaded = load_manifest(manifest_path)
     assert reloaded.phases[0].done is True
     assert reloaded.current_phase == "migrate"
+    assert eligible_now(reloaded, _utc_now()) is True
 
 
 def test_migration_labels_use_phase_file_not_numeric_cursor(
@@ -331,18 +332,20 @@ def test_eligible_not_ready_bumps_wake_up_on(
 
     reloaded = load_manifest(manifest_path)
     assert reloaded.wake_up_on is not None
+    assert reloaded.cooldown_until is not None
     assert reloaded.phases[0].done is False
     assert reloaded.current_phase == "setup"
+    assert eligible_now(reloaded, _utc_now()) is False
 
     _assert_fell_through(classifier_calls, prompts)
 
 
 # ---------------------------------------------------------------------------
-# Test 4: 6h safety invariant — last_touch=now-1h, wake_up_on=now-1d
+# Test 4: future wake_up_on still blocks execution
 # ---------------------------------------------------------------------------
 
 
-def test_6h_invariant_blocks_execution(
+def test_future_wake_up_blocks_execution(
     run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     now = _utc_now()
@@ -350,7 +353,7 @@ def test_6h_invariant_blocks_execution(
         run_once_env,
         name="rework-auth",
         last_touch=now - timedelta(hours=1),
-        wake_up_on=now - timedelta(days=1),
+        wake_up_on=now + timedelta(days=1),
         commit=True,
     )
 

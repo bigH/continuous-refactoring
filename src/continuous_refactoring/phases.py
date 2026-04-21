@@ -317,7 +317,15 @@ def execute_phase(
         for i, p in enumerate(manifest.phases)
     )
     now = iso_timestamp()
-    updated_manifest = replace(manifest, phases=updated_phases, last_touch=now)
+    updated_manifest = replace(
+        manifest,
+        phases=updated_phases,
+        last_touch=now,
+        wake_up_on=None,
+        awaiting_human_review=False,
+        human_review_reason=None,
+        cooldown_until=None,
+    )
     next_phase_name = advance_phase_cursor(manifest, phase.name)
     if next_phase_name is None:
         updated_manifest = replace(

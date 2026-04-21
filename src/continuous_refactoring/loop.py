@@ -742,7 +742,12 @@ def _try_migration_tick(
                 ),
             )
 
-        updated = bump_last_touch(manifest, now)
+        updated = replace(
+            bump_last_touch(manifest, now),
+            cooldown_until=(now + timedelta(hours=6)).isoformat(
+                timespec="milliseconds"
+            ),
+        )
         if updated.wake_up_on is None:
             wake = (now + timedelta(days=7)).isoformat(timespec="milliseconds")
             updated = replace(updated, wake_up_on=wake)

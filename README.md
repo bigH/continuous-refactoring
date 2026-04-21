@@ -196,20 +196,32 @@ Each `run` / `run-once` tick now checks for eligible migration work before falli
 
 ### Wake-up rules
 
-Migrations don't run on every tick. A migration is eligible when **all** of:
+Migrations don't run on every tick. The scheduler now separates **activity** from
+**retry cooldown**:
 
-- At least **6 hours** since its last touch (safety invariant — always enforced, cannot be overridden).
-- Either `wake_up_on` has elapsed, **or** it has been stale for ≥7 days with no `wake_up_on` set.
+- `last_touch` records the latest migration activity.
+- `cooldown_until` gates repeated checks only after the migration was deferred or
+  blocked.
 
-This prevents the loop from hammering a stuck migration while still ensuring nothing is forgotten.
+A migration is eligible when **all** of:
+
+- Any `cooldown_until` has elapsed.
+- Either `wake_up_on` is unset, `wake_up_on` has elapsed, or the migration has
+  been stale for ≥7 days.
+
+That means successful phase execution does **not** make the next phase wait 6
+hours. Ready phases can advance back-to-back in the same run until the
+migration is actually blocked. The 6-hour cooldown still applies after
+`ready: no`, future wake-ups, unverifiable phases, or similar deferrals so the
+loop does not hammer stuck migrations.
 
 ### Phase model
 
 Each migration moves through phases sequentially. Before executing a phase, a ready-check agent verifies that prerequisites are met. Possible outcomes:
 
-- **ready: yes** — phase executes; on green tests, the phase is marked done and the migration advances.
-- **ready: no** — manifest is bumped with a future `wake_up_on`; the tick moves on.
-- **ready: unverifiable** — the migration is flagged `awaiting_human_review`. Use `review list` to find it and `review perform <migration> --with ... --model ... --effort ...` to resolve it interactively.
+- **ready: yes** — phase executes; on green tests, the phase is marked done, any prior deferral markers are cleared, and the migration advances immediately to the next phase.
+- **ready: no** — manifest activity is bumped, a retry cooldown is started, and a future `wake_up_on` is recorded when needed; the tick moves on.
+- **ready: unverifiable** — the migration is flagged `awaiting_human_review` and put on cooldown. Use `review list` to find it and `review perform <migration> --with ... --model ... --effort ...` to resolve it interactively.
 
 Human-facing migration references use the relative phase spec path, for example `phase-2-failure-report.md`. The manifest cursor stores the phase `name`, not a numeric index.
 

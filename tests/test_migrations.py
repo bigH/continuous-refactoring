@@ -42,6 +42,7 @@ def _random_manifest(rng: random.Random) -> MigrationManifest:
         status=rng.choice(MIGRATION_STATUSES),
         current_phase=current_phase,
         phases=phases,
+        cooldown_until=rng.choice([None, "2025-06-01T06:00:00.000+00:00"]),
     )
 
 
@@ -311,6 +312,7 @@ def test_load_manifest_defaults_optional_fields(tmp_path: Path) -> None:
 
     assert loaded.wake_up_on is None
     assert loaded.awaiting_human_review is False
+    assert loaded.cooldown_until is None
 
 
 # ---------------------------------------------------------------------------
@@ -330,6 +332,32 @@ def test_approaches_dir_returns_expected() -> None:
 def test_intentional_skips_dir_returns_expected() -> None:
     result = intentional_skips_dir(Path("/live"))
     assert result == Path("/live/__intentional_skips__")
+
+
+# ---------------------------------------------------------------------------
+# JSON output format
+# ---------------------------------------------------------------------------
+
+def test_load_manifest_reads_cooldown_until(tmp_path: Path) -> None:
+    path = tmp_path / "cooldown" / "manifest.json"
+    path.parent.mkdir(parents=True)
+    payload = {
+        "name": "cooldown-migration",
+        "created_at": "2025-01-01T00:00:00.000+00:00",
+        "last_touch": "2025-01-01T01:00:00.000+00:00",
+        "wake_up_on": None,
+        "cooldown_until": "2025-01-01T07:00:00.000+00:00",
+        "status": "ready",
+        "current_phase": "setup",
+        "phases": [
+            {"name": "setup", "file": "phase-0-setup.md", "done": False, "ready_when": "always"},
+        ],
+    }
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    loaded = load_manifest(path)
+
+    assert loaded.cooldown_until == "2025-01-01T07:00:00.000+00:00"
 
 
 # ---------------------------------------------------------------------------

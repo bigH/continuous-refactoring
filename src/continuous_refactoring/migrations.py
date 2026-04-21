@@ -54,6 +54,7 @@ class MigrationManifest:
     current_phase: str
     phases: tuple[PhaseSpec, ...]
     human_review_reason: str | None = None
+    cooldown_until: str | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -250,6 +251,9 @@ def load_manifest(path: Path) -> MigrationManifest:
         human_review_reason=_optional_str(
             raw.get("human_review_reason"), field="human_review_reason"
         ),
+        cooldown_until=_optional_str(
+            raw.get("cooldown_until"), field="cooldown_until"
+        ),
     )
 
 
@@ -286,11 +290,12 @@ _STALE = timedelta(days=7)
 
 
 def eligible_now(manifest: MigrationManifest, now: datetime) -> bool:
-    elapsed = now - datetime.fromisoformat(manifest.last_touch)
-    if elapsed < _COOLDOWN:
-        return False
+    if manifest.cooldown_until is not None:
+        if datetime.fromisoformat(manifest.cooldown_until) > now:
+            return False
     if manifest.wake_up_on is None:
         return True
+    elapsed = now - datetime.fromisoformat(manifest.last_touch)
     return datetime.fromisoformat(manifest.wake_up_on) <= now or elapsed >= _STALE
 
 

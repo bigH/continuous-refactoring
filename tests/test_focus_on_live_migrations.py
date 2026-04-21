@@ -37,6 +37,10 @@ def _seed_manifest(
     *,
     last_touch: datetime | None = None,
     awaiting_review: bool = False,
+    current_phase: str = "setup",
+    phases: tuple[PhaseSpec, ...] = (_PHASE,),
+    wake_up_on: datetime | None = None,
+    cooldown_until: datetime | None = None,
 ) -> Path:
     lt = (last_touch or _utc_now() - timedelta(days=1)).isoformat(
         timespec="milliseconds",
@@ -45,11 +49,16 @@ def _seed_manifest(
         name=name,
         created_at=(_utc_now() - timedelta(days=2)).isoformat(timespec="milliseconds"),
         last_touch=lt,
-        wake_up_on=None,
+        wake_up_on=wake_up_on.isoformat(timespec="milliseconds") if wake_up_on else None,
         awaiting_human_review=awaiting_review,
         status="ready",
-        current_phase="setup",
-        phases=(_PHASE,),
+        current_phase=current_phase,
+        phases=phases,
+        cooldown_until=(
+            cooldown_until.isoformat(timespec="milliseconds")
+            if cooldown_until is not None
+            else None
+        ),
     )
     root = migration_root(live_dir, name)
     root.mkdir(parents=True, exist_ok=True)
@@ -290,6 +299,90 @@ def test_focused_loop_ticks_each_eligible_migration_until_done(
 
     assert exit_code == 0
     assert tick_calls == ["alpha", "beta"]
+
+
+def test_focused_loop_advances_multiple_ready_phases_until_deferred(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    live_dir = tmp_path / "live-migrations"
+    live_dir.mkdir()
+    migrate_phase = PhaseSpec(
+        name="migrate",
+        file="phase-1-migrate.md",
+        done=False,
+        ready_when="setup done",
+    )
+    manifest_path = _seed_manifest(
+        live_dir,
+        "multi-step",
+        phases=(_PHASE, migrate_phase),
+    )
+
+    _install_focused_loop_env(run_loop_env, monkeypatch, live_dir)
+
+    ready_calls: list[str] = []
+    execute_calls: list[str] = []
+
+    def fake_ready(
+        phase: PhaseSpec,
+        manifest: MigrationManifest,
+        *_args: object,
+        **_kwargs: object,
+    ) -> tuple[str, str]:
+        ready_calls.append(phase.name)
+        if phase.name == "setup":
+            return ("yes", "ready")
+        return ("no", "wait for follow-up")
+
+    def fake_execute(
+        phase: PhaseSpec,
+        manifest: MigrationManifest,
+        taste: str,
+        repo_root: Path,
+        live_dir: Path,
+        artifacts: object,
+        **_kwargs: object,
+    ) -> object:
+        execute_calls.append(phase.name)
+        updated = replace(
+            manifest,
+            phases=(replace(manifest.phases[0], done=True), manifest.phases[1]),
+            current_phase="migrate",
+            last_touch=_utc_now().isoformat(timespec="milliseconds"),
+            wake_up_on=None,
+            cooldown_until=None,
+        )
+        save_manifest(updated, manifest_path)
+        from continuous_refactoring.phases import ExecutePhaseOutcome
+
+        return ExecutePhaseOutcome(status="done", reason="ok")
+
+    monkeypatch.setattr("continuous_refactoring.loop.check_phase_ready", fake_ready)
+    monkeypatch.setattr("continuous_refactoring.loop.execute_phase", fake_execute)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._finalize_commit",
+        lambda *_args, **_kwargs: None,
+    )
+
+    args = make_run_loop_args(
+        run_loop_env,
+        focus_on_live_migrations=True,
+    )
+    exit_code = continuous_refactoring.run_migrations_focused_loop(args)
+
+    assert exit_code == 0
+    assert ready_calls == ["setup", "migrate"]
+    assert execute_calls == ["setup"]
+    reloaded = load_manifest(manifest_path)
+    assert reloaded.current_phase == "migrate"
+    assert reloaded.cooldown_until is not None
+    assert reloaded.wake_up_on is not None
+    captured = capsys.readouterr()
+    assert "Migration tick deferred all eligible migrations: wait for follow-up" in captured.out
+
 
 
 def test_focused_loop_terminates_when_only_awaiting_human_review_remains(

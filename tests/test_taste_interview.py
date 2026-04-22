@@ -8,6 +8,7 @@ from conftest import (
     extract_settle_path,
     init_repo,
     init_taste_project,
+    make_taste_args,
     make_taste_agent_writer,
 )
 
@@ -22,12 +23,20 @@ _AGENT_RUNNER_PATH = "continuous_refactoring.cli.run_agent_interactive_until_set
 
 
 def _interview_args(
-    *, global_: bool = False, force: bool = False,
-    agent: str | None = "codex", model: str | None = "m", effort: str | None = "high",
+    *,
+    global_: bool = False,
+    force: bool = False,
+    agent: str | None = "codex",
+    model: str | None = "m",
+    effort: str | None = "high",
 ) -> argparse.Namespace:
-    return argparse.Namespace(
-        global_=global_, interview=True, agent=agent, model=model,
-        effort=effort, force=force,
+    return make_taste_args(
+        "interview",
+        global_=global_,
+        force=force,
+        agent=agent,
+        model=model,
+        effort=effort,
     )
 
 
@@ -58,12 +67,8 @@ def test_interview_rejects_agent_flags_without_interview(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    args = argparse.Namespace(
-        global_=False, interview=False,
-        agent="codex", model="m", effort="high", force=False,
-    )
     with pytest.raises(SystemExit) as exc_info:
-        _handle_taste(args)
+        _handle_taste(make_taste_args(agent="codex", model="m", effort="high"))
     assert exc_info.value.code == 2
     err = capsys.readouterr().err
     assert "require --interview, --upgrade, or --refine" in err
@@ -75,19 +80,8 @@ def test_force_requires_interview(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    args = argparse.Namespace(
-        global_=False,
-        interview=False,
-        upgrade=False,
-        refine=False,
-        agent=None,
-        model=None,
-        effort=None,
-        force=True,
-    )
-
     with pytest.raises(SystemExit) as exc_info:
-        _handle_taste(args)
+        _handle_taste(make_taste_args(force=True))
 
     assert exc_info.value.code == 2
     err = capsys.readouterr().err

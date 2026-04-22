@@ -2,9 +2,10 @@ from __future__ import annotations
 
 import argparse
 import hashlib
-from collections.abc import Callable
 import sys
+from collections.abc import Callable
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -69,6 +70,27 @@ def make_taste_agent_writer(
         return return_code
 
     return fake
+
+
+def make_taste_args(
+    mode: Literal["plain", "interview", "upgrade", "refine"] = "plain",
+    *,
+    global_: bool = False,
+    agent: str | None = None,
+    model: str | None = None,
+    effort: str | None = None,
+    force: bool = False,
+) -> argparse.Namespace:
+    return argparse.Namespace(
+        global_=global_,
+        interview=mode == "interview",
+        upgrade=mode == "upgrade",
+        refine=mode == "refine",
+        agent=agent,
+        model=model,
+        effort=effort,
+        force=force,
+    )
 
 
 def init_repo(path: Path) -> None:

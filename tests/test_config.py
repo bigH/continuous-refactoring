@@ -7,6 +7,8 @@ from pathlib import Path
 
 import pytest
 
+import continuous_refactoring.config as config
+
 from continuous_refactoring.artifacts import ContinuousRefactorError
 from continuous_refactoring.config import (
     TASTE_CURRENT_VERSION,
@@ -252,6 +254,22 @@ def test_register_project_no_remote(
     _init_repo(project_path)
 
     resolved = register_project(project_path)
+    assert resolved.entry.git_remote is None
+
+
+def test_register_project_no_git_command(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_path = tmp_path / "no-git-command"
+    project_path.mkdir()
+
+    def missing_git(*_: object, **__: object) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError
+
+    monkeypatch.setattr(config.subprocess, "run", missing_git)
+
+    resolved = register_project(project_path)
+
     assert resolved.entry.git_remote is None
 
 

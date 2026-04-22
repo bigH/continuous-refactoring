@@ -215,11 +215,13 @@ def _detect_git_remote(path: Path) -> str | None:
             cwd=path,
             capture_output=True,
             text=True,
-            check=True,
+            check=False,
         )
-        return result.stdout.strip() or None
-    except (subprocess.CalledProcessError, FileNotFoundError):
+    except FileNotFoundError:
         return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.strip() or None
 
 
 def _resolved(entry: ProjectEntry) -> ResolvedProject:

@@ -67,14 +67,14 @@ def parse_globs(raw: str) -> tuple[str, ...]:
     return tuple(g for g in (p.strip() for p in raw.split(":")) if g)
 
 
-def _optional_str(data: dict[str, object], key: str) -> str | None:
+def _optional_str(data: dict[str, object], key: str) -> tuple[bool, str | None]:
     value = data.get(key)
     if value is None:
-        return None
+        return True, None
     if isinstance(value, str) and value.strip():
-        return value
+        return True, value
     _warn_skip(f"non-string or empty {key}")
-    raise ValueError(key)
+    return False, None
 
 
 def validate_target_line(data: object) -> Target | None:
@@ -96,11 +96,10 @@ def validate_target_line(data: object) -> Target | None:
         _warn_skip("invalid file entries")
         return None
 
-    try:
-        scoping = _optional_str(data, "scoping")
-        model_override = _optional_str(data, "model-override")
-        effort_override = _optional_str(data, "effort-override")
-    except ValueError:
+    valid_scoping, scoping = _optional_str(data, "scoping")
+    valid_model_override, model_override = _optional_str(data, "model-override")
+    valid_effort_override, effort_override = _optional_str(data, "effort-override")
+    if not (valid_scoping and valid_model_override and valid_effort_override):
         return None
 
     return Target(

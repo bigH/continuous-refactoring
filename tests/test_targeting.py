@@ -250,6 +250,21 @@ def test_validate_target_line_rejects_empty_and_invalid_optional_fields() -> Non
     assert target is None
 
 
+def test_validate_target_line_warns_for_each_invalid_optional_field(capsys) -> None:
+    for key in ("scoping", "model-override", "effort-override"):
+        target = validate_target_line(
+            {
+                "description": "good",
+                "files": ["src/**/*.py"],
+                key: "",
+            },
+        )
+
+        assert target is None
+        captured = capsys.readouterr()
+        assert f"non-string or empty {key}" in captured.err
+
+
 def test_load_targets_jsonl_skips_invalid_optional_fields(tmp_path: Path, capsys) -> None:
     jsonl = tmp_path / "targets.jsonl"
     lines = [

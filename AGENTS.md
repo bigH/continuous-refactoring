@@ -76,12 +76,8 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 
 ## 9. Active migration of `loop.py`
 
-- Path: `migrations/src-continuous-refactoring-loop-py-20260417T124216/`
-- Plan: phases 1–3 (`decisions.py`, `failure_report.py`, `routing_pipeline.py`) are landed; the active final phase is a no-new-extraction tidy pass in `loop.py`.
-- Realistic size target for this live four-phase migration: `loop.py` roughly 950–1100 lines after phases 2–4. Reaching ~500 needs a later follow-up extraction migration; do not assume phase 3 or 4 can get there alone.
-- **Before editing `loop.py`, read `plan.md` and the current phase doc.** Structural edits may collide with in-flight phases.
-- **No re-export shims.** Symbol moves update every call site and every test monkeypatch target in the same commit.
-- When a migration completes, remove it from this section.
+No active `loop.py` migration is present. Keep edits minimal unless a new live
+migration explicitly scopes structural work.
 
 ## 10. Load-bearing subtleties — do not "simplify" without reading
 
@@ -117,7 +113,7 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 - No relative imports.
 - Do not drop `## Taste` from prompts.
 - Do not simplify the ANSI terminal reset in `agent.py`.
-- Do not refactor `loop.py` without reading the live migration plan.
+- Do not structurally refactor `loop.py` without an active migration plan.
 - Do not amend commits in the driver path (driver uses `git reset --soft`).
 - Driver never creates, switches, or deletes branches. The user controls branching.
 

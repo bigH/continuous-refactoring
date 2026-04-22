@@ -59,6 +59,7 @@ from continuous_refactoring.prompts import (
     compose_full_prompt,
     prompt_file_text,
 )
+import continuous_refactoring.migration_tick as migration_tick
 import continuous_refactoring.routing_pipeline as routing_pipeline
 from continuous_refactoring.targeting import Target, resolve_targets
 
@@ -866,7 +867,7 @@ def _focus_eligible_manifests(
     live_dir: Path, now: datetime,
 ) -> list[tuple[MigrationManifest, Path]]:
     return [
-        pair for pair in routing_pipeline.enumerate_eligible_manifests(live_dir, now)
+        pair for pair in migration_tick.enumerate_eligible_manifests(live_dir, now)
         if not pair[0].awaiting_human_review
     ]
 
@@ -949,7 +950,7 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
             names = ", ".join(m.name for m, _ in eligible)
             print(f"\n── Migration tick {iteration} (eligible: {names}) ──")
 
-            outcome, record = routing_pipeline.try_migration_tick(
+            outcome, record = migration_tick.try_migration_tick(
                 live_dir,
                 taste,
                 repo_root,

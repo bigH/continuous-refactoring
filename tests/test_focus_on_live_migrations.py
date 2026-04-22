@@ -289,7 +289,7 @@ def test_focused_loop_ticks_each_eligible_migration_until_done(
         return ("commit", _commit_ok(f"migration/{name}"))
 
     monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.try_migration_tick", fake_tick,
+        "continuous_refactoring.migration_tick.try_migration_tick", fake_tick,
     )
 
     args = make_run_loop_args(
@@ -418,7 +418,7 @@ def test_focused_loop_terminates_when_only_awaiting_human_review_remains(
         )
 
     monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.try_migration_tick", fake_tick,
+        "continuous_refactoring.migration_tick.try_migration_tick", fake_tick,
     )
 
     args = make_run_loop_args(
@@ -462,7 +462,7 @@ def test_focused_loop_reports_deferred_phase_reason(
         )
 
     monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.try_migration_tick", fake_tick,
+        "continuous_refactoring.migration_tick.try_migration_tick", fake_tick,
     )
 
     args = make_run_loop_args(
@@ -505,7 +505,7 @@ def test_focused_loop_aborts_after_max_consecutive_failures(
         return ("abandon", _abandon("migration/sticky"))
 
     monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.try_migration_tick", fake_tick,
+        "continuous_refactoring.migration_tick.try_migration_tick", fake_tick,
     )
 
     args = make_run_loop_args(

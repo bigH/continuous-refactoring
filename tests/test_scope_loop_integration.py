@@ -8,6 +8,7 @@ import continuous_refactoring
 import continuous_refactoring.loop
 import continuous_refactoring.routing_pipeline
 from continuous_refactoring.artifacts import RunArtifacts, create_run_artifacts
+from continuous_refactoring.decisions import DecisionRecord
 from continuous_refactoring.routing_pipeline import RouteResult
 from continuous_refactoring.targeting import Target
 
@@ -116,7 +117,10 @@ def test_expanded_target_reaches_classifier(
         seen_files.append(target.files)
         return "cohesive-cleanup"
 
-    monkeypatch.setattr("continuous_refactoring.routing_pipeline.classify_target", fake_classifier)
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        fake_classifier,
+    )
 
     result = _invoke_route_and_run(
         repo_root,
@@ -126,6 +130,46 @@ def test_expanded_target_reaches_classifier(
 
     assert seen_files == [EXPANDED_FILES]
     assert result.target.files == EXPANDED_FILES
+
+
+def test_deferred_migration_tick_falls_through_to_classifier(
+    routing_env: tuple[Path, RunArtifacts],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, artifacts = routing_env
+    classifier_calls: list[str] = []
+    record = DecisionRecord(
+        decision="retry",
+        retry_recommendation="same-target",
+        target="migration/deferred",
+        call_role="phase.ready-check",
+        phase_reached="phase.ready-check",
+        failure_kind="phase-ready-no",
+        summary="not ready yet",
+    )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_migration_tick",
+        lambda *_args, **_kwargs: ("not-routed", record),
+    )
+
+    def fake_classifier(target: Target, *_args: object, **_kwargs: object) -> str:
+        classifier_calls.append(target.description)
+        return "cohesive-cleanup"
+
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        fake_classifier,
+    )
+
+    result = _invoke_route_and_run(
+        repo_root,
+        artifacts,
+        Target(description="seed", files=("README.md",), provenance="globs"),
+    )
+
+    assert result.outcome == "not-routed"
+    assert classifier_calls == ["seed"]
 
 
 def test_cohesive_cleanup_runs_one_shot_against_expanded_files(

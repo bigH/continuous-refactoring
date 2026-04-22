@@ -6,18 +6,18 @@ from pathlib import Path
 
 import pytest
 
-from continuous_refactoring.cli import (
-    _handle_review,
-    _handle_review_list,
-    _handle_review_perform,
-    build_parser,
-)
+from continuous_refactoring.cli import build_parser
 from continuous_refactoring.config import register_project, set_live_migrations_dir
 from continuous_refactoring.migrations import (
     MigrationManifest,
     PhaseSpec,
     load_manifest as load_migration_manifest,
     save_manifest as save_migration,
+)
+from continuous_refactoring.review_cli import (
+    handle_review,
+    handle_review_list,
+    handle_review_perform,
 )
 
 _PHASES = (
@@ -173,7 +173,7 @@ def test_review_list_filters_flagged_migrations(
         live_dir / "mig-a" / "manifest.json",
     )
 
-    _handle_review_list()
+    handle_review_list()
 
     out = capsys.readouterr().out
     lines = [line for line in out.strip().splitlines() if line]
@@ -221,7 +221,7 @@ def test_review_list_exits_1_when_project_not_initialized(
     monkeypatch.chdir(repo)
 
     with pytest.raises(SystemExit) as exc_info:
-        _handle_review_list()
+        handle_review_list()
 
     assert exc_info.value.code == 1
     err = capsys.readouterr().err
@@ -241,7 +241,7 @@ def test_review_list_exits_1_when_no_live_migrations_dir(
     register_project(repo)
 
     with pytest.raises(SystemExit) as exc_info:
-        _handle_review_list()
+        handle_review_list()
 
     assert exc_info.value.code == 1
     err = capsys.readouterr().err
@@ -259,7 +259,7 @@ def test_review_perform_exits_2_when_project_not_initialized(
     monkeypatch.chdir(repo)
 
     with pytest.raises(SystemExit) as exc_info:
-        _handle_review_perform(_make_perform_args("my-mig"))
+        handle_review_perform(_make_perform_args("my-mig"))
 
     assert exc_info.value.code == 2
     err = capsys.readouterr().err
@@ -279,7 +279,7 @@ def test_review_perform_exits_2_when_no_live_migrations_dir(
     register_project(repo)
 
     with pytest.raises(SystemExit) as exc_info:
-        _handle_review_perform(_make_perform_args("my-mig"))
+        handle_review_perform(_make_perform_args("my-mig"))
 
     assert exc_info.value.code == 2
     err = capsys.readouterr().err
@@ -331,10 +331,10 @@ def test_review_perform_happy_path(
         return 0
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive", fake_interactive,
+        "continuous_refactoring.review_cli.run_agent_interactive", fake_interactive,
     )
 
-    _handle_review_perform(_make_perform_args("my-mig"))
+    handle_review_perform(_make_perform_args("my-mig"))
 
     assert "needs security audit" in captured_prompt["prompt"]
     assert "phase-2-review-target.md" in captured_prompt["prompt"]
@@ -359,11 +359,11 @@ def test_review_perform_exits_1_when_flag_not_cleared(
         return 0
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive", fake_interactive,
+        "continuous_refactoring.review_cli.run_agent_interactive", fake_interactive,
     )
 
     with pytest.raises(SystemExit) as exc_info:
-        _handle_review_perform(_make_perform_args("my-mig"))
+        handle_review_perform(_make_perform_args("my-mig"))
 
     assert exc_info.value.code == 1
     err = capsys.readouterr().err
@@ -383,11 +383,11 @@ def test_review_perform_exits_with_agent_returncode(
         return 7
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli.run_agent_interactive", fake_interactive,
+        "continuous_refactoring.review_cli.run_agent_interactive", fake_interactive,
     )
 
     with pytest.raises(SystemExit) as exc_info:
-        _handle_review_perform(_make_perform_args("my-mig"))
+        handle_review_perform(_make_perform_args("my-mig"))
 
     assert exc_info.value.code == 7
     err = capsys.readouterr().err
@@ -402,7 +402,7 @@ def test_review_perform_exits_2_when_migration_missing(
     _init_review_project(tmp_path, monkeypatch)
 
     with pytest.raises(SystemExit) as exc_info:
-        _handle_review_perform(_make_perform_args("nonexistent"))
+        handle_review_perform(_make_perform_args("nonexistent"))
 
     assert exc_info.value.code == 2
     err = capsys.readouterr().err
@@ -417,7 +417,7 @@ def test_review_perform_exits_2_when_not_flagged_for_review(
     repo, live_dir = _setup_review_project(tmp_path, monkeypatch, awaiting=False)
 
     with pytest.raises(SystemExit) as exc_info:
-        _handle_review_perform(_make_perform_args("my-mig"))
+        handle_review_perform(_make_perform_args("my-mig"))
 
     assert exc_info.value.code == 2
     err = capsys.readouterr().err
@@ -430,11 +430,11 @@ def test_review_dispatches_list_subcommand(
     seen: list[str] = []
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli._handle_review_list",
+        "continuous_refactoring.review_cli.handle_review_list",
         lambda: seen.append("list"),
     )
 
-    _handle_review(argparse.Namespace(review_command="list"))
+    handle_review(argparse.Namespace(review_command="list"))
 
     assert seen == ["list"]
 
@@ -448,11 +448,11 @@ def test_review_dispatches_perform_subcommand(
         seen.append(args.migration)
 
     monkeypatch.setattr(
-        "continuous_refactoring.cli._handle_review_perform",
+        "continuous_refactoring.review_cli.handle_review_perform",
         fake_perform,
     )
 
-    _handle_review(argparse.Namespace(review_command="perform", migration="my-mig"))
+    handle_review(argparse.Namespace(review_command="perform", migration="my-mig"))
 
     assert seen == ["my-mig"]
 
@@ -461,7 +461,7 @@ def test_review_exits_2_without_subcommand(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     with pytest.raises(SystemExit) as exc_info:
-        _handle_review(argparse.Namespace(review_command=None))
+        handle_review(argparse.Namespace(review_command=None))
 
     assert exc_info.value.code == 2
     err = capsys.readouterr().err

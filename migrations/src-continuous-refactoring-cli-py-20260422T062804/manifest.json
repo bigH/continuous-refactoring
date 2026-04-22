@@ -2,9 +2,9 @@
   "awaiting_human_review": false,
   "cooldown_until": null,
   "created_at": "2026-04-22T06:28:04.715-07:00",
-  "current_phase": "extract-review-cli",
+  "current_phase": "clarify-run-boundary",
   "human_review_reason": null,
-  "last_touch": "2026-04-22T06:50:50.108-07:00",
+  "last_touch": "2026-04-22T06:57:25.922-07:00",
   "name": "src-continuous-refactoring-cli-py-20260422T062804",
   "phases": [
     {
@@ -14,7 +14,7 @@
       "precondition": "`src/continuous_refactoring/cli.py` still owns `_handle_review`, `_handle_review_list`, `_handle_review_perform`, `_resolve_review_context`, `_REVIEW_USAGE`, and the `run_agent_interactive` import used by review tests. `src/continuous_refactoring/review_cli.py` does not exist. The current review tests pass."
     },
     {
-      "done": false,
+      "done": true,
       "file": "phase-2-extract-review-cli.md",
       "name": "extract-review-cli",
       "precondition": "Phase 1 is complete. Review behavior is characterized by tests. `cli.py` still owns the review handlers and `review_cli.py` does not exist."

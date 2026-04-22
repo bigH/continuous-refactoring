@@ -47,6 +47,46 @@ def _random_manifest(rng: random.Random) -> MigrationManifest:
     )
 
 
+def _write_manifest_payload(
+    tmp_path: Path, slug: str, payload: dict[str, object],
+) -> Path:
+    path = tmp_path / slug / "manifest.json"
+    path.parent.mkdir(parents=True)
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    return path
+
+
+def _phase_payload(
+    *,
+    name: str = "setup",
+    file: str = "phase-0-setup.md",
+    done: bool = False,
+    precondition: str | None = "always",
+    ready_when: str | None = None,
+) -> dict[str, object]:
+    payload: dict[str, object] = {"name": name, "file": file, "done": done}
+    if precondition is not None:
+        payload["precondition"] = precondition
+    if ready_when is not None:
+        payload["ready_when"] = ready_when
+    return payload
+
+
+def _manifest_payload(
+    *,
+    current_phase: object = "setup",
+    phases: list[dict[str, object]] | None = None,
+) -> dict[str, object]:
+    return {
+        "name": "codec-contract",
+        "created_at": "2025-01-01T00:00:00.000+00:00",
+        "last_touch": "2025-01-01T00:00:00.000+00:00",
+        "status": "ready",
+        "current_phase": current_phase,
+        "phases": [_phase_payload()] if phases is None else phases,
+    }
+
+
 # ---------------------------------------------------------------------------
 # Roundtrip (property-style)
 # ---------------------------------------------------------------------------
@@ -237,6 +277,38 @@ def test_save_manifest_no_tmp_files(tmp_path: Path) -> None:
     assert path.exists()
 
 
+def test_save_manifest_removes_tmp_file_when_replace_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    manifest = MigrationManifest(
+        name="atomic-test",
+        created_at="2025-01-01T00:00:00.000+00:00",
+        last_touch="2025-01-01T00:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="planning",
+        current_phase="setup",
+        phases=(
+            PhaseSpec(name="setup", file="phase-0-setup.md", done=False, precondition="always"),
+        ),
+    )
+    path = tmp_path / "atomic-failure" / "manifest.json"
+    path.parent.mkdir(parents=True)
+    original_content = '{"name": "old"}\n'
+    path.write_text(original_content, encoding="utf-8")
+
+    def fail_replace(self: Path, target: Path) -> Path:
+        raise OSError(f"cannot replace {target} from {self}")
+
+    monkeypatch.setattr(Path, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="cannot replace"):
+        save_manifest(manifest, path)
+
+    assert path.read_text(encoding="utf-8") == original_content
+    assert list(path.parent.glob("*.tmp")) == []
+
+
 # ---------------------------------------------------------------------------
 # Unknown status rejection
 # ---------------------------------------------------------------------------
@@ -380,6 +452,73 @@ def test_load_manifest_rejects_bool_current_phase(tmp_path: Path) -> None:
         load_manifest(path)
 
 
+def test_load_manifest_accepts_legacy_ready_when_as_precondition(
+    tmp_path: Path,
+) -> None:
+    path = _write_manifest_payload(
+        tmp_path,
+        "legacy-ready-when",
+        _manifest_payload(
+            phases=[
+                _phase_payload(precondition=None, ready_when="previous phase done"),
+            ],
+        ),
+    )
+
+    loaded = load_manifest(path)
+
+    assert loaded.phases[0].precondition == "previous phase done"
+
+
+def test_load_manifest_prefers_precondition_over_legacy_ready_when(
+    tmp_path: Path,
+) -> None:
+    path = _write_manifest_payload(
+        tmp_path,
+        "precondition-precedence",
+        _manifest_payload(
+            phases=[
+                _phase_payload(
+                    precondition="new contract",
+                    ready_when="legacy contract",
+                ),
+            ],
+        ),
+    )
+
+    loaded = load_manifest(path)
+
+    assert loaded.phases[0].precondition == "new contract"
+
+
+def test_load_manifest_rejects_phase_without_readiness_field(
+    tmp_path: Path,
+) -> None:
+    path = _write_manifest_payload(
+        tmp_path,
+        "missing-phase-readiness",
+        _manifest_payload(phases=[_phase_payload(precondition=None)]),
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="must include 'precondition'"):
+        load_manifest(path)
+
+
+def test_load_manifest_accepts_empty_current_phase_with_phases(
+    tmp_path: Path,
+) -> None:
+    path = _write_manifest_payload(
+        tmp_path,
+        "empty-current-phase",
+        _manifest_payload(current_phase=""),
+    )
+
+    loaded = load_manifest(path)
+
+    assert loaded.current_phase == ""
+    assert loaded.phases[0].name == "setup"
+
+
 def test_load_manifest_maps_legacy_integer_cursor_to_phase_name(
     tmp_path: Path,
 ) -> None:
@@ -405,6 +544,48 @@ def test_load_manifest_maps_legacy_integer_cursor_to_phase_name(
     assert loaded.phases[1].precondition == "setup complete"
 
 
+def test_load_manifest_maps_out_of_range_legacy_integer_cursor_to_empty(
+    tmp_path: Path,
+) -> None:
+    path = _write_manifest_payload(
+        tmp_path,
+        "out-of-range-current-phase",
+        _manifest_payload(current_phase=7),
+    )
+
+    loaded = load_manifest(path)
+
+    assert loaded.current_phase == ""
+
+
+def test_load_manifest_maps_legacy_integer_cursor_without_phases_to_empty(
+    tmp_path: Path,
+) -> None:
+    path = _write_manifest_payload(
+        tmp_path,
+        "integer-current-phase-no-phases",
+        _manifest_payload(current_phase=0, phases=[]),
+    )
+
+    loaded = load_manifest(path)
+
+    assert loaded.current_phase == ""
+    assert loaded.phases == ()
+
+
+def test_load_manifest_rejects_unknown_string_current_phase(
+    tmp_path: Path,
+) -> None:
+    path = _write_manifest_payload(
+        tmp_path,
+        "unknown-current-phase",
+        _manifest_payload(current_phase="missing"),
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="names an unknown phase"):
+        load_manifest(path)
+
+
 def test_load_manifest_rejects_duplicate_phase_names(tmp_path: Path) -> None:
     path = tmp_path / "duplicate-phases" / "manifest.json"
     path.parent.mkdir(parents=True)
@@ -425,6 +606,62 @@ def test_load_manifest_rejects_duplicate_phase_names(tmp_path: Path) -> None:
         ContinuousRefactorError, match="Duplicate phase names are not allowed",
     ):
         load_manifest(path)
+
+
+def test_save_manifest_rejects_duplicate_phase_names_before_replacing(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "duplicate-save" / "manifest.json"
+    original = MigrationManifest(
+        name="duplicate-save",
+        created_at="2025-01-01T00:00:00.000+00:00",
+        last_touch="2025-01-01T00:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="ready",
+        current_phase="setup",
+        phases=(
+            PhaseSpec(
+                name="setup",
+                file="phase-0-setup.md",
+                done=False,
+                precondition="always",
+            ),
+        ),
+    )
+    duplicate = MigrationManifest(
+        name="duplicate-save",
+        created_at="2025-01-01T00:00:00.000+00:00",
+        last_touch="2025-01-01T00:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="ready",
+        current_phase="setup",
+        phases=(
+            PhaseSpec(
+                name="setup",
+                file="phase-0-setup.md",
+                done=False,
+                precondition="always",
+            ),
+            PhaseSpec(
+                name="setup",
+                file="phase-1-setup.md",
+                done=False,
+                precondition="again",
+            ),
+        ),
+    )
+    save_manifest(original, path)
+    original_content = path.read_text(encoding="utf-8")
+
+    with pytest.raises(
+        ContinuousRefactorError, match="Duplicate phase names are not allowed",
+    ):
+        save_manifest(duplicate, path)
+
+    assert path.read_text(encoding="utf-8") == original_content
+    assert list(path.parent.glob("*.tmp")) == []
 
 
 # ---------------------------------------------------------------------------

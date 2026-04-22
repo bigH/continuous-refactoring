@@ -82,6 +82,7 @@ def check_phase_ready(
     repo_root: Path,
     artifacts: RunArtifacts,
     *,
+    taste: str = "",
     attempt: int = 1,
     retry: int = 1,
     agent: str,
@@ -89,7 +90,7 @@ def check_phase_ready(
     effort: str,
     timeout: int | None,
 ) -> tuple[ReadyVerdict, str]:
-    prompt = compose_phase_ready_prompt(phase, manifest)
+    prompt = compose_phase_ready_prompt(phase, manifest, taste)
     check_dir = artifacts.root / "phase-ready-check"
     check_dir.mkdir(parents=True, exist_ok=True)
     target_label = _phase_target_label(manifest, phase)

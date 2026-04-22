@@ -11,6 +11,7 @@ if TYPE_CHECKING:
 import continuous_refactoring
 import continuous_refactoring.loop
 from continuous_refactoring.artifacts import CommandCapture, ContinuousRefactorError
+from continuous_refactoring.config import default_taste_text
 from continuous_refactoring.migrations import (
     MigrationManifest,
     PhaseSpec,
@@ -281,6 +282,45 @@ def test_migration_labels_use_phase_file_not_numeric_cursor(
     assert "phase-0/setup" not in commit_messages[0]
     assert "phase-0-setup.md" in out
     assert "migration/rework-auth/phase-0-setup.md" in commit_messages[0]
+
+
+def test_phase_ready_check_receives_runtime_taste(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    now = _utc_now()
+    live_dir, _, _ = _seed_manifest(
+        run_once_env,
+        name="rework-auth",
+        last_touch=now - timedelta(hours=24),
+        commit=True,
+    )
+    captured_taste: list[str] = []
+
+    def fake_check_ready(
+        phase: object,
+        manifest: object,
+        repo_root: object,
+        artifacts: object,
+        *,
+        taste: str = "",
+        **kwargs: object,
+    ) -> tuple[str, str]:
+        captured_taste.append(taste)
+        return ("no", "not ready")
+
+    _patch_live_dir(monkeypatch, live_dir)
+    _patch_classifier_cohesive(monkeypatch)
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.check_phase_ready",
+        fake_check_ready,
+    )
+    _patch_execute_phase_trap(monkeypatch)
+    _patch_one_shot(monkeypatch)
+
+    exit_code = _run_once(run_once_env)
+
+    assert exit_code == 0
+    assert captured_taste == [default_taste_text()]
 
 
 # ---------------------------------------------------------------------------

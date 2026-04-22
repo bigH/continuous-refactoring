@@ -402,28 +402,28 @@ def test_full_prompt_omits_blank_target_files() -> None:
 
 def test_phase_ready_contains_base_prompt() -> None:
     manifest = _manifest()
-    result = compose_phase_ready_prompt(manifest.phases[1], manifest)
+    result = compose_phase_ready_prompt(manifest.phases[1], manifest, _TASTE)
     assert PHASE_READY_CHECK_PROMPT in result
 
 
 def test_phase_ready_contains_phase_name() -> None:
     manifest = _manifest()
     phase = manifest.phases[1]
-    result = compose_phase_ready_prompt(phase, manifest)
+    result = compose_phase_ready_prompt(phase, manifest, _TASTE)
     assert phase.name in result
 
 
 def test_phase_ready_contains_phase_file() -> None:
     manifest = _manifest()
     phase = manifest.phases[1]
-    result = compose_phase_ready_prompt(phase, manifest)
+    result = compose_phase_ready_prompt(phase, manifest, _TASTE)
     assert phase.file in result
 
 
 def test_phase_ready_contains_precondition() -> None:
     manifest = _manifest()
     phase = manifest.phases[1]
-    result = compose_phase_ready_prompt(phase, manifest)
+    result = compose_phase_ready_prompt(phase, manifest, _TASTE)
     assert phase.precondition in result
     assert "Precondition:" in result
     assert "Ready when:" not in result
@@ -431,7 +431,7 @@ def test_phase_ready_contains_precondition() -> None:
 
 def test_phase_ready_contains_manifest_name() -> None:
     manifest = _manifest()
-    result = compose_phase_ready_prompt(manifest.phases[1], manifest)
+    result = compose_phase_ready_prompt(manifest.phases[1], manifest, _TASTE)
     assert manifest.name in result
     assert "Current phase file: phase-1-migrate.md" in result
     assert "Current phase name: migrate" in result
@@ -440,10 +440,16 @@ def test_phase_ready_contains_manifest_name() -> None:
 
 def test_phase_ready_contains_output_contract() -> None:
     manifest = _manifest()
-    result = compose_phase_ready_prompt(manifest.phases[1], manifest)
+    result = compose_phase_ready_prompt(manifest.phases[1], manifest, _TASTE)
     assert "ready: yes" in result
     assert "ready: no" in result
     assert "ready: unverifiable" in result
+
+
+def test_phase_ready_contains_taste() -> None:
+    manifest = _manifest()
+    result = compose_phase_ready_prompt(manifest.phases[1], manifest, _TASTE)
+    assert f"## Taste\n{_TASTE}" in result
 
 
 # ---------------------------------------------------------------------------

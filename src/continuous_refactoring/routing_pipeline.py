@@ -137,6 +137,7 @@ def try_migration_tick(
                 manifest,
                 repo_root,
                 artifacts,
+                taste=taste,
                 attempt=attempt,
                 retry=1,
                 agent=agent,

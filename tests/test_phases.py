@@ -158,7 +158,7 @@ def test_check_ready_yes(
 
     verdict, reason = check_phase_ready(
         _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
-        agent="codex", model="fake", effort="low", timeout=None,
+        taste=_TASTE, agent="codex", model="fake", effort="low", timeout=None,
     )
     assert verdict == "yes"
     assert reason == "yes"
@@ -175,7 +175,7 @@ def test_check_ready_yes_with_trailing_noise(
 
     verdict, reason = check_phase_ready(
         _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
-        agent="codex", model="fake", effort="low", timeout=None,
+        taste=_TASTE, agent="codex", model="fake", effort="low", timeout=None,
     )
     assert verdict == "yes"
     assert reason == "yes"
@@ -189,7 +189,7 @@ def test_check_ready_rejects_no_output(
     with pytest.raises(ContinuousRefactorError, match="no output"):
         check_phase_ready(
             _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
-            agent="codex", model="fake", effort="low", timeout=None,
+            taste=_TASTE, agent="codex", model="fake", effort="low", timeout=None,
         )
 
 
@@ -203,7 +203,7 @@ def test_check_ready_rejects_unparseable_output(
     with pytest.raises(ContinuousRefactorError, match="unrecognised output"):
         check_phase_ready(
             _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
-            agent="codex", model="fake", effort="low", timeout=None,
+            taste=_TASTE, agent="codex", model="fake", effort="low", timeout=None,
         )
 
 
@@ -218,7 +218,7 @@ def test_check_ready_no(
 
     verdict, reason = check_phase_ready(
         _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
-        agent="codex", model="fake", effort="low", timeout=None,
+        taste=_TASTE, agent="codex", model="fake", effort="low", timeout=None,
     )
     assert verdict == "no"
     assert reason == "prerequisites not met"
@@ -235,10 +235,36 @@ def test_check_ready_unverifiable(
 
     verdict, reason = check_phase_ready(
         _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
-        agent="codex", model="fake", effort="low", timeout=None,
+        taste=_TASTE, agent="codex", model="fake", effort="low", timeout=None,
     )
     assert verdict == "unverifiable"
     assert reason == "need human judgment"
+
+
+def test_check_ready_prompt_includes_taste(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    prompts: list[str] = []
+
+    def fake_agent(**kwargs: object) -> CommandCapture:
+        prompts.append(str(kwargs["prompt"]))
+        for key in ("stdout_path", "stderr_path"):
+            path = Path(str(kwargs[key]))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+        return _fake_capture("ready: yes\n", tmp_path=tmp_path)
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.maybe_run_agent", fake_agent,
+    )
+
+    check_phase_ready(
+        _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
+        taste=_TASTE, agent="codex", model="fake", effort="low", timeout=None,
+    )
+
+    assert len(prompts) == 1
+    assert f"## Taste\n{_TASTE}" in prompts[0]
 
 
 # ---------------------------------------------------------------------------
@@ -341,7 +367,7 @@ def test_ready_no_leaves_manifest_untouched(
 
     verdict, _reason = check_phase_ready(
         _PHASE_0, manifest, tmp_path, _make_artifacts(tmp_path),
-        agent="codex", model="fake", effort="low", timeout=None,
+        taste=_TASTE, agent="codex", model="fake", effort="low", timeout=None,
     )
     assert verdict == "no"
 
@@ -380,7 +406,7 @@ def test_ready_unverifiable_sets_awaiting_human_review(
 
     verdict, _reason = check_phase_ready(
         _PHASE_0, manifest, tmp_path, _make_artifacts(tmp_path),
-        agent="codex", model="fake", effort="low", timeout=None,
+        taste=_TASTE, agent="codex", model="fake", effort="low", timeout=None,
     )
     assert verdict == "unverifiable"
 

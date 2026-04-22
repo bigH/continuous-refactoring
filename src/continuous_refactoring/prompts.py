@@ -706,12 +706,13 @@ def compose_planning_prompt(
 
 
 def compose_phase_ready_prompt(
-    phase: PhaseSpec, manifest: MigrationManifest,
+    phase: PhaseSpec, manifest: MigrationManifest, taste: str = "",
 ) -> str:
     return _join_sections(
         PHASE_READY_CHECK_PROMPT,
         f"## Phase\nName: {phase.name}\nFile: {phase.file}\nPrecondition: {phase.precondition}",
         f"## Manifest\n{_format_manifest_summary(manifest)}",
+        f"## Taste\n{taste}",
     )
 
 

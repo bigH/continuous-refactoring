@@ -2,7 +2,7 @@
 
 ## 1. Identity
 
-Test-gated refactor loop that drives `codex` and `claude` CLIs through small, validated commits. Zero runtime deps, stdlib only. Dog-foods itself — the driver's biggest active target is its own `loop.py`. User-facing docs live in `README.md`; this file is the mutator's contract.
+Test-gated refactor loop that drives `codex` and `claude` CLIs through small, validated commits. Zero runtime deps, stdlib only. Dog-foods itself through live migrations. User-facing docs live in `README.md`; this file is the mutator's contract.
 
 ## 2. Keep this file current
 
@@ -88,6 +88,7 @@ migration explicitly scopes structural work.
 - **Driver owns commits** (`loop.py:474-479`) — if an agent commits mid-attempt, driver does `git reset --soft head_before` and re-commits with its own message.
 - **Migration scheduling split** (`migrations.py`, `loop.py`, `phases.py`) — `last_touch` is activity bookkeeping, not the 6-hour retry gate. Deferred/blocked migrations set `cooldown_until`; successful phase completion clears deferral markers so the next ready phase can run immediately.
 - **Manifest codec boundary** (`migration_manifest_codec.py`, `migrations.py`) — codec owns legacy `ready_when`, legacy integer `current_phase`, duplicate phase-name rejection, and saved JSON formatting. `load_manifest()` / `save_manifest()` own filesystem and JSON boundary errors.
+- **Review CLI boundary** (`cli.py`, `review_cli.py`) — `cli.py` owns parser wiring and run dispatch; migration review internals live in `review_cli.py`, which stays internal and out of package-root `_SUBMODULES`.
 - **Migration terminology split** (`migrations.py`, `planning.py`, `prompts.py`) — manifest `precondition` gates phase start; phase markdown `## Definition of Done` governs completion.
 - **Phase execution validation gate** (`phases.py`, `prompts.py`, `loop.py`) — a migration phase is complete only after host-side full validation passes. `execute_phase()` retries validation-red attempts from `head_before` up to the effective `--max-attempts` budget, and the phase prompt must include the literal configured validation command plus the phase file's Definition of Done as the completion contract.
 - **Taste injection** — every prompt includes a `## Taste` section. `tests/test_prompts.py` enforces this via `_TASTE_INJECTED_PROMPTS`. Do not drop it.

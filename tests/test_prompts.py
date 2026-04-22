@@ -308,6 +308,21 @@ def test_compose_full_prompt_includes_retry_context_heading() -> None:
     assert "validation failed after refactor" in result
 
 
+def test_compose_full_prompt_omits_blank_retry_context() -> None:
+    result = compose_full_prompt(
+        base_prompt="base",
+        taste=_TASTE,
+        target=_target(),
+        scope_instruction=None,
+        validation_command="uv run pytest",
+        attempt=2,
+        retry_context=" \n\t ",
+    )
+
+    assert "## Retry Context" not in result
+    assert "Use this as focused context only." not in result
+
+
 def test_planning_approaches_mentions_artifacts() -> None:
     result = compose_planning_prompt("approaches", "mig", _TASTE, "ctx")
     assert "approaches/" in result
@@ -507,3 +522,17 @@ def test_phase_execution_contains_validation_command() -> None:
     assert "Run the full configured validation command before declaring success." in result
     assert "Definition of Done" in result
     assert "A phase is done only when the Definition of Done is satisfied" in result
+
+
+def test_phase_execution_includes_stripped_retry_context() -> None:
+    manifest = _manifest()
+    result = compose_phase_execution_prompt(
+        manifest.phases[1],
+        manifest,
+        _TASTE,
+        "uv run pytest",
+        retry_context=" \nvalidation failed after phase execution\n ",
+    )
+
+    assert "## Retry Context\n\nvalidation failed after phase execution" in result
+    assert "Use this as focused context only. Do not copy raw failure text into code." in result

@@ -74,6 +74,18 @@ def _first_scope(*scopes: str | None) -> str | None:
     return None
 
 
+_RETRY_CONTEXT_WARNING = (
+    "Use this as focused context only. Do not copy raw failure text into code."
+)
+
+
+def _retry_context_sections(retry_context: str | None) -> tuple[str, ...]:
+    retry_text = _strip_or_none(retry_context)
+    if retry_text is None:
+        return ()
+    return ("## Retry Context", retry_text, _RETRY_CONTEXT_WARNING)
+
+
 def scope_candidate_detail_lines(candidate: ScopeCandidate) -> list[str]:
     return [
         "Files:",
@@ -413,7 +425,6 @@ def compose_full_prompt(
     retry_context: str | None = None,
     fix_amendment: str | None = None,
 ) -> str:
-    sanitized_retry_context = _strip_or_none(retry_context)
     sections: list[str] = [
         f"Attempt {attempt}",
         base_prompt,
@@ -422,13 +433,8 @@ def compose_full_prompt(
         _format_target_files(target.files),
         _first_scope(target.scoping, scope_instruction),
         f"## Validation\nRun: `{validation_command}`",
+        *_retry_context_sections(retry_context),
     ]
-    if sanitized_retry_context:
-        sections.extend([
-            "## Retry Context",
-            sanitized_retry_context,
-            "Use this as focused context only. Do not copy raw failure text into code.",
-        ])
     if fix_amendment:
         sections.append(fix_amendment)
     return _join_sections(*sections)
@@ -723,20 +729,14 @@ def compose_phase_execution_prompt(
     validation_command: str,
     retry_context: str | None = None,
 ) -> str:
-    sanitized_retry_context = _strip_or_none(retry_context)
     sections: list[str] = [
         PHASE_EXECUTION_PROMPT,
         f"## Phase\nName: {phase.name}\nFile: {phase.file}\nPrecondition: {phase.precondition}",
         f"## Manifest\n{_format_manifest_summary(manifest)}",
         f"## Taste\n{taste}",
         f"## Validation\nRun: `{validation_command}`",
+        *_retry_context_sections(retry_context),
     ]
-    if sanitized_retry_context:
-        sections.extend([
-            "## Retry Context",
-            sanitized_retry_context,
-            "Use this as focused context only. Do not copy raw failure text into code.",
-        ])
     return _join_sections(*sections)
 
 

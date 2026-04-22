@@ -138,18 +138,7 @@ def test_review_list_filters_flagged_migrations(
 
     save_migration(
         _make_manifest(
-            "mig-a",
-            awaiting_human_review=True,
-            status="ready",
-            current_phase="review-target",
-            last_touch="2025-03-01T12:00:00+00:00",
-            human_review_reason="needs security audit",
-        ),
-        live_dir / "mig-a" / "manifest.json",
-    )
-    save_migration(
-        _make_manifest(
-            "mig-b",
+            "listed-a",
             awaiting_human_review=True,
             status="in-progress",
             current_phase="setup",
@@ -158,19 +147,41 @@ def test_review_list_filters_flagged_migrations(
         live_dir / "mig-b" / "manifest.json",
     )
     save_migration(
+        _make_manifest(
+            "listed-without-phase",
+            awaiting_human_review=True,
+            status="ready",
+            current_phase="",
+            last_touch="2025-03-03T16:00:00+00:00",
+            human_review_reason="phase cursor cleared",
+        ),
+        live_dir / "mig-no-phase" / "manifest.json",
+    )
+    save_migration(
         _make_manifest("mig-c", awaiting_human_review=False, status="done"),
         live_dir / "mig-c" / "manifest.json",
+    )
+    save_migration(
+        _make_manifest(
+            "listed-z",
+            awaiting_human_review=True,
+            status="ready",
+            current_phase="review-target",
+            last_touch="2025-03-01T12:00:00+00:00",
+            human_review_reason="needs security audit",
+        ),
+        live_dir / "mig-a" / "manifest.json",
     )
 
     _handle_review_list()
 
     out = capsys.readouterr().out
     lines = [line for line in out.strip().splitlines() if line]
-    assert len(lines) == 2
+    assert len(lines) == 3
 
     fields_a = lines[0].split("\t")
     assert fields_a == [
-        "mig-a",
+        "listed-z",
         "ready",
         "phase-2-review-target.md",
         "review-target",
@@ -180,13 +191,41 @@ def test_review_list_filters_flagged_migrations(
 
     fields_b = lines[1].split("\t")
     assert fields_b == [
-        "mig-b",
+        "listed-a",
         "in-progress",
         "phase-1-setup.md",
         "setup",
         "2025-03-02T14:00:00+00:00",
         "(no reason recorded)",
     ]
+
+    fields_no_phase = lines[2].split("\t")
+    assert fields_no_phase == [
+        "listed-without-phase",
+        "ready",
+        "(none)",
+        "(none)",
+        "2025-03-03T16:00:00+00:00",
+        "phase cursor cleared",
+    ]
+
+
+def test_review_list_exits_1_when_project_not_initialized(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    monkeypatch.chdir(repo)
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_review_list()
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "project not initialized" in err
 
 
 def test_review_list_exits_1_when_no_live_migrations_dir(
@@ -227,6 +266,26 @@ def test_review_perform_exits_2_when_project_not_initialized(
     assert "project not initialized" in err
 
 
+def test_review_perform_exits_2_when_no_live_migrations_dir(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    monkeypatch.chdir(repo)
+
+    register_project(repo)
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_review_perform(_make_perform_args("my-mig"))
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "live-migrations-dir" in err
+
+
 def _setup_review_project(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -264,6 +323,7 @@ def test_review_perform_happy_path(
         agent: str, model: str, effort: str, prompt: str, repo_root: Path,
     ) -> int:
         captured_prompt["prompt"] = prompt
+        captured_prompt["repo_root"] = str(repo_root)
         manifest = load_migration_manifest(manifest_path)
         from dataclasses import replace
         updated = replace(manifest, awaiting_human_review=False)
@@ -279,6 +339,7 @@ def test_review_perform_happy_path(
     assert "needs security audit" in captured_prompt["prompt"]
     assert "phase-2-review-target.md" in captured_prompt["prompt"]
     assert "Name: review-target" in captured_prompt["prompt"]
+    assert captured_prompt["repo_root"] == str(Path.cwd().resolve())
 
     reloaded = load_migration_manifest(manifest_path)
     assert reloaded.awaiting_human_review is False
@@ -307,6 +368,30 @@ def test_review_perform_exits_1_when_flag_not_cleared(
     assert exc_info.value.code == 1
     err = capsys.readouterr().err
     assert "not completed" in err
+
+
+def test_review_perform_exits_with_agent_returncode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _setup_review_project(tmp_path, monkeypatch, awaiting=True)
+
+    def fake_interactive(
+        agent: str, model: str, effort: str, prompt: str, repo_root: Path,
+    ) -> int:
+        return 7
+
+    monkeypatch.setattr(
+        "continuous_refactoring.cli.run_agent_interactive", fake_interactive,
+    )
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_review_perform(_make_perform_args("my-mig"))
+
+    assert exc_info.value.code == 7
+    err = capsys.readouterr().err
+    assert "review agent exited with code 7" in err
 
 
 def test_review_perform_exits_2_when_migration_missing(

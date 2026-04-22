@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -28,7 +28,7 @@ from continuous_refactoring.decisions import (
 )
 from continuous_refactoring.git import get_head_sha, revert_to
 from continuous_refactoring.migrations import (
-    advance_phase_cursor,
+    complete_manifest_phase,
     migration_root,
     phase_file_reference,
     save_manifest,
@@ -87,10 +87,12 @@ def _phase_target_label(manifest: MigrationManifest, phase: PhaseSpec) -> str:
     return f"{manifest.name} {phase_file_reference(phase)} ({phase.name})"
 
 
-def _phase_index(manifest: MigrationManifest, phase_name: str) -> int:
-    for index, manifest_phase in enumerate(manifest.phases):
+def _require_phase_in_manifest(
+    manifest: MigrationManifest, phase_name: str,
+) -> None:
+    for manifest_phase in manifest.phases:
         if manifest_phase.name == phase_name:
-            return index
+            return
     raise ContinuousRefactorError(f"Phase {phase_name!r} not found in manifest")
 
 
@@ -515,31 +517,13 @@ def _complete_phase(
     manifest: MigrationManifest,
     live_dir: Path,
     *,
-    phase_index: int,
     retry: int,
 ) -> ExecutePhaseOutcome:
-    updated_phases = tuple(
-        replace(manifest_phase, done=True) if index == phase_index else manifest_phase
-        for index, manifest_phase in enumerate(manifest.phases)
-    )
-    updated_manifest = replace(
+    updated_manifest = complete_manifest_phase(
         manifest,
-        phases=updated_phases,
-        last_touch=iso_timestamp(),
-        wake_up_on=None,
-        awaiting_human_review=False,
-        human_review_reason=None,
-        cooldown_until=None,
+        phase.name,
+        iso_timestamp(),
     )
-    next_phase_name = advance_phase_cursor(manifest, phase.name)
-    if next_phase_name is None:
-        updated_manifest = replace(
-            updated_manifest,
-            current_phase="",
-            status="done",
-        )
-    else:
-        updated_manifest = replace(updated_manifest, current_phase=next_phase_name)
 
     manifest_path = migration_root(live_dir, manifest.name) / "manifest.json"
     save_manifest(updated_manifest, manifest_path)
@@ -568,7 +552,7 @@ def execute_phase(
     validation_command: str,
     max_attempts: int | None,
 ) -> ExecutePhaseOutcome:
-    phase_index = _phase_index(manifest, phase.name)
+    _require_phase_in_manifest(manifest, phase.name)
     head_before = get_head_sha(repo_root)
     target_label = _phase_target_label(manifest, phase)
     retry_context: str | None = None
@@ -619,7 +603,6 @@ def execute_phase(
                 phase,
                 manifest,
                 live_dir,
-                phase_index=phase_index,
                 retry=retry_number,
             )
 

@@ -11,6 +11,7 @@ from continuous_refactoring.artifacts import ContinuousRefactorError
 
 __all__ = [
     "advance_phase_cursor",
+    "complete_manifest_phase",
     "MigrationManifest",
     "PhaseSpec",
     "MIGRATION_STATUSES",
@@ -125,6 +126,35 @@ def advance_phase_cursor(
     if next_index >= len(manifest.phases):
         return None
     return manifest.phases[next_index].name
+
+
+def complete_manifest_phase(
+    manifest: MigrationManifest,
+    completed_phase_name: str,
+    completed_at: str,
+) -> MigrationManifest:
+    phase_index = _phase_index(manifest.phases, completed_phase_name)
+    if phase_index is None:
+        raise ContinuousRefactorError(
+            f"Cannot complete unknown phase {completed_phase_name!r}"
+        )
+    updated_phases = tuple(
+        replace(manifest_phase, done=True) if index == phase_index else manifest_phase
+        for index, manifest_phase in enumerate(manifest.phases)
+    )
+    updated_manifest = replace(
+        manifest,
+        phases=updated_phases,
+        last_touch=completed_at,
+        wake_up_on=None,
+        awaiting_human_review=False,
+        human_review_reason=None,
+        cooldown_until=None,
+    )
+    next_phase_name = advance_phase_cursor(manifest, completed_phase_name)
+    if next_phase_name is None:
+        return replace(updated_manifest, current_phase="", status="done")
+    return replace(updated_manifest, current_phase=next_phase_name)
 
 
 # ---------------------------------------------------------------------------

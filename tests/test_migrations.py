@@ -11,6 +11,7 @@ from continuous_refactoring.migrations import (
     MigrationManifest,
     PhaseSpec,
     approaches_dir,
+    complete_manifest_phase,
     MIGRATION_STATUSES,
     intentional_skips_dir,
     has_executable_phase,
@@ -101,6 +102,113 @@ def test_has_executable_phase_rejects_invalid_phase_names() -> None:
     assert has_executable_phase(manifest_zero_phase) is False
     assert has_executable_phase(manifest_missing_phase) is False
     assert has_executable_phase(manifest_valid) is True
+
+
+# ---------------------------------------------------------------------------
+# Phase completion
+# ---------------------------------------------------------------------------
+
+def test_complete_manifest_phase_advances_to_next_phase() -> None:
+    completed_at = "2026-04-22T12:00:00.000+00:00"
+    manifest = MigrationManifest(
+        name="phase-completion",
+        created_at="2026-04-22T00:00:00.000+00:00",
+        last_touch="2026-04-22T06:00:00.000+00:00",
+        wake_up_on="2026-04-29T06:00:00.000+00:00",
+        awaiting_human_review=True,
+        human_review_reason="needs review",
+        status="in-progress",
+        current_phase="setup",
+        phases=(
+            PhaseSpec(
+                name="setup",
+                file="phase-0-setup.md",
+                done=False,
+                precondition="always",
+            ),
+            PhaseSpec(
+                name="migrate",
+                file="phase-1-migrate.md",
+                done=False,
+                precondition="setup done",
+            ),
+        ),
+        cooldown_until="2026-04-22T12:00:00.000+00:00",
+    )
+
+    completed = complete_manifest_phase(manifest, "setup", completed_at)
+
+    assert completed.phases[0].done is True
+    assert completed.phases[1].done is False
+    assert completed.current_phase == "migrate"
+    assert completed.status == "in-progress"
+    assert completed.last_touch == completed_at
+    assert completed.wake_up_on is None
+    assert completed.awaiting_human_review is False
+    assert completed.human_review_reason is None
+    assert completed.cooldown_until is None
+
+
+def test_complete_manifest_phase_marks_final_phase_done() -> None:
+    completed_at = "2026-04-22T12:00:00.000+00:00"
+    manifest = MigrationManifest(
+        name="phase-completion",
+        created_at="2026-04-22T00:00:00.000+00:00",
+        last_touch="2026-04-22T06:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="in-progress",
+        current_phase="migrate",
+        phases=(
+            PhaseSpec(
+                name="setup",
+                file="phase-0-setup.md",
+                done=True,
+                precondition="always",
+            ),
+            PhaseSpec(
+                name="migrate",
+                file="phase-1-migrate.md",
+                done=False,
+                precondition="setup done",
+            ),
+        ),
+    )
+
+    completed = complete_manifest_phase(manifest, "migrate", completed_at)
+
+    assert completed.phases[0].done is True
+    assert completed.phases[1].done is True
+    assert completed.current_phase == ""
+    assert completed.status == "done"
+    assert completed.last_touch == completed_at
+
+
+def test_complete_manifest_phase_rejects_unknown_phase() -> None:
+    manifest = MigrationManifest(
+        name="phase-completion",
+        created_at="2026-04-22T00:00:00.000+00:00",
+        last_touch="2026-04-22T06:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="in-progress",
+        current_phase="setup",
+        phases=(
+            PhaseSpec(
+                name="setup",
+                file="phase-0-setup.md",
+                done=False,
+                precondition="always",
+            ),
+        ),
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="Cannot complete unknown phase"):
+        complete_manifest_phase(
+            manifest,
+            "missing",
+            "2026-04-22T12:00:00.000+00:00",
+        )
 
 
 # ---------------------------------------------------------------------------

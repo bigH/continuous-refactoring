@@ -1,22 +1,22 @@
+from __future__ import annotations
+
 from types import ModuleType
 
-from . import (
-    agent,
-    artifacts,
-    cli,
-    decisions,
-    failure_report,
-    git,
-    loop,
-    migration_tick,
-    migrations,
-    phases,
-    planning,
-    prompts,
-    routing,
-    routing_pipeline,
-    scope_expansion,
-)
+from continuous_refactoring import agent
+from continuous_refactoring import artifacts
+from continuous_refactoring import cli
+from continuous_refactoring import decisions
+from continuous_refactoring import failure_report
+from continuous_refactoring import git
+from continuous_refactoring import loop
+from continuous_refactoring import migration_tick
+from continuous_refactoring import migrations
+from continuous_refactoring import phases
+from continuous_refactoring import planning
+from continuous_refactoring import prompts
+from continuous_refactoring import routing
+from continuous_refactoring import routing_pipeline
+from continuous_refactoring import scope_expansion
 
 _SUBMODULES: tuple[ModuleType, ...] = (
     agent,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import hashlib
 import io
 import os
@@ -98,6 +99,20 @@ def test_package_exports_are_stable() -> None:
         "cli_main",
     ):
         assert hasattr(continuous_refactoring, name)
+
+
+def test_package_init_follows_source_import_conventions() -> None:
+    init_path = Path(continuous_refactoring.__file__)
+    source = init_path.read_text(encoding="utf-8")
+    relative_imports = [
+        node
+        for node in ast.walk(ast.parse(source))
+        if isinstance(node, ast.ImportFrom)
+        and node.level > 0
+    ]
+
+    assert source.startswith("from __future__ import annotations\n")
+    assert relative_imports == []
 
 
 def test_build_command_claude_streams_json_so_watchdog_sees_progress() -> None:

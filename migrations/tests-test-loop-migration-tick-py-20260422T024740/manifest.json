@@ -1,0 +1,37 @@
+{
+  "awaiting_human_review": false,
+  "cooldown_until": null,
+  "created_at": "2026-04-22T02:47:40.420-07:00",
+  "current_phase": "safety-net",
+  "human_review_reason": null,
+  "last_touch": "2026-04-22T03:03:40.536-07:00",
+  "name": "tests-test-loop-migration-tick-py-20260422T024740",
+  "phases": [
+    {
+      "done": false,
+      "file": "phase-1-safety-net.md",
+      "name": "safety-net",
+      "precondition": "`try_migration_tick()` and `enumerate_eligible_manifests()` are still implemented and exported by `continuous_refactoring.routing_pipeline`, `tests/test_loop_migration_tick.py` still monkeypatches that boundary, no `src/continuous_refactoring/migration_tick.py` module exists, and the focused migration tick tests pass."
+    },
+    {
+      "done": false,
+      "file": "phase-2-extract-migration-tick.md",
+      "name": "extract-migration-tick",
+      "precondition": "Phase 1 is complete: focused tests characterize current migration tick behavior at the `routing_pipeline` boundary, no production files were changed in Phase 1, `try_migration_tick()` and `enumerate_eligible_manifests()` still live in `routing_pipeline.py`, no `migration_tick.py` module exists, and all Phase 1 validation commands pass."
+    },
+    {
+      "done": false,
+      "file": "phase-3-retarget-driver-and-tests.md",
+      "name": "retarget-driver-and-tests",
+      "precondition": "Phase 2 is complete: `migration_tick.py` contains the real tick implementation, `routing_pipeline.route_and_run()` uses it, focused tests patch tick collaborators through `continuous_refactoring.migration_tick`, package import succeeds, the temporary routing compatibility path still exists for remaining callers, and all Phase 2 validation commands pass."
+    },
+    {
+      "done": false,
+      "file": "phase-4-delete-routing-shim.md",
+      "name": "delete-routing-shim",
+      "precondition": "Phase 3 is complete: production call sites and tests import or monkeypatch migration tick behavior through `continuous_refactoring.migration_tick`, `loop.py` has only minimal call-site edits, any stale `AGENTS.md` `loop.py` guidance has been resolved, and all Phase 3 validation commands pass."
+    }
+  ],
+  "status": "ready",
+  "wake_up_on": null
+}

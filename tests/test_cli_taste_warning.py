@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 import sys
-from pathlib import Path
 from collections.abc import Callable
+from pathlib import Path
 
 import pytest
 
-from continuous_refactoring.cli import cli_main
-from continuous_refactoring.cli import _TASTE_WARNING
+import continuous_refactoring.cli as cli
 from continuous_refactoring.config import default_taste_text
 
 _LEGACY_TASTE = "- Old taste without version header.\n"
@@ -26,16 +25,17 @@ def _write_current_taste(xdg_root: Path) -> None:
 
 
 _SUBCOMMANDS: list[tuple[list[str], str]] = [
-    (["cr", "init"], "_handle_init"),
-    (["cr", "taste", "--global"], "_handle_taste"),
-    (["cr", "upgrade"], "_handle_upgrade"),
+    (["cr", "init"], "init"),
+    (["cr", "taste", "--global"], "taste"),
+    (["cr", "upgrade"], "upgrade"),
+    (["cr", "review", "list"], "review"),
     (
         [
             "cr", "run-once",
             "--with", "codex", "--model", "m", "--effort", "e",
             "--scope-instruction", "s",
         ],
-        "_handle_run_once",
+        "run-once",
     ),
     (
         [
@@ -43,7 +43,7 @@ _SUBCOMMANDS: list[tuple[list[str], str]] = [
             "--with", "codex", "--model", "m", "--effort", "e",
             "--scope-instruction", "s", "--max-refactors", "1",
         ],
-        "_handle_run",
+        "run",
     ),
 ]
 
@@ -53,13 +53,14 @@ def _run_cli_for_subcommand(
     xdg_root: Path,
     monkeypatch: pytest.MonkeyPatch,
     argv: list[str],
-    handler: str,
+    command: str,
     write_taste: Callable[[Path], None],
 ) -> None:
     write_taste(xdg_root)
     monkeypatch.setattr(sys, "argv", argv)
-    monkeypatch.setattr(f"continuous_refactoring.cli.{handler}", lambda _: None)
-    cli_main()
+    assert command in cli._COMMAND_HANDLERS
+    monkeypatch.setitem(cli._COMMAND_HANDLERS, command, lambda _: None)
+    cli.cli_main()
 
 
 @pytest.fixture
@@ -78,9 +79,9 @@ def xdg_root(
 
 
 @pytest.mark.parametrize(
-    "argv,handler",
+    "argv,command",
     _SUBCOMMANDS,
-    ids=["init", "taste", "upgrade", "run-once", "run"],
+    ids=["init", "taste", "upgrade", "review", "run-once", "run"],
 )
 @pytest.mark.parametrize(
     "taste_writer,warns",
@@ -92,7 +93,7 @@ def test_taste_warning_behavior(
     capsys: pytest.CaptureFixture[str],
     xdg_root: Path,
     argv: list[str],
-    handler: str,
+    command: str,
     taste_writer: Callable[[Path], None],
     warns: bool,
 ) -> None:
@@ -100,15 +101,15 @@ def test_taste_warning_behavior(
         xdg_root=xdg_root,
         monkeypatch=monkeypatch,
         argv=argv,
-        handler=handler,
+        command=command,
         write_taste=taste_writer,
     )
 
     err = capsys.readouterr().err
     if warns:
-        assert err.count(_TASTE_WARNING) == 1
+        assert err.count(cli._TASTE_WARNING) == 1
     else:
-        assert _TASTE_WARNING not in err
+        assert cli._TASTE_WARNING not in err
 
 
 # ---------------------------------------------------------------------------
@@ -127,14 +128,14 @@ def test_warning_preserves_exit_code(
     def fake_upgrade(_: object) -> None:
         raise SystemExit(42)
 
-    monkeypatch.setattr("continuous_refactoring.cli._handle_upgrade", fake_upgrade)
+    monkeypatch.setitem(cli._COMMAND_HANDLERS, "upgrade", fake_upgrade)
 
     with pytest.raises(SystemExit) as exc_info:
-        cli_main()
+        cli.cli_main()
 
     assert exc_info.value.code == 42
     err = capsys.readouterr().err
-    assert _TASTE_WARNING in err
+    assert cli._TASTE_WARNING in err
 
 
 # ---------------------------------------------------------------------------
@@ -152,8 +153,8 @@ def test_warning_does_not_mutate_taste(
     before = taste_path.read_text(encoding="utf-8")
 
     monkeypatch.setattr(sys, "argv", ["cr", "upgrade"])
-    monkeypatch.setattr("continuous_refactoring.cli._handle_upgrade", lambda _: None)
+    monkeypatch.setitem(cli._COMMAND_HANDLERS, "upgrade", lambda _: None)
 
-    cli_main()
+    cli.cli_main()
 
     assert taste_path.read_text(encoding="utf-8") == before

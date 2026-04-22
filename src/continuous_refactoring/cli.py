@@ -735,12 +735,12 @@ def cli_main() -> None:
 
 
 _COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], None]] = {
-    "init": lambda args: _handle_init(args),
-    "taste": lambda args: _handle_taste(args),
-    "upgrade": lambda args: _handle_upgrade(args),
-    "review": lambda args: _handle_review(args),
-    "run-once": lambda args: _handle_run_once(args),
-    "run": lambda args: _handle_run(args),
+    "init": _handle_init,
+    "taste": _handle_taste,
+    "upgrade": _handle_upgrade,
+    "review": _handle_review,
+    "run-once": _handle_run_once,
+    "run": _handle_run,
 }
 
 _TASTE_MODE_HANDLERS: dict[str, Callable[[argparse.Namespace], None]] = {

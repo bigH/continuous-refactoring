@@ -14,6 +14,10 @@ from continuous_refactoring.targeting import Target
 from conftest import init_repo, make_run_once_args
 
 
+EXPANDED_FILES = ("README.md", "src/expanded.py")
+LIVE_MIGRATIONS_DIR = ".migrations"
+
+
 @pytest.fixture
 def routing_env(
     tmp_path: Path,
@@ -21,7 +25,7 @@ def routing_env(
 ) -> tuple[Path, RunArtifacts]:
     repo_root = tmp_path / "repo"
     init_repo(repo_root)
-    (repo_root / ".migrations").mkdir()
+    _patch_live_migrations_dir(monkeypatch, repo_root)
     tmpdir = tmp_path / "tmpdir"
     tmpdir.mkdir()
     monkeypatch.setenv("TMPDIR", str(tmpdir))
@@ -33,14 +37,41 @@ def routing_env(
         test_command="true",
     )
     monkeypatch.setattr(
-        "continuous_refactoring.loop._resolve_live_migrations_dir",
-        lambda _repo_root: repo_root / ".migrations",
-    )
-    monkeypatch.setattr(
         "continuous_refactoring.routing_pipeline.try_migration_tick",
         lambda *_args, **_kwargs: ("not-routed", None),
     )
     return repo_root, artifacts
+
+
+def _patch_live_migrations_dir(
+    monkeypatch: pytest.MonkeyPatch, repo_root: Path,
+) -> Path:
+    live_dir = repo_root / LIVE_MIGRATIONS_DIR
+    live_dir.mkdir()
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    return live_dir
+
+
+def _patch_scope_expansion(
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    files: tuple[str, ...] = EXPANDED_FILES,
+    context: str,
+) -> None:
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.expand_target_for_classification",
+        lambda target, *_args, **_kwargs: (
+            Target(
+                description=target.description,
+                files=files,
+                provenance=target.provenance,
+            ),
+            context,
+        ),
+    )
 
 
 def _invoke_route_and_run(
@@ -51,7 +82,7 @@ def _invoke_route_and_run(
         "taste",
         repo_root,
         artifacts,
-        live_dir=repo_root / ".migrations",
+        live_dir=repo_root / LIVE_MIGRATIONS_DIR,
         agent="codex",
         model="fake",
         effort="low",
@@ -64,6 +95,11 @@ def _invoke_route_and_run(
     )
 
 
+def _single_prompt(prompt_capture: list[str]) -> str:
+    assert len(prompt_capture) == 1
+    return prompt_capture[0]
+
+
 def test_expanded_target_reaches_classifier(
     routing_env: tuple[Path, RunArtifacts],
     monkeypatch: pytest.MonkeyPatch,
@@ -71,16 +107,9 @@ def test_expanded_target_reaches_classifier(
     repo_root, artifacts = routing_env
     seen_files: list[tuple[str, ...]] = []
 
-    monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.expand_target_for_classification",
-        lambda target, *_args, **_kwargs: (
-            Target(
-                description=target.description,
-                files=("README.md", "src/expanded.py"),
-                provenance=target.provenance,
-            ),
-            "Selected scope candidate: cross-cluster",
-        ),
+    _patch_scope_expansion(
+        monkeypatch,
+        context="Selected scope candidate: cross-cluster",
     )
 
     def fake_classifier(target: Target, *_args: object, **_kwargs: object) -> str:
@@ -95,8 +124,8 @@ def test_expanded_target_reaches_classifier(
         Target(description="seed", files=("README.md",), provenance="globs"),
     )
 
-    assert seen_files == [("README.md", "src/expanded.py")]
-    assert result.target.files == ("README.md", "src/expanded.py")
+    assert seen_files == [EXPANDED_FILES]
+    assert result.target.files == EXPANDED_FILES
 
 
 def test_cohesive_cleanup_runs_one_shot_against_expanded_files(
@@ -104,8 +133,7 @@ def test_cohesive_cleanup_runs_one_shot_against_expanded_files(
     prompt_capture: list[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    live_dir = run_once_env / ".migrations"
-    live_dir.mkdir()
+    _patch_live_migrations_dir(monkeypatch, run_once_env)
     (run_once_env / "src").mkdir()
     (run_once_env / "src" / "expanded.py").write_text("VALUE = 1\n", encoding="utf-8")
     continuous_refactoring.run_command(["git", "add", "src/expanded.py"], cwd=run_once_env)
@@ -113,20 +141,9 @@ def test_cohesive_cleanup_runs_one_shot_against_expanded_files(
         ["git", "commit", "-m", "add expanded"], cwd=run_once_env,
     )
 
-    monkeypatch.setattr(
-        "continuous_refactoring.loop._resolve_live_migrations_dir",
-        lambda _repo_root: live_dir,
-    )
-    monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.expand_target_for_classification",
-        lambda target, *_args, **_kwargs: (
-            Target(
-                description=target.description,
-                files=("README.md", "src/expanded.py"),
-                provenance=target.provenance,
-            ),
-            "Selected scope candidate: local-cluster",
-        ),
+    _patch_scope_expansion(
+        monkeypatch,
+        context="Selected scope candidate: local-cluster",
     )
     monkeypatch.setattr(
         "continuous_refactoring.routing_pipeline.classify_target",
@@ -134,11 +151,11 @@ def test_cohesive_cleanup_runs_one_shot_against_expanded_files(
     )
 
     exit_code = continuous_refactoring.run_once(make_run_once_args(run_once_env))
+    prompt = _single_prompt(prompt_capture)
 
     assert exit_code == 0
-    assert len(prompt_capture) == 1
-    assert "- README.md" in prompt_capture[0]
-    assert "- src/expanded.py" in prompt_capture[0]
+    assert "- README.md" in prompt
+    assert "- src/expanded.py" in prompt
 
 
 def test_needs_plan_receives_expanded_scope_context(
@@ -149,16 +166,10 @@ def test_needs_plan_receives_expanded_scope_context(
     captured: dict[str, str] = {}
     planning_context = "Selected scope candidate: cross-cluster\n- src/foo.py\n- tests/test_foo.py"
 
-    monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.expand_target_for_classification",
-        lambda target, *_args, **_kwargs: (
-            Target(
-                description=target.description,
-                files=("src/foo.py", "tests/test_foo.py"),
-                provenance=target.provenance,
-            ),
-            planning_context,
-        ),
+    _patch_scope_expansion(
+        monkeypatch,
+        files=("src/foo.py", "tests/test_foo.py"),
+        context=planning_context,
     )
     monkeypatch.setattr(
         "continuous_refactoring.routing_pipeline.classify_target",
@@ -199,4 +210,4 @@ def test_live_migrations_unset_skips_scope_expansion_and_classification(
     exit_code = continuous_refactoring.run_once(make_run_once_args(run_once_env))
 
     assert exit_code == 0
-    assert len(prompt_capture) == 1
+    _single_prompt(prompt_capture)

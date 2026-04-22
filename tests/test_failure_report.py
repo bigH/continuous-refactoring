@@ -119,6 +119,31 @@ def test_write_emits_snapshot_header_and_body(
     assert "Retry the same target on the next attempt. Focus: Fix the failing assertion." in content
 
 
+def test_write_replaces_dots_in_call_role_snapshot_name(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    artifacts = _artifacts(tmp_path / "artifacts")
+    record = _record(call_role="planner.review")
+
+    snapshot_path = write(
+        repo_root,
+        artifacts,
+        target=record.target,
+        attempt=1,
+        retry=1,
+        validation_command="uv run pytest",
+        record=record,
+    )
+
+    assert snapshot_path.name == (
+        "20260421T120000-000000-attempt-001-retry-01-planner-review.md"
+    )
+
+
 def test_persist_decision_records_commit_without_failure_snapshot(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()

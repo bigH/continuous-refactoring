@@ -39,52 +39,75 @@ def _yaml_scalar(value: object) -> str:
     return json.dumps(str(value))
 
 
-def write(
+def _snapshot_name(
+    run_id: str,
+    *,
+    attempt: int,
+    retry: int,
+    call_role: str,
+) -> str:
+    safe_call_role = call_role.replace(".", "-")
+    return f"{run_id}-attempt-{attempt:03d}-retry-{retry:02d}-{safe_call_role}.md"
+
+
+def _artifact_path_fields(
+    record: DecisionRecord,
+    artifact_root: Path,
+) -> dict[str, str]:
+    return {
+        "agent_last_message": _relative_path(
+            record.agent_last_message_path,
+            artifact_root,
+        ),
+        "agent_stdout": _relative_path(record.agent_stdout_path, artifact_root),
+        "agent_stderr": _relative_path(record.agent_stderr_path, artifact_root),
+        "tests_stdout": _relative_path(record.tests_stdout_path, artifact_root),
+        "tests_stderr": _relative_path(record.tests_stderr_path, artifact_root),
+    }
+
+
+def _yaml_lines(fields: dict[str, object]) -> list[str]:
+    return [f"{key}: {_yaml_scalar(value)}" for key, value in fields.items()]
+
+
+def _front_matter_lines(
+    *,
+    project_uuid: str,
     repo_root: Path,
     artifacts: RunArtifacts,
-    *,
     target: str,
     attempt: int,
     retry: int,
     validation_command: str,
     record: DecisionRecord,
-) -> Path:
-    project = register_project(repo_root)
-    snapshot_dir = failure_snapshots_dir(repo_root)
-    snapshot_name = (
-        f"{artifacts.run_id}-attempt-{attempt:03d}-retry-{retry:02d}-"
-        f"{record.call_role.replace('.', '-')}.md"
-    )
-    snapshot_path = snapshot_dir / snapshot_name
-    agent_last_message = _relative_path(record.agent_last_message_path, artifacts.root)
-    agent_stdout = _relative_path(record.agent_stdout_path, artifacts.root)
-    agent_stderr = _relative_path(record.agent_stderr_path, artifacts.root)
-    tests_stdout = _relative_path(record.tests_stdout_path, artifacts.root)
-    tests_stderr = _relative_path(record.tests_stderr_path, artifacts.root)
-    content = "\n".join([
-        "---",
-        f"schema_version: {_yaml_scalar(1)}",
-        f"project_uuid: {_yaml_scalar(project.entry.uuid)}",
-        f"repo_root: {_yaml_scalar(str(repo_root))}",
-        f"run_id: {_yaml_scalar(artifacts.run_id)}",
-        f"target: {_yaml_scalar(target)}",
-        f"attempt: {_yaml_scalar(attempt)}",
-        f"retry: {_yaml_scalar(retry)}",
-        f"call_role: {_yaml_scalar(record.call_role)}",
-        f"phase_reached: {_yaml_scalar(record.phase_reached)}",
-        f"decision: {_yaml_scalar(record.decision)}",
-        f"retry_recommendation: {_yaml_scalar(record.retry_recommendation)}",
-        f"failure_kind: {_yaml_scalar(record.failure_kind)}",
-        f"summary: {_yaml_scalar(record.summary)}",
-        f"validation_command: {_yaml_scalar(validation_command)}",
-        f"artifact_root: {_yaml_scalar(str(artifacts.root))}",
-        f"agent_last_message: {_yaml_scalar(agent_last_message)}",
-        f"agent_stdout: {_yaml_scalar(agent_stdout)}",
-        f"agent_stderr: {_yaml_scalar(agent_stderr)}",
-        f"tests_stdout: {_yaml_scalar(tests_stdout)}",
-        f"tests_stderr: {_yaml_scalar(tests_stderr)}",
-        "---",
-        "",
+) -> list[str]:
+    fields: dict[str, object] = {
+        "schema_version": 1,
+        "project_uuid": project_uuid,
+        "repo_root": str(repo_root),
+        "run_id": artifacts.run_id,
+        "target": target,
+        "attempt": attempt,
+        "retry": retry,
+        "call_role": record.call_role,
+        "phase_reached": record.phase_reached,
+        "decision": record.decision,
+        "retry_recommendation": record.retry_recommendation,
+        "failure_kind": record.failure_kind,
+        "summary": record.summary,
+        "validation_command": validation_command,
+        "artifact_root": str(artifacts.root),
+    }
+    fields.update(_artifact_path_fields(record, artifacts.root))
+    return _yaml_lines(fields)
+
+
+def _snapshot_body_lines(
+    record: DecisionRecord,
+    artifacts: RunArtifacts,
+) -> list[str]:
+    artifact_paths = _artifact_path_fields(record, artifacts.root)
+    return [
         "# Reason for Failure",
         "",
         "## What failed",
@@ -102,12 +125,49 @@ def write(
         "",
         "## Evidence",
         f"- Run artifacts: {artifacts.root}",
-        f"- Latest agent message: {agent_last_message or '(not available)'}",
-        f"- Agent stdout: {agent_stdout or '(not available)'}",
-        f"- Agent stderr: {agent_stderr or '(not available)'}",
-        f"- Tests stdout: {tests_stdout or '(not available)'}",
-        f"- Tests stderr: {tests_stderr or '(not available)'}",
+        "- Latest agent message: "
+        f"{artifact_paths['agent_last_message'] or '(not available)'}",
+        f"- Agent stdout: {artifact_paths['agent_stdout'] or '(not available)'}",
+        f"- Agent stderr: {artifact_paths['agent_stderr'] or '(not available)'}",
+        f"- Tests stdout: {artifact_paths['tests_stdout'] or '(not available)'}",
+        f"- Tests stderr: {artifact_paths['tests_stderr'] or '(not available)'}",
         "",
+    ]
+
+
+def write(
+    repo_root: Path,
+    artifacts: RunArtifacts,
+    *,
+    target: str,
+    attempt: int,
+    retry: int,
+    validation_command: str,
+    record: DecisionRecord,
+) -> Path:
+    project = register_project(repo_root)
+    snapshot_dir = failure_snapshots_dir(repo_root)
+    snapshot_path = snapshot_dir / _snapshot_name(
+        artifacts.run_id,
+        attempt=attempt,
+        retry=retry,
+        call_role=record.call_role,
+    )
+    content = "\n".join([
+        "---",
+        *_front_matter_lines(
+            project_uuid=project.entry.uuid,
+            repo_root=repo_root,
+            artifacts=artifacts,
+            target=target,
+            attempt=attempt,
+            retry=retry,
+            validation_command=validation_command,
+            record=record,
+        ),
+        "---",
+        "",
+        *_snapshot_body_lines(record, artifacts),
     ])
     snapshot_path.write_text(content, encoding="utf-8")
     return snapshot_path

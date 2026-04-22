@@ -77,7 +77,7 @@ def _seed_live_manifest(live_dir: Path, name: str = "auto-migration") -> None:
                 name="setup",
                 file="phase-0-setup.md",
                 done=False,
-                ready_when="always",
+                precondition="always",
             ),
         ),
     )

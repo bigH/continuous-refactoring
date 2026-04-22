@@ -83,10 +83,10 @@ def _manifest() -> MigrationManifest:
         status="in-progress",
         current_phase="migrate",
         phases=(
-            PhaseSpec(name="prep", file="phase-0-prep.md", done=True, ready_when="always"),
+            PhaseSpec(name="prep", file="phase-0-prep.md", done=True, precondition="always"),
             PhaseSpec(
                 name="migrate", file="phase-1-migrate.md",
-                done=False, ready_when="prep complete",
+                done=False, precondition="prep complete",
             ),
         ),
     )
@@ -128,6 +128,11 @@ def test_ready_check_output_contract() -> None:
     assert "ready: unverifiable" in PHASE_READY_CHECK_PROMPT
 
 
+def test_phase_ready_prompt_uses_precondition_terminology() -> None:
+    assert "precondition" in PHASE_READY_CHECK_PROMPT.lower()
+    assert "ready_when" not in PHASE_READY_CHECK_PROMPT
+
+
 # ---------------------------------------------------------------------------
 # Taste injection mentions
 # ---------------------------------------------------------------------------
@@ -145,6 +150,18 @@ def test_prompts_mention_taste_injection(prompt: str) -> None:
 
 def test_approaches_prompt_mentions_approaches_dir() -> None:
     assert "approaches/<idea>.md" in PLANNING_APPROACHES_PROMPT
+
+
+def test_planning_expand_prompt_mentions_precondition_and_definition_of_done() -> None:
+    assert "## Precondition" in PLANNING_EXPAND_PROMPT
+    assert "## Definition of Done" in PLANNING_EXPAND_PROMPT
+    assert "Do not conflate them." in PLANNING_EXPAND_PROMPT
+
+
+def test_planning_review_prompt_separates_precondition_and_definition_of_done() -> None:
+    assert "precondition" in PLANNING_REVIEW_PROMPT
+    assert "Definition of Done" in PLANNING_REVIEW_PROMPT
+    assert "not conflated" in PLANNING_REVIEW_PROMPT
 
 
 @pytest.mark.parametrize("prompt", _PLANNING_PROMPTS_THAT_MENTION_PLAN_MD)
@@ -403,11 +420,13 @@ def test_phase_ready_contains_phase_file() -> None:
     assert phase.file in result
 
 
-def test_phase_ready_contains_ready_when() -> None:
+def test_phase_ready_contains_precondition() -> None:
     manifest = _manifest()
     phase = manifest.phases[1]
     result = compose_phase_ready_prompt(phase, manifest)
-    assert phase.ready_when in result
+    assert phase.precondition in result
+    assert "Precondition:" in result
+    assert "Ready when:" not in result
 
 
 def test_phase_ready_contains_manifest_name() -> None:
@@ -480,4 +499,5 @@ def test_phase_execution_contains_validation_command() -> None:
     assert "## Validation" in result
     assert "Run: `uv run pytest -q`" in result
     assert "Run the full configured validation command before declaring success." in result
-    assert "A phase is done only when the complete validation command is green." in result
+    assert "Definition of Done" in result
+    assert "A phase is done only when the Definition of Done is satisfied" in result

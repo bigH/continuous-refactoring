@@ -20,12 +20,12 @@ from continuous_refactoring.migrations import (
 )
 
 _PHASES = (
-    PhaseSpec(name="setup", file="phase-1-setup.md", done=True, ready_when="always"),
+    PhaseSpec(name="setup", file="phase-1-setup.md", done=True, precondition="always"),
     PhaseSpec(
         name="review-target",
         file="phase-2-review-target.md",
         done=False,
-        ready_when="setup complete",
+        precondition="setup complete",
     ),
 )
 

@@ -178,7 +178,7 @@ Each `run` / `run-once` tick now checks for eligible migration work before falli
 
 1. **Classify** — a classifier agent reads the target and decides: `cohesive-cleanup` (one-shot path) or `needs-plan` (migration path).
 2. **Plan** — for `needs-plan` targets, a six-stage planning workflow runs: generate approaches → pick best → expand into phases → review → revise → final review. Artifacts land under `<live-migrations-dir>/<migration-name>/`.
-3. **Execute** — each phase is a self-contained unit of work. The tick picks the oldest eligible migration, checks whether its current phase is ready, and executes it on the current branch; commit message identifies the migration as `migration/<name>/<phase-file>.md`.
+3. **Execute** — each phase is a self-contained unit of work. The tick picks the oldest eligible migration, checks whether its current phase precondition is satisfied, and executes it on the current branch. Phase completion is judged against the phase file's `## Definition of Done`; commit message identifies the migration as `migration/<name>/<phase-file>.md`.
 
 ### Migration directory layout
 
@@ -210,14 +210,19 @@ A migration is eligible when **all** of:
   been stale for ≥7 days.
 
 That means successful phase execution does **not** make the next phase wait 6
-hours. Ready phases can advance back-to-back in the same run until the
-migration is actually blocked. The 6-hour cooldown still applies after
-`ready: no`, future wake-ups, unverifiable phases, or similar deferrals so the
-loop does not hammer stuck migrations.
+hours. Phases whose preconditions are already satisfied can advance back-to-back
+in the same run until the migration is actually blocked. The 6-hour cooldown
+still applies after `ready: no`, future wake-ups, unverifiable phases, or
+similar deferrals so the loop does not hammer stuck migrations.
 
 ### Phase model
 
-Each migration moves through phases sequentially. Before executing a phase, a ready-check agent verifies that prerequisites are met. Possible outcomes:
+Each migration moves through phases sequentially.
+
+- The manifest stores each phase's **precondition** — what must already be true before execution may start.
+- Each phase markdown file stores its **Definition of Done** under `## Definition of Done` — what must be true for that phase to count as completed.
+
+Before executing a phase, a ready-check agent verifies that the current phase precondition is met. Possible outcomes:
 
 - **ready: yes** — phase executes; on green tests, the phase is marked done, any prior deferral markers are cleared, and the migration advances immediately to the next phase.
 - **ready: no** — manifest activity is bumped, a retry cooldown is started, and a future `wake_up_on` is recorded when needed; the tick moves on.

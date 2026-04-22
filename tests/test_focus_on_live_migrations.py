@@ -23,7 +23,7 @@ from conftest import make_run_loop_args
 
 
 _PHASE = PhaseSpec(
-    name="setup", file="phase-0-setup.md", done=False, ready_when="always",
+    name="setup", file="phase-0-setup.md", done=False, precondition="always",
 )
 
 
@@ -313,7 +313,7 @@ def test_focused_loop_advances_multiple_ready_phases_until_deferred(
         name="migrate",
         file="phase-1-migrate.md",
         done=False,
-        ready_when="setup done",
+        precondition="setup done",
     )
     manifest_path = _seed_manifest(
         live_dir,

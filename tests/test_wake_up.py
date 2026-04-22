@@ -13,7 +13,7 @@ from continuous_refactoring.migrations import (
 
 NOW = datetime(2026, 4, 14, 12, 0, 0, tzinfo=timezone.utc)
 
-_PHASE = PhaseSpec(name="setup", file="phase-0-setup.md", done=False, ready_when="always")
+_PHASE = PhaseSpec(name="setup", file="phase-0-setup.md", done=False, precondition="always")
 
 
 def _ago(**delta: float) -> datetime:

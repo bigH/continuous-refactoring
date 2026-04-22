@@ -119,6 +119,14 @@ class _MockAgent:
         )
 
 
+def _phase_doc(precondition: str, definition_of_done: str) -> str:
+    return (
+        f"## Precondition\n\n{precondition}\n\n"
+        f"## Definition of Done\n\n{definition_of_done}\n"
+    )
+
+
+
 def _base_responses() -> list[tuple[str, dict[str, str]]]:
     """First 4 stages (approaches → review with no findings)."""
     return [
@@ -131,8 +139,11 @@ def _base_responses() -> list[tuple[str, dict[str, str]]]:
             "Plan expanded.\n",
             {
                 "plan.md": "# Migration Plan\nPhased approach.",
-                "phase-0-setup.md": "Ready when: always\nSetup scaffolding.",
-                "phase-1-migrate.md": "Ready when: phase 0 complete\nCore migration.",
+                "phase-0-setup.md": _phase_doc("always", "Setup scaffolding is in place."),
+                "phase-1-migrate.md": _phase_doc(
+                    "phase 0 complete",
+                    "Core migration lands cleanly and validation passes.",
+                ),
             },
         ),
         ("Reviewed plan. no findings.\n", {}),
@@ -207,7 +218,7 @@ def test_initial_decisions(
         assert len(manifest.phases) == 2
         assert tuple(phase.name for phase in manifest.phases) == phase_names
         assert manifest.current_phase == phase_names[0]
-        assert manifest.phases[0].ready_when == "always"
+        assert manifest.phases[0].precondition == "always"
         assert (mig_root / "plan.md").exists()
         assert (mig_root / "approaches" / "incremental.md").exists()
         assert (mig_root / "phase-0-setup.md").exists()
@@ -233,7 +244,7 @@ def _revise_responses() -> list[tuple[str, dict[str, str]]]:
             "Expanded.\n",
             {
                 "plan.md": "# Plan v1",
-                "phase-0-prep.md": "Ready when: always\nPrep phase.",
+                "phase-0-prep.md": _phase_doc("always", "Prep phase is complete."),
             },
         ),
         ("1. Missing rollback step.\n2. Phase order unclear.\n", {}),
@@ -241,8 +252,11 @@ def _revise_responses() -> list[tuple[str, dict[str, str]]]:
             "Revised plan.\n",
             {
                 "plan.md": "# Plan v2 (revised)",
-                "phase-0-prep.md": "Ready when: always\nRevised prep.",
-                "phase-1-rollback.md": "Ready when: phase 0 done\nRollback added.",
+                "phase-0-prep.md": _phase_doc("always", "Revised prep is complete."),
+                "phase-1-rollback.md": _phase_doc(
+                    "phase 0 done",
+                    "Rollback path exists and validation passes.",
+                ),
             },
         ),
         ("Reviewed revised plan. no findings.\n", {}),
@@ -269,7 +283,7 @@ def test_review_findings_trigger_revise(
     assert manifest.current_phase == "prep"
     assert manifest.phases[0].name == "prep"
     assert manifest.phases[1].name == "rollback"
-    assert manifest.phases[1].ready_when == "phase 0 done"
+    assert manifest.phases[1].precondition == "phase 0 done"
 
     assert (mig_root / "plan.md").read_text(encoding="utf-8") == "# Plan v2 (revised)"
     assert mock.call_count == 7
@@ -334,21 +348,44 @@ def test_discover_phase_files_orders_by_numeric_phase_number(tmp_path: Path) -> 
     mig_root.mkdir(parents=True)
 
     (mig_root / "phase-10-final.md").write_text(
-        "Ready when: phase 10 complete\nFinal phase.",
+        _phase_doc("phase 10 complete", "Final phase complete."),
         encoding="utf-8",
     )
     (mig_root / "phase-2-middle.md").write_text(
-        "Ready when: phase 1 complete\nMiddle phase.",
+        _phase_doc("phase 1 complete", "Middle phase complete."),
         encoding="utf-8",
     )
     (mig_root / "phase-1-start.md").write_text(
-        "Ready when: always\nStart phase.",
+        _phase_doc("always", "Start phase complete."),
         encoding="utf-8",
     )
 
     phases = _discover_phase_files(mig_root)
 
     assert tuple(phase.name for phase in phases) == ("start", "middle", "final")
+    assert tuple(phase.precondition for phase in phases) == (
+        "always",
+        "phase 1 complete",
+        "phase 10 complete",
+    )
+
+
+def test_discover_phase_files_falls_back_when_precondition_is_missing(
+    tmp_path: Path,
+) -> None:
+    mig_root = tmp_path / "live" / "fallback"
+    mig_root.mkdir(parents=True)
+
+    (mig_root / "phase-1-legacy.md").write_text(
+        "## Ready When\n\nLegacy completion wording.\n",
+        encoding="utf-8",
+    )
+
+    phases = _discover_phase_files(mig_root)
+
+    assert len(phases) == 1
+    assert phases[0].precondition == "prerequisites in phase-1-legacy.md are met"
+
 
 
 def test_discover_phase_files_rejects_duplicate_phase_names(tmp_path: Path) -> None:
@@ -356,11 +393,11 @@ def test_discover_phase_files_rejects_duplicate_phase_names(tmp_path: Path) -> N
     mig_root.mkdir(parents=True)
 
     (mig_root / "phase-1-setup.md").write_text(
-        "Ready when: always\nFirst setup phase.",
+        _phase_doc("always", "First setup phase complete."),
         encoding="utf-8",
     )
     (mig_root / "phase-2-setup.md").write_text(
-        "Ready when: after setup\nDuplicate setup phase.",
+        _phase_doc("after setup", "Duplicate setup phase complete."),
         encoding="utf-8",
     )
 

@@ -51,7 +51,11 @@ glue — it stays until phase 4 revisits).
    - `error_failure_kind`: total over `str`; output is one of the known kinds.
 7. Do not add a re-export in `loop.py`. Tests and callers use the new FQN.
 
-## Ready When
+## Precondition
+
+Always. This is the first extraction phase and has no earlier-phase blockers.
+
+## Definition of Done
 
 - `src/continuous_refactoring/decisions.py` exists and contains every listed symbol.
 - `loop.py` no longer defines any of the moved symbols.

@@ -48,7 +48,11 @@ From `loop.py` to `failure_report.py`:
    - Example test for `persist_decision`: writes JSON record to artifacts dir
      with expected schema.
 
-## Ready When
+## Precondition
+
+`phase-1-decisions.md` is complete so `decisions.py` symbols are already at their final FQNs.
+
+## Definition of Done
 
 - `failure_report.py` exists and owns reason-doc + persistence logic.
 - `loop.py` no longer defines `_write_reason_for_failure`, `_persist_decision`,

@@ -25,7 +25,7 @@ def _random_phase(rng: random.Random, index: int) -> PhaseSpec:
         name=name,
         file=f"phase-{index}-{name}.md",
         done=rng.choice([True, False]),
-        ready_when="".join(rng.choices("abcdefghijklmnop ", k=rng.randint(5, 30))),
+        precondition="".join(rng.choices("abcdefghijklmnop ", k=rng.randint(5, 30))),
     )
 
 
@@ -80,7 +80,7 @@ def test_has_executable_phase_rejects_invalid_phase_names() -> None:
         status="ready",
         current_phase="missing",
         phases=(
-            PhaseSpec(name="setup", file="phase-0-setup.md", done=False, ready_when="always"),
+            PhaseSpec(name="setup", file="phase-0-setup.md", done=False, precondition="always"),
         ),
     )
     manifest_valid = MigrationManifest(
@@ -93,7 +93,7 @@ def test_has_executable_phase_rejects_invalid_phase_names() -> None:
         current_phase="setup",
         phases=(
             PhaseSpec(
-                name="setup", file="phase-0-setup.md", done=False, ready_when="always"
+                name="setup", file="phase-0-setup.md", done=False, precondition="always"
             ),
         ),
     )
@@ -117,7 +117,7 @@ def test_save_manifest_no_tmp_files(tmp_path: Path) -> None:
         status="planning",
         current_phase="setup",
         phases=(
-            PhaseSpec(name="setup", file="phase-0-setup.md", done=False, ready_when="always"),
+            PhaseSpec(name="setup", file="phase-0-setup.md", done=False, precondition="always"),
         ),
     )
     out_dir = tmp_path / "atomic"
@@ -266,6 +266,8 @@ def test_load_manifest_maps_legacy_integer_cursor_to_phase_name(
     loaded = load_manifest(path)
 
     assert loaded.current_phase == "migrate"
+    assert loaded.phases[0].precondition == "always"
+    assert loaded.phases[1].precondition == "setup complete"
 
 
 def test_load_manifest_rejects_duplicate_phase_names(tmp_path: Path) -> None:
@@ -278,8 +280,8 @@ def test_load_manifest_rejects_duplicate_phase_names(tmp_path: Path) -> None:
         "status": "ready",
         "current_phase": "setup",
         "phases": [
-            {"name": "setup", "file": "phase-1-setup.md", "done": False, "ready_when": "always"},
-            {"name": "setup", "file": "phase-2-setup.md", "done": False, "ready_when": "again"},
+            {"name": "setup", "file": "phase-1-setup.md", "done": False, "precondition": "always"},
+            {"name": "setup", "file": "phase-2-setup.md", "done": False, "precondition": "again"},
         ],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -304,7 +306,7 @@ def test_load_manifest_defaults_optional_fields(tmp_path: Path) -> None:
         "status": "planning",
         "current_phase": "init",
         "phases": [
-            {"name": "init", "file": "phase-0-init.md", "done": False, "ready_when": "always"},
+            {"name": "init", "file": "phase-0-init.md", "done": False, "precondition": "always"},
         ],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -350,7 +352,7 @@ def test_load_manifest_reads_cooldown_until(tmp_path: Path) -> None:
         "status": "ready",
         "current_phase": "setup",
         "phases": [
-            {"name": "setup", "file": "phase-0-setup.md", "done": False, "ready_when": "always"},
+            {"name": "setup", "file": "phase-0-setup.md", "done": False, "precondition": "always"},
         ],
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
@@ -373,7 +375,14 @@ def test_save_manifest_uses_indent_and_sorted_keys(tmp_path: Path) -> None:
         awaiting_human_review=False,
         status="ready",
         current_phase="",
-        phases=(),
+        phases=(
+            PhaseSpec(
+                name="setup",
+                file="phase-0-setup.md",
+                done=False,
+                precondition="always",
+            ),
+        ),
     )
     path = tmp_path / "fmt" / "manifest.json"
     save_manifest(manifest, path)
@@ -382,3 +391,5 @@ def test_save_manifest_uses_indent_and_sorted_keys(tmp_path: Path) -> None:
     parsed = json.loads(raw)
     expected = json.dumps(parsed, indent=2, sort_keys=True) + "\n"
     assert raw == expected
+    assert parsed["phases"][0]["precondition"] == "always"
+    assert "ready_when" not in parsed["phases"][0]

@@ -27,8 +27,8 @@ from conftest import (
     noop_tests,
 )
 
-_PHASE_0 = PhaseSpec(name="setup", file="phase-0-setup.md", done=False, ready_when="always")
-_PHASE_1 = PhaseSpec(name="migrate", file="phase-1-migrate.md", done=False, ready_when="phase 0 done")
+_PHASE_0 = PhaseSpec(name="setup", file="phase-0-setup.md", done=False, precondition="always")
+_PHASE_1 = PhaseSpec(name="migrate", file="phase-1-migrate.md", done=False, precondition="phase 0 done")
 
 
 def _utc_now() -> datetime:

@@ -10,25 +10,25 @@
       "done": true,
       "file": "phase-1-decisions.md",
       "name": "decisions",
-      "ready_when": "prerequisites in phase-1-decisions.md are met"
+      "precondition": "always"
     },
     {
       "done": false,
       "file": "phase-2-failure-report.md",
       "name": "failure-report",
-      "ready_when": "prerequisites in phase-2-failure-report.md are met"
+      "precondition": "phase-1-decisions.md is complete"
     },
     {
       "done": false,
       "file": "phase-3-routing-pipeline.md",
       "name": "routing-pipeline",
-      "ready_when": "prerequisites in phase-3-routing-pipeline.md are met"
+      "precondition": "phase-1-decisions.md and phase-2-failure-report.md are complete"
     },
     {
       "done": false,
       "file": "phase-4-trim-loop.md",
       "name": "trim-loop",
-      "ready_when": "prerequisites in phase-4-trim-loop.md are met"
+      "precondition": "phase-3-routing-pipeline.md is complete"
     }
   ],
   "status": "ready",

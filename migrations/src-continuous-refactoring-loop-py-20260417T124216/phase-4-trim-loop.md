@@ -45,7 +45,11 @@ No new modules. No behavior change. Pure tidy:
    one screen's worth of scanning without jumping into out-of-order helpers.
 4. If `_retry_context` moved, add an example test in `tests/test_decisions.py`.
 
-## Ready When
+## Precondition
+
+`phase-3-routing-pipeline.md` is complete so `loop.py` is already down to orchestration-only responsibilities.
+
+## Definition of Done
 
 - `loop.py` is 400–550 lines.
 - Top of `loop.py` shows: imports → arg helpers → `run_baseline_checks` →

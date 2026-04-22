@@ -58,7 +58,7 @@ def _write_live_manifest(
                 name="cleanup",
                 file="phase-0-cleanup.md",
                 done=False,
-                ready_when="always",
+                precondition="always",
             ),
         ),
     )

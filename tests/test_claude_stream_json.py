@@ -309,7 +309,7 @@ def test_roundtrip_review_has_findings_no_findings_case() -> None:
 
 def test_roundtrip_review_has_findings_has_findings_case() -> None:
     stream = _synthetic_grammar_stream(
-        "- finding: phase 2 ready_when is ambiguous\n"
+        "- finding: phase 2 precondition is ambiguous\n"
         "- finding: missing rollback step in phase 3",
     )
 

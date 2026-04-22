@@ -68,7 +68,11 @@ From `loop.py` to `routing_pipeline.py`:
    don't move).
 5. No re-exports in `loop.py`. Taste: no shims in non-shipped code.
 
-## Ready When
+## Precondition
+
+`phase-1-decisions.md` and `phase-2-failure-report.md` are complete so routing glue can import their final module surfaces.
+
+## Definition of Done
 
 - `routing_pipeline.py` exists with the listed public surface.
 - `loop.py` no longer defines any moved symbol.

@@ -540,11 +540,14 @@ You are a planning agent expanding the chosen approach into a detailed migration
 Read the chosen approach from approaches/<idea>.md and produce:
 1. plan.md \u2014 the full migration plan with numbered phases, dependencies, and
    validation strategy.
-2. phase-<n>-<name>.md for each phase \u2014 detailed instructions, scope, ready_when
-   conditions, and validation steps.
+2. phase-<n>-<name>.md for each phase \u2014 detailed instructions, scope,
+   `## Precondition`, `## Definition of Done`, and validation steps.
 
 Each phase must be independently verifiable. Order phases so earlier ones reduce
 risk for later ones. Every phase must leave the repository shippable.
+The precondition must describe what must already be true before the phase may
+start. The Definition of Done must describe what must be true for the phase to
+count as complete. Do not conflate them.
 
 Refactoring taste is injected by the caller. Respect it when scoping phases
 and defining quality bars.\
@@ -558,7 +561,9 @@ approaches/<idea>.md for context. Check:
 - Each phase is independently verifiable and leaves the repo shippable.
 - Phase ordering minimizes risk and respects dependencies.
 - No phase requires product or architecture judgment beyond the taste.
-- Ready-when conditions are concrete and mechanically checkable.
+- Each phase has a concrete precondition for start gating.
+- Each phase has a concrete Definition of Done for completion assessment.
+- Preconditions and Definitions of Done are not conflated.
 - The plan does not modify source files outside the migration scope.
 
 List findings as numbered items. If no findings, state "no findings."
@@ -589,7 +594,7 @@ PHASE_READY_CHECK_PROMPT = """\
 You are checking whether a migration phase is ready to execute.
 
 Assess:
-- Is the ready_when condition for this phase currently met?
+- Is the precondition for this phase currently met?
 - Are prerequisites from earlier phases actually complete?
 - Is the working tree in a state where this phase can safely execute?
 
@@ -606,13 +611,15 @@ PHASE_EXECUTION_PROMPT = """\
 You are executing a single phase of a refactoring migration.
 
 Execute the work described in the phase file. Follow the plan exactly.
+Treat the phase file's `## Definition of Done` as the completion contract.
 All changes must keep the project in a state where all tests pass.
 Do not modify files outside the scope defined in the phase plan.
 Run the full configured validation command before declaring success.
 Narrow checks may be useful during iteration, but they are not sufficient on
 their own.
 Do not stop after making edits if the full validation command is red.
-A phase is done only when the complete validation command is green.
+A phase is done only when the Definition of Done is satisfied and the complete
+validation command is green.
 
 Refactoring taste is injected by the caller. Respect it in all code changes.
 
@@ -635,7 +642,7 @@ def _format_manifest_summary(manifest: MigrationManifest) -> str:
         (
             f"  - {phase_file_reference(phase)}"
             f" ({phase.name}, {'done' if phase.done else 'pending'})"
-            f" \u2014 {phase.ready_when}"
+            f" \u2014 precondition: {phase.precondition}"
         )
         for phase in manifest.phases
     )
@@ -703,7 +710,7 @@ def compose_phase_ready_prompt(
 ) -> str:
     return _join_sections(
         PHASE_READY_CHECK_PROMPT,
-        f"## Phase\nName: {phase.name}\nFile: {phase.file}\nReady when: {phase.ready_when}",
+        f"## Phase\nName: {phase.name}\nFile: {phase.file}\nPrecondition: {phase.precondition}",
         f"## Manifest\n{_format_manifest_summary(manifest)}",
     )
 
@@ -718,7 +725,7 @@ def compose_phase_execution_prompt(
     sanitized_retry_context = _strip_or_none(retry_context)
     sections: list[str] = [
         PHASE_EXECUTION_PROMPT,
-        f"## Phase\nName: {phase.name}\nFile: {phase.file}",
+        f"## Phase\nName: {phase.name}\nFile: {phase.file}\nPrecondition: {phase.precondition}",
         f"## Manifest\n{_format_manifest_summary(manifest)}",
         f"## Taste\n{taste}",
         f"## Validation\nRun: `{validation_command}`",

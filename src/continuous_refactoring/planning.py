@@ -29,8 +29,8 @@ _FINAL_DECISION_RE = re.compile(
     re.IGNORECASE,
 )
 
-_READY_WHEN_RE = re.compile(
-    r"^(?:ready[_ ]?when):\s*(.+)$", re.IGNORECASE | re.MULTILINE,
+_PRECONDITION_LINE_RE = re.compile(
+    r"^precondition:\s*(.+)$", re.IGNORECASE | re.MULTILINE,
 )
 
 
@@ -76,6 +76,29 @@ def _review_has_findings(stdout: str) -> bool:
 # ---------------------------------------------------------------------------
 
 
+def _phase_section_text(content: str, heading: str) -> str | None:
+    match = re.search(
+        rf"^##\s+{re.escape(heading)}\s*$\n(?P<body>.*?)(?=^##\s+|\Z)",
+        content,
+        re.IGNORECASE | re.MULTILINE | re.DOTALL,
+    )
+    if not match:
+        return None
+    body = match.group("body")
+    normalized = " ".join(line.strip() for line in body.splitlines() if line.strip())
+    return normalized or None
+
+
+def _phase_precondition(content: str, phase_file: str) -> str:
+    section = _phase_section_text(content, "Precondition")
+    if section is not None:
+        return section
+    match = _PRECONDITION_LINE_RE.search(content)
+    if match:
+        return match.group(1).strip()
+    return f"prerequisites in {phase_file} are met"
+
+
 def _discover_phase_files(mig_root: Path) -> tuple[PhaseSpec, ...]:
     phase_files: list[tuple[int, Path]] = []
     for pf in mig_root.glob("phase-*-*.md"):
@@ -96,18 +119,12 @@ def _discover_phase_files(mig_root: Path) -> tuple[PhaseSpec, ...]:
             )
         seen_names.add(name)
         content = pf.read_text(encoding="utf-8")
-        ready_match = _READY_WHEN_RE.search(content)
-        ready_when = (
-            ready_match.group(1).strip()
-            if ready_match
-            else f"prerequisites in {pf.name} are met"
-        )
         phases.append(
             PhaseSpec(
                 name=name,
                 file=pf.name,
                 done=False,
-                ready_when=ready_when,
+                precondition=_phase_precondition(content, pf.name),
             )
         )
     return tuple(phases)

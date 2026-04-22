@@ -40,7 +40,7 @@ class PhaseSpec:
     name: str
     file: str
     done: bool
-    ready_when: str
+    precondition: str
 
 
 @dataclass(frozen=True)
@@ -173,6 +173,17 @@ def _require_bool(value: object, *, field: str) -> bool:
     return value
 
 
+def _require_phase_precondition(phase: dict[str, object], *, prefix: str) -> str:
+    if "precondition" in phase:
+        return _require_str(phase.get("precondition"), field=f"{prefix}.precondition")
+    if "ready_when" in phase:
+        return _require_str(phase.get("ready_when"), field=f"{prefix}.ready_when")
+    raise ContinuousRefactorError(
+        f"Migration field {prefix!r} must include 'precondition' "
+        "(or legacy 'ready_when')"
+    )
+
+
 def _require_phase(raw_phase: object, *, index: int) -> PhaseSpec:
     phase = _require_mapping(raw_phase, field=f"phases[{index}]")
     prefix = f"phases[{index}]"
@@ -180,7 +191,7 @@ def _require_phase(raw_phase: object, *, index: int) -> PhaseSpec:
         name=_require_str(phase.get("name"), field=f"{prefix}.name"),
         file=_require_str(phase.get("file"), field=f"{prefix}.file"),
         done=_require_bool(phase.get("done"), field=f"{prefix}.done"),
-        ready_when=_require_str(phase.get("ready_when"), field=f"{prefix}.ready_when"),
+        precondition=_require_phase_precondition(phase, prefix=prefix),
     )
 
 

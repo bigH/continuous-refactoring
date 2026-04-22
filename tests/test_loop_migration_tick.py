@@ -27,7 +27,7 @@ from continuous_refactoring.migrations import (
     save_manifest,
 )
 from continuous_refactoring.phases import ExecutePhaseOutcome
-from continuous_refactoring.routing_pipeline import (
+from continuous_refactoring.migration_tick import (
     enumerate_eligible_manifests,
     try_migration_tick,
 )
@@ -162,7 +162,7 @@ def _patch_check_ready(
         calls.append(getattr(phase, "name", ""))
         return (verdict, reason or verdict)
 
-    monkeypatch.setattr("continuous_refactoring.routing_pipeline.check_phase_ready", fake)
+    monkeypatch.setattr("continuous_refactoring.migration_tick.check_phase_ready", fake)
     return calls
 
 
@@ -204,7 +204,7 @@ def _patch_execute_phase(
         save_manifest(updated, mp)
         return ExecutePhaseOutcome(status=status, reason=reason)
 
-    monkeypatch.setattr("continuous_refactoring.routing_pipeline.execute_phase", fake)
+    monkeypatch.setattr("continuous_refactoring.migration_tick.execute_phase", fake)
     return calls
 
 
@@ -212,7 +212,7 @@ def _patch_execute_phase_trap(monkeypatch: pytest.MonkeyPatch) -> None:
     def trap(*_a: object, **_k: object) -> object:
         raise AssertionError("execute_phase must not be called")
 
-    monkeypatch.setattr("continuous_refactoring.routing_pipeline.execute_phase", trap)
+    monkeypatch.setattr("continuous_refactoring.migration_tick.execute_phase", trap)
 
 
 def _patch_one_shot(monkeypatch: pytest.MonkeyPatch) -> list[str]:
@@ -330,7 +330,7 @@ def test_ready_check_error_abandons_with_sanitized_decision_record(
         raise ContinuousRefactorError(noisy_error)
 
     monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.check_phase_ready",
+        "continuous_refactoring.migration_tick.check_phase_ready",
         fail_ready,
     )
     _patch_execute_phase_trap(monkeypatch)
@@ -396,7 +396,7 @@ def test_ready_phase_execution_receives_runtime_settings_and_commits_phase_file(
 
     _patch_check_ready(monkeypatch, "yes")
     monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.execute_phase",
+        "continuous_refactoring.migration_tick.execute_phase",
         fake_execute,
     )
 
@@ -456,7 +456,7 @@ def test_failed_ready_phase_abandons_and_preserves_retry_used(
 
     _patch_check_ready(monkeypatch, "yes")
     monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.execute_phase",
+        "continuous_refactoring.migration_tick.execute_phase",
         fake_execute,
     )
 
@@ -631,7 +631,7 @@ def test_phase_ready_check_receives_runtime_taste(
     _patch_live_dir(monkeypatch, live_dir)
     _patch_classifier_cohesive(monkeypatch)
     monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.check_phase_ready",
+        "continuous_refactoring.migration_tick.check_phase_ready",
         fake_check_ready,
     )
     _patch_execute_phase_trap(monkeypatch)

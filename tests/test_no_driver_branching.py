@@ -155,7 +155,7 @@ def test_focused_loop_migration_tick_makes_no_branching_calls(
     )
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
     monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.check_phase_ready",
+        "continuous_refactoring.migration_tick.check_phase_ready",
         lambda *_args, **_kwargs: ("yes", "yes"),
     )
 
@@ -187,7 +187,7 @@ def test_focused_loop_migration_tick_makes_no_branching_calls(
         return ExecutePhaseOutcome(status="done", reason="ok")
 
     monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.execute_phase", fake_execute_phase,
+        "continuous_refactoring.migration_tick.execute_phase", fake_execute_phase,
     )
 
     captured = _install_argv_spy(monkeypatch)

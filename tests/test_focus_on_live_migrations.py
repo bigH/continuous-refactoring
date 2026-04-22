@@ -362,8 +362,8 @@ def test_focused_loop_advances_multiple_ready_phases_until_deferred(
 
         return ExecutePhaseOutcome(status="done", reason="ok")
 
-    monkeypatch.setattr("continuous_refactoring.routing_pipeline.check_phase_ready", fake_ready)
-    monkeypatch.setattr("continuous_refactoring.routing_pipeline.execute_phase", fake_execute)
+    monkeypatch.setattr("continuous_refactoring.migration_tick.check_phase_ready", fake_ready)
+    monkeypatch.setattr("continuous_refactoring.migration_tick.execute_phase", fake_execute)
     monkeypatch.setattr(
         "continuous_refactoring.loop._finalize_commit",
         lambda *_args, **_kwargs: None,

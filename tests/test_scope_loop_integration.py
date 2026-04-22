@@ -37,7 +37,7 @@ def routing_env(
         test_command="true",
     )
     monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.try_migration_tick",
+        "continuous_refactoring.migration_tick.try_migration_tick",
         lambda *_args, **_kwargs: ("not-routed", None),
     )
     return repo_root, artifacts

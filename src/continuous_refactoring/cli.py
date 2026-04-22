@@ -84,12 +84,7 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Continuous refactoring CLI for AI coding agents.",
-    )
-    subparsers = parser.add_subparsers(dest="command")
-
+def _add_init_parser(subparsers: argparse._SubParsersAction) -> None:
     init_parser = subparsers.add_parser(
         "init",
         help="Register a project for continuous refactoring.",
@@ -107,6 +102,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for live migration artifacts (repo-relative path).",
     )
 
+
+def _add_taste_parser(subparsers: argparse._SubParsersAction) -> None:
     taste_parser = subparsers.add_parser(
         "taste",
         help="Manage refactoring taste files.",
@@ -156,12 +153,16 @@ def build_parser() -> argparse.ArgumentParser:
         help="Allow --interview to overwrite a taste file with custom content (backup at .bak).",
     )
 
+
+def _add_run_once_parser(subparsers: argparse._SubParsersAction) -> None:
     run_once_parser = subparsers.add_parser(
         "run-once",
         help="Single refactoring attempt (one agent call, no fix retry).",
     )
     _add_common_args(run_once_parser)
 
+
+def _add_run_parser(subparsers: argparse._SubParsersAction) -> None:
     run_parser = subparsers.add_parser(
         "run",
         help="Continuous refactoring loop with fix-prompt retry.",
@@ -205,11 +206,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="Seconds to sleep between completed targets.",
     )
 
-    subparsers.add_parser(
-        "upgrade",
-        help="Verify and upgrade global configuration.",
-    )
 
+def _add_review_parser(subparsers: argparse._SubParsersAction) -> None:
     review_parser = subparsers.add_parser(
         "review",
         help="Review migrations awaiting human review.",
@@ -227,6 +225,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     perform_parser.add_argument("--model", required=True, help="Model name.")
     perform_parser.add_argument("--effort", required=True, help="Effort level.")
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        description="Continuous refactoring CLI for AI coding agents.",
+    )
+    subparsers = parser.add_subparsers(dest="command")
+
+    _add_init_parser(subparsers)
+    _add_taste_parser(subparsers)
+    _add_run_once_parser(subparsers)
+    _add_run_parser(subparsers)
+    subparsers.add_parser(
+        "upgrade",
+        help="Verify and upgrade global configuration.",
+    )
+    _add_review_parser(subparsers)
 
     return parser
 

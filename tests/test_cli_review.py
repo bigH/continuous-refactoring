@@ -10,6 +10,7 @@ from continuous_refactoring.cli import (
     _handle_review,
     _handle_review_list,
     _handle_review_perform,
+    build_parser,
 )
 from continuous_refactoring.config import register_project, set_live_migrations_dir
 from continuous_refactoring.migrations import (
@@ -28,6 +29,38 @@ _PHASES = (
         precondition="setup complete",
     ),
 )
+
+
+def test_review_parser_accepts_list_and_perform_subcommands() -> None:
+    parser = build_parser()
+
+    review_args = parser.parse_args(["review"])
+    assert review_args.command == "review"
+    assert review_args.review_command is None
+
+    list_args = parser.parse_args(["review", "list"])
+    assert list_args.command == "review"
+    assert list_args.review_command == "list"
+
+    perform_args = parser.parse_args(
+        [
+            "review",
+            "perform",
+            "my-mig",
+            "--with",
+            "codex",
+            "--model",
+            "test-model",
+            "--effort",
+            "low",
+        ],
+    )
+    assert perform_args.command == "review"
+    assert perform_args.review_command == "perform"
+    assert perform_args.migration == "my-mig"
+    assert perform_args.agent == "codex"
+    assert perform_args.model == "test-model"
+    assert perform_args.effort == "low"
 
 
 def _init_repo(path: Path) -> None:

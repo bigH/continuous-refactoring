@@ -101,6 +101,21 @@ def classify_target(
             f"Classifier agent failed with exit code {result.returncode}"
         )
 
+    try:
+        decision = _parse_decision(result.stdout)
+    except ContinuousRefactorError as error:
+        artifacts.log_call_finished(
+            attempt=attempt,
+            retry=retry,
+            target=target.description,
+            call_role=call_role,
+            status="failed",
+            level="WARN",
+            returncode=result.returncode,
+            summary=str(error),
+        )
+        raise
+
     artifacts.log_call_finished(
         attempt=attempt,
         retry=retry,
@@ -109,4 +124,4 @@ def classify_target(
         status="finished",
         returncode=result.returncode,
     )
-    return _parse_decision(result.stdout)
+    return decision

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -35,6 +36,11 @@ def _make_artifacts(tmp_path: Path) -> RunArtifacts:
     )
 
 
+def _prepare_tmpdir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
+    (tmp_path / "tmpdir").mkdir(exist_ok=True)
+
+
 def _fake_capture(
     stdout: str, *, returncode: int = 0, tmp_path: Path | None = None,
 ) -> CommandCapture:
@@ -55,10 +61,10 @@ def _run_with_fake_agent(
     stdout: str,
     *,
     returncode: int = 0,
+    artifacts: RunArtifacts | None = None,
 ) -> str:
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    (tmp_path / "tmpdir").mkdir()
-    artifacts = _make_artifacts(tmp_path)
+    _prepare_tmpdir(tmp_path, monkeypatch)
+    artifacts = artifacts or _make_artifacts(tmp_path)
 
     def fake_agent(**kwargs: object) -> CommandCapture:
         stdout_path = Path(str(kwargs["stdout_path"]))
@@ -80,6 +86,15 @@ def _run_with_fake_agent(
         effort="low",
         timeout=None,
     )
+
+
+def _call_finished_events(artifacts: RunArtifacts) -> list[dict[str, object]]:
+    events: list[dict[str, object]] = []
+    for line in artifacts.events_path.read_text(encoding="utf-8").splitlines():
+        event = json.loads(line)
+        if event.get("event") == "call_finished":
+            events.append(event)
+    return events
 
 
 # ---------------------------------------------------------------------------
@@ -155,6 +170,39 @@ def test_classify_malformed_output_raises(
 ) -> None:
     with pytest.raises(ContinuousRefactorError, match="unrecognised output"):
         _run_with_fake_agent(tmp_path, monkeypatch, "I don't know what to do\n")
+
+
+def test_classify_malformed_output_logs_failed_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_tmpdir(tmp_path, monkeypatch)
+    artifacts = _make_artifacts(tmp_path)
+
+    with pytest.raises(ContinuousRefactorError, match="unrecognised output"):
+        _run_with_fake_agent(
+            tmp_path,
+            monkeypatch,
+            "I don't know what to do\n",
+            artifacts=artifacts,
+        )
+
+    event = _call_finished_events(artifacts)[-1]
+    timestamp = event.pop("timestamp")
+
+    assert isinstance(timestamp, str)
+    assert event == {
+        "attempt": 1,
+        "call_role": "classify",
+        "call_status": "failed",
+        "event": "call_finished",
+        "level": "WARN",
+        "message": "call failed: classify \u2014 Clean up auth module",
+        "phase_reached": "classify",
+        "retry": 1,
+        "returncode": 0,
+        "summary": "Classifier produced unrecognised output: \"I don't know what to do\"",
+        "target": "Clean up auth module",
+    }
 
 
 def test_classify_empty_output_raises(

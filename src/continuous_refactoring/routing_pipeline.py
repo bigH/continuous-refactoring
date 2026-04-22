@@ -10,7 +10,6 @@ from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from continuous_refactoring.artifacts import RunArtifacts
-    from continuous_refactoring.migrations import MigrationManifest
     from continuous_refactoring.migration_tick import _FinalizeCommit
 
 __all__ = [
@@ -29,7 +28,7 @@ from continuous_refactoring.decisions import (
     sanitize_text,
 )
 from continuous_refactoring.git import get_head_sha
-import continuous_refactoring.migration_tick as migration_tick
+from continuous_refactoring.migration_tick import try_migration_tick as _try_migration_tick
 from continuous_refactoring.planning import run_planning
 from continuous_refactoring.routing import classify_target
 from continuous_refactoring.scope_expansion import (
@@ -56,45 +55,6 @@ class RouteResult:
     target: Target
     planning_context: str = ""
     decision_record: DecisionRecord | None = None
-
-
-def enumerate_eligible_manifests(
-    live_dir: Path, now: datetime,
-) -> list[tuple[MigrationManifest, Path]]:
-    return migration_tick.enumerate_eligible_manifests(live_dir, now)
-
-
-def try_migration_tick(
-    live_dir: Path,
-    taste: str,
-    repo_root: Path,
-    artifacts: RunArtifacts,
-    *,
-    agent: str,
-    model: str,
-    effort: str,
-    timeout: int | None,
-    commit_message_prefix: str,
-    validation_command: str,
-    max_attempts: int | None,
-    attempt: int,
-    finalize_commit: _FinalizeCommit,
-) -> tuple[RouteOutcome, DecisionRecord | None]:
-    return migration_tick.try_migration_tick(
-        live_dir,
-        taste,
-        repo_root,
-        artifacts,
-        agent=agent,
-        model=model,
-        effort=effort,
-        timeout=timeout,
-        commit_message_prefix=commit_message_prefix,
-        validation_command=validation_command,
-        max_attempts=max_attempts,
-        attempt=attempt,
-        finalize_commit=finalize_commit,
-    )
 
 
 def _scope_bypass_context(target: Target, reason: str) -> str:
@@ -180,7 +140,7 @@ def route_and_run(
     if live_dir is None:
         return RouteResult(outcome="not-routed", target=target)
 
-    migration_result, migration_record = migration_tick.try_migration_tick(
+    migration_result, migration_record = _try_migration_tick(
         live_dir, taste, repo_root, artifacts,
         agent=agent, model=model, effort=effort,
         timeout=timeout, commit_message_prefix=commit_message_prefix,

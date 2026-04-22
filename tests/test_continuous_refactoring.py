@@ -717,3 +717,34 @@ def test_default_artifacts_root_ignores_blank_tmpdir(
     monkeypatch.setattr(artifacts.tempfile, "gettempdir", lambda: str(tmp_path))
 
     assert artifacts.default_artifacts_root() == tmp_path
+
+
+def test_run_summary_write_preserves_previous_content_on_replace_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = artifacts.RunArtifacts(
+        root=tmp_path,
+        run_id="run-1",
+        repo_root=tmp_path,
+        agent="codex",
+        model="fake-model",
+        effort="medium",
+        test_command="true",
+        events_path=tmp_path / "events.jsonl",
+        summary_path=tmp_path / "summary.json",
+        log_path=tmp_path / "run.log",
+        started_at="2026-04-15T12:34:56.123+00:00",
+    )
+    run.summary_path.write_text("previous summary\n", encoding="utf-8")
+
+    def fail_replace(_src: str, _dst: str) -> None:
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(artifacts.os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        run.write_summary()
+
+    assert run.summary_path.read_text(encoding="utf-8") == "previous summary\n"
+    assert list(tmp_path.glob("*.tmp")) == []

@@ -282,9 +282,9 @@ class RunArtifacts:
             "counts": self.counts,
             "attempts": [asdict(self.attempts[key]) for key in sorted(self.attempts)],
         }
-        self.summary_path.write_text(
+        _write_text_atomic(
+            self.summary_path,
             json.dumps(summary, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
         )
 
 
@@ -298,6 +298,22 @@ def _now() -> datetime:
 
 def default_artifacts_root() -> Path:
     return Path(os.environ.get("TMPDIR") or tempfile.gettempdir())
+
+
+def _write_text_atomic(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False
+        ) as tmp:
+            tmp_path = Path(tmp.name)
+            tmp.write(content)
+        os.replace(tmp_path, path)
+    except Exception:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        raise
 
 
 def create_run_artifacts(

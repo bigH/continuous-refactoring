@@ -13,8 +13,15 @@ from pathlib import Path
 import pytest
 
 import continuous_refactoring
+import continuous_refactoring.migration_manifest_codec as migration_manifest_codec
 import continuous_refactoring.artifacts as artifacts
 from continuous_refactoring.artifacts import ContinuousRefactorError, create_run_artifacts
+from continuous_refactoring.migrations import (
+    MigrationManifest,
+    PhaseSpec,
+    load_manifest,
+    save_manifest,
+)
 from continuous_refactoring.targeting import Target
 
 
@@ -99,6 +106,20 @@ def test_package_exports_are_stable() -> None:
         "cli_main",
     ):
         assert hasattr(continuous_refactoring, name)
+
+
+def test_migration_manifest_codec_stays_internal() -> None:
+    assert MigrationManifest.__name__ == "MigrationManifest"
+    assert PhaseSpec.__name__ == "PhaseSpec"
+    assert callable(load_manifest)
+    assert callable(save_manifest)
+    assert callable(migration_manifest_codec.decode_manifest_payload)
+    assert callable(migration_manifest_codec.encode_manifest_payload)
+    assert not hasattr(continuous_refactoring, "decode_manifest_payload")
+    assert not hasattr(continuous_refactoring, "encode_manifest_payload")
+    assert migration_manifest_codec.__name__ not in {
+        module.__name__ for module in continuous_refactoring._SUBMODULES
+    }
 
 
 def test_package_init_follows_source_import_conventions() -> None:

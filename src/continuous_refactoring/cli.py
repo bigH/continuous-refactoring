@@ -243,17 +243,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def _validate_targeting(args: argparse.Namespace) -> None:
-    has_targeting = args.targets or args.extensions or args.globs or args.paths
-    if not has_targeting and not args.scope_instruction:
-        print(
-            "Error: --scope-instruction required when no "
-            "--targets/--extensions/--globs/--paths",
-            file=sys.stderr,
-        )
-        raise SystemExit(2)
-
-
 def _handle_init(args: argparse.Namespace) -> None:
     from continuous_refactoring.config import (
         ensure_taste_file,
@@ -547,26 +536,18 @@ def _handle_upgrade(args: argparse.Namespace) -> None:
             print(_GLOBAL_TASTE_WARNING, file=sys.stderr)
 
 
-def _handle_run_once(args: argparse.Namespace) -> None:
-    _validate_targeting(args)
-    _run_with_loop_errors(run_once, args)
-
-
-def _handle_run(args: argparse.Namespace) -> None:
-    if getattr(args, "focus_on_live_migrations", False):
-        _run_with_loop_errors(run_migrations_focused_loop, args)
-        return
-    _validate_targeting(args)
-    if args.max_refactors is None and not args.targets:
+def _require_targeting_or_scope(args: argparse.Namespace) -> None:
+    has_targeting = args.targets or args.extensions or args.globs or args.paths
+    if not has_targeting and not args.scope_instruction:
         print(
-            "Error: --max-refactors required when no --targets",
+            "Error: --scope-instruction required when no "
+            "--targets/--extensions/--globs/--paths",
             file=sys.stderr,
         )
         raise SystemExit(2)
-    _run_with_loop_errors(run_loop, args)
 
 
-def _run_with_loop_errors(
+def _exit_with_loop_result(
     command: Callable[[argparse.Namespace], int],
     args: argparse.Namespace,
 ) -> None:
@@ -575,6 +556,25 @@ def _run_with_loop_errors(
     except ContinuousRefactorError as error:
         print(error, file=sys.stderr)
         raise SystemExit(1) from error
+
+
+def _handle_run_once(args: argparse.Namespace) -> None:
+    _require_targeting_or_scope(args)
+    _exit_with_loop_result(run_once, args)
+
+
+def _handle_run(args: argparse.Namespace) -> None:
+    if getattr(args, "focus_on_live_migrations", False):
+        _exit_with_loop_result(run_migrations_focused_loop, args)
+        return
+    _require_targeting_or_scope(args)
+    if args.max_refactors is None and not args.targets:
+        print(
+            "Error: --max-refactors required when no --targets",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    _exit_with_loop_result(run_loop, args)
 
 
 def _maybe_warn_stale_taste() -> None:

@@ -708,6 +708,133 @@ def test_cli_does_not_cap_max_refactors(
     assert calls[0].max_refactors == 20
 
 
+def test_cli_run_validates_targeting_before_max_refactors(
+    run_loop_env: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    args = make_run_loop_args(
+        run_loop_env,
+        scope_instruction=None,
+        max_refactors=None,
+    )
+
+    from continuous_refactoring.cli import _handle_run
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_run(args)
+    assert exc_info.value.code == 2
+    assert "--scope-instruction required" in capsys.readouterr().err
+
+
+def test_cli_run_requires_max_refactors_for_scope_only_run(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    args = make_run_loop_args(
+        run_loop_env,
+        scope_instruction="clean up",
+        max_refactors=None,
+    )
+    calls: list[argparse.Namespace] = []
+
+    def unexpected_run_loop(passed: argparse.Namespace) -> int:
+        calls.append(passed)
+        return 0
+
+    monkeypatch.setattr("continuous_refactoring.cli.run_loop", unexpected_run_loop)
+
+    from continuous_refactoring.cli import _handle_run
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_run(args)
+    assert exc_info.value.code == 2
+    assert "--max-refactors required when no --targets" in capsys.readouterr().err
+    assert calls == []
+
+
+def test_cli_run_allows_targets_without_max_refactors(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    targets_file = tmp_path / "targets.jsonl"
+    targets_file.write_text(
+        json.dumps({"description": "target", "files": ["file.py"]}),
+        encoding="utf-8",
+    )
+    args = make_run_loop_args(
+        run_loop_env,
+        targets=targets_file,
+        scope_instruction=None,
+        max_refactors=None,
+    )
+    calls: list[argparse.Namespace] = []
+
+    def fake_run_loop(passed: argparse.Namespace) -> int:
+        calls.append(passed)
+        return 0
+
+    monkeypatch.setattr("continuous_refactoring.cli.run_loop", fake_run_loop)
+
+    from continuous_refactoring.cli import _handle_run
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_run(args)
+    assert exc_info.value.code == 0
+    assert calls == [args]
+
+
+def test_cli_run_once_validates_targeting_before_dispatch(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    args = make_run_loop_args(
+        run_loop_env,
+        scope_instruction=None,
+    )
+
+    def unexpected_run_once(_: argparse.Namespace) -> int:
+        raise AssertionError("run_once should not be called")
+
+    monkeypatch.setattr("continuous_refactoring.cli.run_once", unexpected_run_once)
+
+    from continuous_refactoring.cli import _handle_run_once
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_run_once(args)
+    assert exc_info.value.code == 2
+    assert "--scope-instruction required" in capsys.readouterr().err
+
+
+def test_cli_loop_errors_exit_one_with_cause(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    args = make_run_loop_args(
+        run_loop_env,
+        extensions=".py",
+        scope_instruction=None,
+        max_refactors=1,
+    )
+    error = ContinuousRefactorError("loop broke")
+
+    def broken_run_loop(_: argparse.Namespace) -> int:
+        raise error
+
+    monkeypatch.setattr("continuous_refactoring.cli.run_loop", broken_run_loop)
+
+    from continuous_refactoring.cli import _handle_run
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_run(args)
+    assert exc_info.value.code == 1
+    assert exc_info.value.__cause__ is error
+    assert capsys.readouterr().err == "loop broke\n"
+
+
 def test_run_random_fallback_targeting(
     run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -784,10 +911,10 @@ def test_cli_errors_when_no_targets_and_no_scope_instruction(
         repo_root=repo_root,
     )
 
-    from continuous_refactoring.cli import _validate_targeting
+    from continuous_refactoring.cli import _require_targeting_or_scope
 
     with pytest.raises(SystemExit) as exc_info:
-        _validate_targeting(args)
+        _require_targeting_or_scope(args)
     assert exc_info.value.code == 2
 
 

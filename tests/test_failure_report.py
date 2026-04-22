@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
+import continuous_refactoring.failure_report as failure_report
 from continuous_refactoring.artifacts import RunArtifacts
 from continuous_refactoring.config import register_project
 from continuous_refactoring.decisions import DecisionRecord
@@ -142,6 +145,47 @@ def test_write_replaces_dots_in_call_role_snapshot_name(
     assert snapshot_path.name == (
         "20260421T120000-000000-attempt-001-retry-01-planner-review.md"
     )
+
+
+def test_write_preserves_existing_snapshot_on_replace_failure(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    artifacts = _artifacts(tmp_path / "artifacts")
+    record = _record()
+
+    snapshot_path = write(
+        repo_root,
+        artifacts,
+        target=record.target,
+        attempt=1,
+        retry=1,
+        validation_command="uv run pytest",
+        record=record,
+    )
+    snapshot_path.write_text("previous snapshot\n", encoding="utf-8")
+
+    def fail_replace(_src: object, _dst: object) -> None:
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(failure_report.os, "replace", fail_replace)
+
+    with pytest.raises(OSError, match="replace failed"):
+        write(
+            repo_root,
+            artifacts,
+            target=record.target,
+            attempt=1,
+            retry=1,
+            validation_command="uv run pytest",
+            record=record,
+        )
+
+    assert snapshot_path.read_text(encoding="utf-8") == "previous snapshot\n"
+    assert list(snapshot_path.parent.glob("*.tmp")) == []
 
 
 def test_persist_decision_records_commit_without_failure_snapshot(tmp_path: Path) -> None:

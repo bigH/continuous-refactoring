@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 from dataclasses import replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from continuous_refactoring.config import failure_snapshots_dir, register_project
+from continuous_refactoring.config import register_project
 from continuous_refactoring.decisions import DecisionRecord
 
 if TYPE_CHECKING:
@@ -70,6 +72,26 @@ def _yaml_lines(fields: dict[str, object]) -> list[str]:
     return [f"{key}: {_yaml_scalar(value)}" for key, value in fields.items()]
 
 
+def _write_text_atomic(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            encoding="utf-8",
+            dir=path.parent,
+            suffix=".tmp",
+            delete=False,
+        ) as tmp:
+            tmp_path = Path(tmp.name)
+            tmp.write(content)
+        os.replace(tmp_path, path)
+    except Exception:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        raise
+
+
 def _front_matter_lines(
     *,
     project_uuid: str,
@@ -80,6 +102,7 @@ def _front_matter_lines(
     retry: int,
     validation_command: str,
     record: DecisionRecord,
+    artifact_paths: dict[str, str],
 ) -> list[str]:
     fields: dict[str, object] = {
         "schema_version": 1,
@@ -98,15 +121,15 @@ def _front_matter_lines(
         "validation_command": validation_command,
         "artifact_root": str(artifacts.root),
     }
-    fields.update(_artifact_path_fields(record, artifacts.root))
+    fields.update(artifact_paths)
     return _yaml_lines(fields)
 
 
 def _snapshot_body_lines(
     record: DecisionRecord,
     artifacts: RunArtifacts,
+    artifact_paths: dict[str, str],
 ) -> list[str]:
-    artifact_paths = _artifact_path_fields(record, artifacts.root)
     return [
         "# Reason for Failure",
         "",
@@ -146,13 +169,15 @@ def write(
     record: DecisionRecord,
 ) -> Path:
     project = register_project(repo_root)
-    snapshot_dir = failure_snapshots_dir(repo_root)
+    snapshot_dir = project.project_dir / "failures"
+    snapshot_dir.mkdir(parents=True, exist_ok=True)
     snapshot_path = snapshot_dir / _snapshot_name(
         artifacts.run_id,
         attempt=attempt,
         retry=retry,
         call_role=record.call_role,
     )
+    artifact_paths = _artifact_path_fields(record, artifacts.root)
     content = "\n".join([
         "---",
         *_front_matter_lines(
@@ -164,12 +189,13 @@ def write(
             retry=retry,
             validation_command=validation_command,
             record=record,
+            artifact_paths=artifact_paths,
         ),
         "---",
         "",
-        *_snapshot_body_lines(record, artifacts),
+        *_snapshot_body_lines(record, artifacts, artifact_paths),
     ])
-    snapshot_path.write_text(content, encoding="utf-8")
+    _write_text_atomic(snapshot_path, content)
     return snapshot_path
 
 

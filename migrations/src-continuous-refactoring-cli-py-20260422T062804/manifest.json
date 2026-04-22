@@ -1,0 +1,37 @@
+{
+  "awaiting_human_review": false,
+  "cooldown_until": null,
+  "created_at": "2026-04-22T06:28:04.715-07:00",
+  "current_phase": "characterize-review-contracts",
+  "human_review_reason": null,
+  "last_touch": "2026-04-22T06:43:35.303-07:00",
+  "name": "src-continuous-refactoring-cli-py-20260422T062804",
+  "phases": [
+    {
+      "done": false,
+      "file": "phase-1-characterize-review-contracts.md",
+      "name": "characterize-review-contracts",
+      "precondition": "`src/continuous_refactoring/cli.py` still owns `_handle_review`, `_handle_review_list`, `_handle_review_perform`, `_resolve_review_context`, `_REVIEW_USAGE`, and the `run_agent_interactive` import used by review tests. `src/continuous_refactoring/review_cli.py` does not exist. The current review tests pass."
+    },
+    {
+      "done": false,
+      "file": "phase-2-extract-review-cli.md",
+      "name": "extract-review-cli",
+      "precondition": "Phase 1 is complete. Review behavior is characterized by tests. `cli.py` still owns the review handlers and `review_cli.py` does not exist."
+    },
+    {
+      "done": false,
+      "file": "phase-3-clarify-run-boundary.md",
+      "name": "clarify-run-boundary",
+      "precondition": "Phase 2 is complete. Review handling has moved to `review_cli.py`. `cli.py` still owns `_validate_targeting`, `_handle_run_once`, `_handle_run`, and `_run_with_loop_errors`, and the focused review tests pass against the new module."
+    },
+    {
+      "done": false,
+      "file": "phase-4-contract-sweep.md",
+      "name": "contract-sweep",
+      "precondition": "Phases 1 through 3 are complete. Review command execution lives in `review_cli.py`; run dispatch remains in `cli.py`; focused review, run, and command-dispatch tests pass."
+    }
+  ],
+  "status": "ready",
+  "wake_up_on": null
+}

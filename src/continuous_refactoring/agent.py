@@ -76,21 +76,14 @@ def _extract_claude_final_text(raw: str) -> str:
     last_result: str | None = None
     assistant_messages: list[str] = []
     for line in raw.splitlines():
-        if not line.lstrip().startswith("{"):
-            continue
-        try:
-            event = json.loads(line)
-        except ValueError:
-            continue
-        if not isinstance(event, dict):
+        event = _claude_stream_event(line)
+        if event is None:
             continue
         event_type = event.get("type")
         if event_type == "result":
-            if event.get("is_error") is True:
-                continue
-            result_value = event.get("result")
-            if isinstance(result_value, str) and result_value:
-                last_result = result_value
+            result_text = _result_event_text(event)
+            if result_text is not None:
+                last_result = result_text
         elif event_type == "assistant":
             text = _assistant_event_text(event)
             if text:
@@ -100,6 +93,27 @@ def _extract_claude_final_text(raw: str) -> str:
     if assistant_messages:
         return "\n".join(assistant_messages)
     return raw
+
+
+def _claude_stream_event(line: str) -> dict[str, object] | None:
+    if not line.lstrip().startswith("{"):
+        return None
+    try:
+        event = json.loads(line)
+    except ValueError:
+        return None
+    if not isinstance(event, dict):
+        return None
+    return event
+
+
+def _result_event_text(event: dict[str, object]) -> str | None:
+    if event.get("is_error") is True:
+        return None
+    result = event.get("result")
+    if isinstance(result, str) and result:
+        return result
+    return None
 
 
 def _assistant_event_text(event: dict[str, object]) -> str:

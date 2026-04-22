@@ -160,6 +160,15 @@ def test_malformed_json_lines_are_skipped() -> None:
     assert _extract_claude_final_text(stream) == "final"
 
 
+def test_whitespace_prefixed_json_lines_are_parsed() -> None:
+    stream = (
+        "  " + _as_line(_assistant_event("assistant fallback")) + "\n"
+        "\t" + _as_line(_result_event("final")) + "\n"
+    )
+
+    assert _extract_claude_final_text(stream) == "final"
+
+
 def test_unknown_types_only_returns_raw() -> None:
     stream = _stream(
         {"type": "system", "subtype": "init"},

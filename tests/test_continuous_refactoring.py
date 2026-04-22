@@ -123,6 +123,75 @@ def test_build_command_rejects_unknown_agent() -> None:
         )
 
 
+def test_maybe_run_agent_rejects_unknown_agent_before_path_lookup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path_lookups: list[str] = []
+    monkeypatch.setattr(
+        "continuous_refactoring.agent.which",
+        lambda agent: path_lookups.append(agent) or None,
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="Unsupported agent backend"):
+        continuous_refactoring.maybe_run_agent(
+            "gemini",
+            "opus",
+            "medium",
+            "do the thing",
+            tmp_path,
+            stdout_path=tmp_path / "stdout.log",
+            stderr_path=tmp_path / "stderr.log",
+        )
+
+    assert path_lookups == []
+
+
+def test_run_agent_interactive_rejects_unknown_agent_before_path_lookup(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path_lookups: list[str] = []
+    monkeypatch.setattr(
+        "continuous_refactoring.agent.which",
+        lambda agent: path_lookups.append(agent) or None,
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="Unsupported agent backend"):
+        continuous_refactoring.run_agent_interactive(
+            "gemini",
+            "opus",
+            "medium",
+            "do the thing",
+            tmp_path,
+        )
+
+    assert path_lookups == []
+
+
+def test_interactive_settle_rejects_unknown_agent_before_settle_path_checks(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path_lookups: list[str] = []
+    settle_path = tmp_path / "taste.md.done"
+    settle_path.mkdir()
+    monkeypatch.setattr(
+        "continuous_refactoring.agent.which",
+        lambda agent: path_lookups.append(agent) or None,
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="Unsupported agent backend"):
+        continuous_refactoring.run_agent_interactive_until_settled(
+            "gemini",
+            "opus",
+            "medium",
+            "do the thing",
+            tmp_path,
+            content_path=tmp_path / "taste.md",
+            settle_path=settle_path,
+        )
+
+    assert path_lookups == []
+
+
 class _FakeInteractiveProcess:
     def __init__(
         self,

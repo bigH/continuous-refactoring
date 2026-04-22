@@ -122,6 +122,7 @@ def _assistant_event_text(event: dict[str, object]) -> str:
 
 
 def _require_agent_on_path(agent: str) -> None:
+    _require_supported_agent(agent)
     if which(agent) is None:
         raise ContinuousRefactorError(f"Required command not found in PATH: {agent}")
 

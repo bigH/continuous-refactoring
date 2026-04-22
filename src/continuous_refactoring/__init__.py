@@ -13,6 +13,7 @@ from . import (
     planning,
     prompts,
     routing,
+    routing_pipeline,
     scope_expansion,
 )
 
@@ -29,6 +30,7 @@ _SUBMODULES: tuple[ModuleType, ...] = (
     planning,
     prompts,
     routing,
+    routing_pipeline,
     scope_expansion,
 )
 

@@ -312,7 +312,7 @@ def test_run_routed_planning_reports_and_records_commit(
         lambda _repo_root: live_dir,
     )
     monkeypatch.setattr(
-        "continuous_refactoring.loop.classify_target",
+        "continuous_refactoring.routing_pipeline.classify_target",
         lambda *_args, **_kwargs: "needs-plan",
     )
 
@@ -324,7 +324,7 @@ def test_run_routed_planning_reports_and_records_commit(
         (repo_root / "plan.txt").write_text("plan\n", encoding="utf-8")
         return StubPlanningOutcome()
 
-    monkeypatch.setattr("continuous_refactoring.loop.run_planning", fake_run_planning)
+    monkeypatch.setattr("continuous_refactoring.routing_pipeline.run_planning", fake_run_planning)
 
     exit_code = continuous_refactoring.run_loop(make_run_loop_args(repo_root, max_refactors=1))
 
@@ -353,7 +353,7 @@ def test_run_routed_planning_surfaces_human_review_requirement(
         lambda _repo_root: live_dir,
     )
     monkeypatch.setattr(
-        "continuous_refactoring.loop.classify_target",
+        "continuous_refactoring.routing_pipeline.classify_target",
         lambda *_args, **_kwargs: "needs-plan",
     )
 
@@ -365,7 +365,7 @@ def test_run_routed_planning_surfaces_human_review_requirement(
         (repo_root / "plan.txt").write_text("plan\n", encoding="utf-8")
         return StubPlanningOutcome()
 
-    monkeypatch.setattr("continuous_refactoring.loop.run_planning", fake_run_planning)
+    monkeypatch.setattr("continuous_refactoring.routing_pipeline.run_planning", fake_run_planning)
 
     exit_code = continuous_refactoring.run_loop(make_run_loop_args(repo_root, max_refactors=1))
 
@@ -1186,7 +1186,7 @@ def test_run_planning_failure_writes_reason_doc_and_logs_stage(
         lambda _repo_root: live_dir,
     )
     monkeypatch.setattr(
-        "continuous_refactoring.loop.classify_target",
+        "continuous_refactoring.routing_pipeline.classify_target",
         lambda *_args, **_kwargs: "needs-plan",
     )
     def timeout_planning_stage(**kwargs: object) -> CommandCapture:

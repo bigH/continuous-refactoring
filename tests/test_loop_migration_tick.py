@@ -122,7 +122,7 @@ def _patch_classifier_cohesive(monkeypatch: pytest.MonkeyPatch) -> list[str]:
             calls.append(getattr(target, "description", ""))
         return "cohesive-cleanup"
 
-    monkeypatch.setattr("continuous_refactoring.loop.classify_target", stub)
+    monkeypatch.setattr("continuous_refactoring.routing_pipeline.classify_target", stub)
     return calls
 
 
@@ -137,7 +137,7 @@ def _patch_classifier_trap(monkeypatch: pytest.MonkeyPatch) -> None:
     def trap(*_a: object, **_k: object) -> object:
         raise AssertionError("classify_target must not be called during migration tick")
 
-    monkeypatch.setattr("continuous_refactoring.loop.classify_target", trap)
+    monkeypatch.setattr("continuous_refactoring.routing_pipeline.classify_target", trap)
 
 
 def _patch_check_ready(
@@ -149,7 +149,7 @@ def _patch_check_ready(
         calls.append(getattr(phase, "name", ""))
         return (verdict, reason or verdict)
 
-    monkeypatch.setattr("continuous_refactoring.loop.check_phase_ready", fake)
+    monkeypatch.setattr("continuous_refactoring.routing_pipeline.check_phase_ready", fake)
     return calls
 
 
@@ -191,7 +191,7 @@ def _patch_execute_phase(
         save_manifest(updated, mp)
         return ExecutePhaseOutcome(status=status, reason=reason)
 
-    monkeypatch.setattr("continuous_refactoring.loop.execute_phase", fake)
+    monkeypatch.setattr("continuous_refactoring.routing_pipeline.execute_phase", fake)
     return calls
 
 
@@ -199,7 +199,7 @@ def _patch_execute_phase_trap(monkeypatch: pytest.MonkeyPatch) -> None:
     def trap(*_a: object, **_k: object) -> object:
         raise AssertionError("execute_phase must not be called")
 
-    monkeypatch.setattr("continuous_refactoring.loop.execute_phase", trap)
+    monkeypatch.setattr("continuous_refactoring.routing_pipeline.execute_phase", trap)
 
 
 def _patch_one_shot(monkeypatch: pytest.MonkeyPatch) -> list[str]:

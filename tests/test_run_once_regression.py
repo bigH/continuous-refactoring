@@ -55,7 +55,7 @@ def test_run_once_prompt_matches_compose_full_prompt(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
-        "continuous_refactoring.loop.classify_target", _classifier_trap,
+        "continuous_refactoring.routing_pipeline.classify_target", _classifier_trap,
     )
     args = make_run_once_args(run_once_env)
     continuous_refactoring.run_once(args)
@@ -80,7 +80,7 @@ def test_run_once_paths_arg_trims_whitespace(
     )
 
     monkeypatch.setattr(
-        "continuous_refactoring.loop.classify_target", _classifier_trap,
+        "continuous_refactoring.routing_pipeline.classify_target", _classifier_trap,
     )
     args = make_run_once_args(run_once_env, paths="src/foo.py: src/bar.py")
     exit_code = continuous_refactoring.run_once(args)
@@ -104,7 +104,7 @@ def test_run_once_stays_on_invoked_branch(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setattr(
-        "continuous_refactoring.loop.classify_target", _classifier_trap,
+        "continuous_refactoring.routing_pipeline.classify_target", _classifier_trap,
     )
     starting_branch = continuous_refactoring.current_branch(run_once_env)
     args = make_run_once_args(run_once_env)
@@ -131,7 +131,7 @@ def test_run_loop_two_targets_unchanged(
     monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     monkeypatch.setattr(
-        "continuous_refactoring.loop.classify_target", _classifier_trap,
+        "continuous_refactoring.routing_pipeline.classify_target", _classifier_trap,
     )
 
     agent_calls: list[str] = []
@@ -193,7 +193,7 @@ def test_cohesive_cleanup_matches_one_shot(
         lambda _repo_root: live_dir,
     )
     monkeypatch.setattr(
-        "continuous_refactoring.loop.classify_target", stub_classifier,
+        "continuous_refactoring.routing_pipeline.classify_target", stub_classifier,
     )
 
     args = make_run_once_args(run_once_env)

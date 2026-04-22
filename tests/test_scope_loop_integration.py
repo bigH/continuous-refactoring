@@ -6,8 +6,9 @@ import pytest
 
 import continuous_refactoring
 import continuous_refactoring.loop
+import continuous_refactoring.routing_pipeline
 from continuous_refactoring.artifacts import RunArtifacts, create_run_artifacts
-from continuous_refactoring.loop import RouteResult
+from continuous_refactoring.routing_pipeline import RouteResult
 from continuous_refactoring.targeting import Target
 
 from conftest import init_repo, make_run_once_args
@@ -36,7 +37,7 @@ def routing_env(
         lambda _repo_root: repo_root / ".migrations",
     )
     monkeypatch.setattr(
-        "continuous_refactoring.loop._try_migration_tick",
+        "continuous_refactoring.routing_pipeline.try_migration_tick",
         lambda *_args, **_kwargs: ("not-routed", None),
     )
     return repo_root, artifacts
@@ -45,11 +46,12 @@ def routing_env(
 def _invoke_route_and_run(
     repo_root: Path, artifacts: RunArtifacts, target: Target,
 ) -> RouteResult:
-    return continuous_refactoring.loop._route_and_run(
+    return continuous_refactoring.routing_pipeline.route_and_run(
         target,
         "taste",
         repo_root,
         artifacts,
+        live_dir=repo_root / ".migrations",
         agent="codex",
         model="fake",
         effort="low",
@@ -58,6 +60,7 @@ def _invoke_route_and_run(
         validation_command="uv run pytest",
         max_attempts=1,
         attempt=1,
+        finalize_commit=continuous_refactoring.loop._finalize_commit,
     )
 
 
@@ -69,7 +72,7 @@ def test_expanded_target_reaches_classifier(
     seen_files: list[tuple[str, ...]] = []
 
     monkeypatch.setattr(
-        "continuous_refactoring.loop._expand_target_for_classification",
+        "continuous_refactoring.routing_pipeline.expand_target_for_classification",
         lambda target, *_args, **_kwargs: (
             Target(
                 description=target.description,
@@ -84,7 +87,7 @@ def test_expanded_target_reaches_classifier(
         seen_files.append(target.files)
         return "cohesive-cleanup"
 
-    monkeypatch.setattr("continuous_refactoring.loop.classify_target", fake_classifier)
+    monkeypatch.setattr("continuous_refactoring.routing_pipeline.classify_target", fake_classifier)
 
     result = _invoke_route_and_run(
         repo_root,
@@ -115,7 +118,7 @@ def test_cohesive_cleanup_runs_one_shot_against_expanded_files(
         lambda _repo_root: live_dir,
     )
     monkeypatch.setattr(
-        "continuous_refactoring.loop._expand_target_for_classification",
+        "continuous_refactoring.routing_pipeline.expand_target_for_classification",
         lambda target, *_args, **_kwargs: (
             Target(
                 description=target.description,
@@ -126,7 +129,7 @@ def test_cohesive_cleanup_runs_one_shot_against_expanded_files(
         ),
     )
     monkeypatch.setattr(
-        "continuous_refactoring.loop.classify_target",
+        "continuous_refactoring.routing_pipeline.classify_target",
         lambda *_args, **_kwargs: "cohesive-cleanup",
     )
 
@@ -147,7 +150,7 @@ def test_needs_plan_receives_expanded_scope_context(
     planning_context = "Selected scope candidate: cross-cluster\n- src/foo.py\n- tests/test_foo.py"
 
     monkeypatch.setattr(
-        "continuous_refactoring.loop._expand_target_for_classification",
+        "continuous_refactoring.routing_pipeline.expand_target_for_classification",
         lambda target, *_args, **_kwargs: (
             Target(
                 description=target.description,
@@ -158,7 +161,7 @@ def test_needs_plan_receives_expanded_scope_context(
         ),
     )
     monkeypatch.setattr(
-        "continuous_refactoring.loop.classify_target",
+        "continuous_refactoring.routing_pipeline.classify_target",
         lambda *_args, **_kwargs: "needs-plan",
     )
 
@@ -170,7 +173,7 @@ def test_needs_plan_receives_expanded_scope_context(
         captured["extra_context"] = str(kwargs["extra_context"])
         return StubPlanningOutcome()
 
-    monkeypatch.setattr("continuous_refactoring.loop.run_planning", fake_run_planning)
+    monkeypatch.setattr("continuous_refactoring.routing_pipeline.run_planning", fake_run_planning)
 
     result = _invoke_route_and_run(
         repo_root,
@@ -190,8 +193,8 @@ def test_live_migrations_unset_skips_scope_expansion_and_classification(
     def trap(*_args: object, **_kwargs: object) -> object:
         raise AssertionError("routing helpers must not run without live_migrations_dir")
 
-    monkeypatch.setattr("continuous_refactoring.loop.classify_target", trap)
-    monkeypatch.setattr("continuous_refactoring.loop._expand_target_for_classification", trap)
+    monkeypatch.setattr("continuous_refactoring.routing_pipeline.classify_target", trap)
+    monkeypatch.setattr("continuous_refactoring.routing_pipeline.expand_target_for_classification", trap)
 
     exit_code = continuous_refactoring.run_once(make_run_once_args(run_once_env))
 

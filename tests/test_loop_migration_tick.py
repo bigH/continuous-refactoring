@@ -71,6 +71,8 @@ def _make_manifest(
     created_at: datetime | None = None,
     current_phase: str = "setup",
     phases: tuple[PhaseSpec, ...] = (_PHASE_0, _PHASE_1),
+    awaiting_human_review: bool = False,
+    human_review_reason: str | None = None,
 ) -> MigrationManifest:
     ts = (created_at or _utc_now()).isoformat(timespec="milliseconds")
     return MigrationManifest(
@@ -78,10 +80,11 @@ def _make_manifest(
         created_at=ts,
         last_touch=last_touch.isoformat(timespec="milliseconds"),
         wake_up_on=wake_up_on.isoformat(timespec="milliseconds") if wake_up_on else None,
-        awaiting_human_review=False,
+        awaiting_human_review=awaiting_human_review,
         status="in-progress",
         current_phase=current_phase,
         phases=phases,
+        human_review_reason=human_review_reason,
     )
 
 
@@ -291,6 +294,16 @@ def test_enumerate_eligible_manifests_ignores_noise_and_sorts_by_created_at(
     )
     _save(
         _make_manifest(
+            "awaiting-review",
+            last_touch=now - timedelta(days=1),
+            created_at=now - timedelta(hours=3),
+            awaiting_human_review=True,
+            human_review_reason="needs a person",
+        ),
+        live_dir,
+    )
+    _save(
+        _make_manifest(
             "newer",
             last_touch=now - timedelta(days=1),
             created_at=now - timedelta(hours=1),
@@ -310,6 +323,42 @@ def test_enumerate_eligible_manifests_ignores_noise_and_sorts_by_created_at(
 
     assert [manifest.name for manifest, _ in candidates] == ["older", "newer"]
     assert [path.parent.name for _, path in candidates] == ["older", "newer"]
+
+
+def test_try_migration_tick_skips_migrations_awaiting_human_review(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    now = _utc_now()
+    _save(
+        _make_manifest(
+            "needs-review",
+            last_touch=now - timedelta(days=1),
+            created_at=now - timedelta(hours=2),
+            awaiting_human_review=True,
+            human_review_reason="needs explicit signoff",
+        ),
+        live_dir,
+    )
+    _save(
+        _make_manifest(
+            "ready-now",
+            last_touch=now - timedelta(days=1),
+            created_at=now - timedelta(hours=1),
+        ),
+        live_dir,
+    )
+    ready_calls = _patch_check_ready(monkeypatch, "yes")
+    exec_calls = _patch_execute_phase(monkeypatch, status="done")
+
+    outcome, record = _tick(live_dir, run_once_env)
+
+    assert outcome == "commit"
+    assert record is not None
+    assert ready_calls == ["setup"]
+    assert exec_calls == ["setup"]
+    assert load_manifest(live_dir / "needs-review" / "manifest.json").awaiting_human_review is True
+    assert load_manifest(live_dir / "ready-now" / "manifest.json").phases[0].done is True
 
 
 def test_ready_check_error_abandons_with_sanitized_decision_record(

@@ -226,7 +226,7 @@ Before executing a phase, a ready-check agent verifies that the current phase pr
 
 - **ready: yes** — phase executes; on green tests, the phase is marked done, any prior deferral markers are cleared, and the migration advances immediately to the next phase.
 - **ready: no** — manifest activity is bumped, a retry cooldown is started, and a future `wake_up_on` is recorded when needed; the tick moves on.
-- **ready: unverifiable** — the migration is flagged `awaiting_human_review` and put on cooldown. Use `review list` to find it and `review perform <migration> --with ... --model ... --effort ...` to resolve it interactively.
+- **ready: unverifiable** — the migration is flagged `awaiting_human_review` and put on cooldown. Automated migration ticks skip flagged migrations until review clears the flag. Use `review list` to find it and `review perform <migration> --with ... --model ... --effort ...` to resolve it interactively.
 
 Human-facing migration references use the relative phase spec path, for example `phase-2-failure-report.md`. The manifest cursor stores the phase `name`, not a numeric index.
 

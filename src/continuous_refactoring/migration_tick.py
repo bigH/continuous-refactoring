@@ -66,6 +66,8 @@ def enumerate_eligible_manifests(
         manifest = load_manifest(manifest_path)
         if manifest.status not in ("ready", "in-progress"):
             continue
+        if manifest.awaiting_human_review:
+            continue
         if not has_executable_phase(manifest):
             continue
         if not eligible_now(manifest, now):

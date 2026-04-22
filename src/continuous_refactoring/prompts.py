@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from continuous_refactoring.migrations import MigrationManifest, PhaseSpec
-    from continuous_refactoring.scope_expansion import ScopeCandidate
+    from continuous_refactoring.scope_expansion import ScopeCandidate, ScopeCandidateKind
     from continuous_refactoring.targeting import Target
 
 __all__ = [
@@ -472,7 +472,7 @@ You are selecting the best scope candidate for refactoring classification.
 Choose the smallest candidate that still captures the real cleanup cluster.\
 """
 
-_SCOPE_SELECTION_PREFER_BULLETS: dict[str, str] = {
+_SCOPE_SELECTION_PREFER_BULLETS: dict[ScopeCandidateKind, str] = {
     "seed": "- `seed` when evidence is weak, conflicting, or mostly speculative.",
     "local-cluster": (
         "- `local-cluster` when one nearby cluster shares one rationale and "
@@ -491,17 +491,21 @@ scope is justified.\
 """
 
 
-def build_scope_selection_prompt(kinds: tuple[str, ...]) -> str:
+def _scope_candidate_kinds(
+    candidates: tuple[ScopeCandidate, ...],
+) -> tuple[ScopeCandidateKind, ...]:
+    return tuple(dict.fromkeys(candidate.kind for candidate in candidates))
+
+
+def _build_scope_selection_prompt(kinds: tuple[ScopeCandidateKind, ...]) -> str:
     present = tuple(dict.fromkeys(kinds))
     prefer_bullets = "\n".join(
         _SCOPE_SELECTION_PREFER_BULLETS[kind]
         for kind in present
-        if kind in _SCOPE_SELECTION_PREFER_BULLETS
     )
     contract_lines = "\n".join(
         f"  selected-candidate: {kind} \u2014 <short reason>"
         for kind in present
-        if kind in _SCOPE_SELECTION_PREFER_BULLETS
     )
     sections = [SCOPE_SELECTION_PREAMBLE]
     if prefer_bullets:
@@ -685,9 +689,8 @@ def compose_scope_selection_prompt(
     candidates: tuple[ScopeCandidate, ...],
     taste: str,
 ) -> str:
-    kinds = tuple(candidate.kind for candidate in candidates)
     return _join_sections(
-        build_scope_selection_prompt(kinds),
+        _build_scope_selection_prompt(_scope_candidate_kinds(candidates)),
         f"## Seed Target\n{target.description}",
         _format_target_files(target.files),
         _heading_section("Candidates", _format_scope_candidates(candidates)),

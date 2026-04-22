@@ -115,6 +115,19 @@ def test_contract_has_exactly_one_line_per_present_kind(
             assert f"`{kind}`" not in prefer
 
 
+def test_prompt_deduplicates_repeated_candidate_kinds() -> None:
+    prompt = compose_scope_selection_prompt(
+        _target(),
+        _candidates(("seed", "seed", "local-cluster")),
+        _TASTE,
+    )
+
+    contract = _contract_section(prompt)
+    prefer = _prefer_section(prompt)
+    assert contract.count("selected-candidate: seed \u2014 <short reason>") == 1
+    assert prefer.count("`seed`") == 1
+
+
 def test_prompt_preserves_taste_section() -> None:
     prompt = compose_scope_selection_prompt(_target(), _candidates(_ALL_KINDS), _TASTE)
 

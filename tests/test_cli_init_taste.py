@@ -95,15 +95,17 @@ def test_init_idempotent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo = _init_repo_with_temp_home(tmp_path, monkeypatch)
+    args = argparse.Namespace(path=repo)
 
-    first = register_project(repo)
-    taste_path = first.project_dir / "taste.md"
-    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    _handle_init(args)
+    first = _single_manifest_entry()
+    taste_path = _taste_path(_xdg_home(tmp_path), first.uuid)
     custom_content = "- My custom taste.\n"
     taste_path.write_text(custom_content, encoding="utf-8")
 
-    second = register_project(repo)
-    assert first.entry.uuid == second.entry.uuid
+    _handle_init(args)
+    second = _single_manifest_entry()
+    assert first.uuid == second.uuid
     assert taste_path.read_text(encoding="utf-8") == custom_content
 
 

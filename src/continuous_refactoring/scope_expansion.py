@@ -60,6 +60,12 @@ class ScopeSelection:
     reason: str
 
 
+@dataclass(frozen=True)
+class _CandidateSupport:
+    scores: dict[str, int]
+    evidence: dict[str, tuple[str, ...]]
+
+
 def scope_expansion_bypass_reason(target: Target) -> str | None:
     if len(target.files) == 0:
         return "scope expansion requires a seed file"
@@ -258,13 +264,13 @@ def _candidate_from_files(
     kind: ScopeCandidateKind,
     seed_file: str,
     files: tuple[str, ...],
-    support: dict[str, tuple[str, ...]],
+    evidence_by_file: dict[str, tuple[str, ...]],
 ) -> ScopeCandidate:
     evidence = ["seed target"]
     for file_path in files:
         if file_path == seed_file:
             continue
-        evidence.extend(support.get(file_path, ()))
+        evidence.extend(evidence_by_file.get(file_path, ()))
     deduped_evidence = tuple(dict.fromkeys(evidence))
     clusters = tuple(sorted({_cluster_label(path) for path in files}))
     return ScopeCandidate(
@@ -276,9 +282,77 @@ def _candidate_from_files(
     )
 
 
-def _rank_paths(
+def _record_support(
+    support_lines: dict[str, list[str]],
     scores: Counter[str],
-    support: dict[str, tuple[str, ...]],
+    file_path: str,
+    evidence_line: str,
+    score: int,
+) -> None:
+    support_lines[file_path].append(evidence_line)
+    scores[file_path] += score
+
+
+def _candidate_support(
+    seed_file: str,
+    tracked: tuple[str, ...],
+    repo_root: Path,
+    *,
+    max_git_commits: int,
+) -> _CandidateSupport:
+    support_lines: dict[str, list[str]] = defaultdict(list)
+    scores: Counter[str] = Counter()
+
+    for paired in _paired_source_test_files(seed_file, tracked):
+        _record_support(
+            support_lines,
+            scores,
+            paired,
+            f"source/test pairing with {seed_file}",
+            50,
+        )
+
+    for path, alias in _find_direct_references(seed_file, tracked, repo_root).items():
+        _record_support(
+            support_lines,
+            scores,
+            path,
+            f"direct reference/import-like match from {seed_file}: {alias}",
+            30,
+        )
+
+    for path, alias in _find_reverse_references(seed_file, tracked, repo_root).items():
+        _record_support(
+            support_lines,
+            scores,
+            path,
+            f"reverse reference/import-like match to {seed_file}: {alias}",
+            30,
+        )
+
+    for path, count in _recent_cochange_neighbors(
+        seed_file, repo_root, max_commits=max_git_commits,
+    ):
+        _record_support(
+            support_lines,
+            scores,
+            path,
+            f"git co-change with {seed_file}: {count} recent commit(s)",
+            min(count, 5) * 5,
+        )
+
+    return _CandidateSupport(
+        scores=dict(sorted(scores.items())),
+        evidence={
+            path: tuple(dict.fromkeys(lines))
+            for path, lines in sorted(support_lines.items())
+        },
+    )
+
+
+def _rank_paths(
+    scores: dict[str, int],
+    evidence_by_file: dict[str, tuple[str, ...]],
     seed_file: str,
     include: Callable[[bool, tuple[str, ...]], bool],
 ) -> list[str]:
@@ -286,7 +360,10 @@ def _rank_paths(
     ranked = [
         (score, path)
         for path, score in scores.items()
-        if include(_cluster_label(path) == seed_parent, support.get(path, ()))
+        if include(
+            _cluster_label(path) == seed_parent,
+            evidence_by_file.get(path, ()),
+        )
     ]
     ranked.sort(key=lambda item: (-item[0], item[1]))
     return [path for _score, path in ranked]
@@ -324,54 +401,31 @@ def build_scope_candidates(
     if seed_file not in tracked:
         return (_build_seed_candidate(seed_file),)
 
-    support_lines: dict[str, list[str]] = defaultdict(list)
-    scores: Counter[str] = Counter()
-
-    for paired in _paired_source_test_files(seed_file, tracked):
-        support_lines[paired].append(f"source/test pairing with {seed_file}")
-        scores[paired] += 50
-
-    for path, alias in _find_direct_references(seed_file, tracked, repo_root).items():
-        support_lines[path].append(
-            f"direct reference/import-like match from {seed_file}: {alias}"
-        )
-        scores[path] += 30
-
-    for path, alias in _find_reverse_references(seed_file, tracked, repo_root).items():
-        support_lines[path].append(
-            f"reverse reference/import-like match to {seed_file}: {alias}"
-        )
-        scores[path] += 30
-
-    for path, count in _recent_cochange_neighbors(
-        seed_file, repo_root, max_commits=max_git_commits,
-    ):
-        support_lines[path].append(
-            f"git co-change with {seed_file}: {count} recent commit(s)"
-        )
-        scores[path] += min(count, 5) * 5
-
-    support = {
-        path: tuple(dict.fromkeys(lines))
-        for path, lines in sorted(support_lines.items())
-    }
-
+    support = _candidate_support(
+        seed_file, tracked, repo_root, max_git_commits=max_git_commits,
+    )
     candidates = [_build_seed_candidate(seed_file)]
 
-    local_ranked = _rank_paths(scores, support, seed_file, _include_local)
+    local_ranked = _rank_paths(
+        support.scores, support.evidence, seed_file, _include_local,
+    )
     local_extras = tuple(local_ranked[: max_files - 1])
     if local_extras:
         local_files = (seed_file, *local_extras)
         candidates.append(
-            _candidate_from_files("local-cluster", seed_file, local_files, support)
+            _candidate_from_files(
+                "local-cluster", seed_file, local_files, support.evidence,
+            )
         )
 
-    cross_ranked = _rank_paths(scores, support, seed_file, _include_cross)
+    cross_ranked = _rank_paths(
+        support.scores, support.evidence, seed_file, _include_cross,
+    )
     cross_extras = tuple(cross_ranked[: max_files - 1])
     if cross_extras:
         cross_files = (seed_file, *cross_extras)
         cross_candidate = _candidate_from_files(
-            "cross-cluster", seed_file, cross_files, support,
+            "cross-cluster", seed_file, cross_files, support.evidence,
         )
         if cross_candidate.files != candidates[-1].files:
             candidates.append(cross_candidate)

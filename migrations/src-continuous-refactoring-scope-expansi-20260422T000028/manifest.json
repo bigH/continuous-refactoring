@@ -1,0 +1,37 @@
+{
+  "awaiting_human_review": true,
+  "cooldown_until": null,
+  "created_at": "2026-04-22T00:00:28.596-07:00",
+  "current_phase": "characterize-discovery",
+  "human_review_reason": "test/module contract and one boundary choice need explicit human signoff",
+  "last_touch": "2026-04-22T00:12:21.642-07:00",
+  "name": "src-continuous-refactoring-scope-expansi-20260422T000028",
+  "phases": [
+    {
+      "done": false,
+      "file": "phase-1-characterize-discovery.md",
+      "name": "characterize-discovery",
+      "precondition": "The migration is still in planning or ready state, `scope_expansion.py` still defines and exports `ScopeCandidate`, `ScopeCandidateKind`, and `build_scope_candidates`, and no `src/continuous_refactoring/scope_candidates.py` module exists."
+    },
+    {
+      "done": false,
+      "file": "phase-2-extract-scope-candidates.md",
+      "name": "extract-scope-candidates",
+      "precondition": "Phase 1 is complete: discovery behavior is covered by focused tests, `build_scope_candidates()` has a clear internal discovery flow, and all tests pass with the public symbols still exported from `scope_expansion.py`."
+    },
+    {
+      "done": false,
+      "file": "phase-3-trim-expansion-orchestration.md",
+      "name": "trim-expansion-orchestration",
+      "precondition": "Phase 2 is complete: `scope_candidates.py` owns candidate data and discovery, moved symbols are imported directly from their new module, no compatibility shims exist in `scope_expansion.py`, and the full test suite passes."
+    },
+    {
+      "done": false,
+      "file": "phase-4-contract-sweep.md",
+      "name": "contract-sweep",
+      "precondition": "Phases 1 through 3 are complete: candidate discovery lives in `scope_candidates.py`, selection orchestration remains in `scope_expansion.py`, candidate formatting has a single final home, and the full test suite passes."
+    }
+  ],
+  "status": "ready",
+  "wake_up_on": null
+}

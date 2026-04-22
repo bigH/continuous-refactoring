@@ -302,16 +302,44 @@ def test_save_manifest_removes_tmp_file_when_replace_fails(
 
     monkeypatch.setattr(Path, "replace", fail_replace)
 
-    with pytest.raises(OSError, match="cannot replace"):
+    with pytest.raises(
+        ContinuousRefactorError, match=f"Could not save manifest {path}",
+    ) as exc_info:
         save_manifest(manifest, path)
 
+    assert isinstance(exc_info.value.__cause__, OSError)
     assert path.read_text(encoding="utf-8") == original_content
     assert list(path.parent.glob("*.tmp")) == []
 
 
 # ---------------------------------------------------------------------------
-# Unknown status rejection
+# Boundary errors and schema rejection
 # ---------------------------------------------------------------------------
+
+def test_load_manifest_wraps_malformed_json(tmp_path: Path) -> None:
+    path = tmp_path / "malformed" / "manifest.json"
+    path.parent.mkdir(parents=True)
+    path.write_text("{", encoding="utf-8")
+
+    with pytest.raises(
+        ContinuousRefactorError, match=f"Could not parse manifest {path}",
+    ) as exc_info:
+        load_manifest(path)
+
+    assert isinstance(exc_info.value.__cause__, json.JSONDecodeError)
+
+
+def test_load_manifest_wraps_filesystem_read_failure(tmp_path: Path) -> None:
+    path = tmp_path / "manifest.json"
+    path.mkdir()
+
+    with pytest.raises(
+        ContinuousRefactorError, match=f"Could not load manifest {path}",
+    ) as exc_info:
+        load_manifest(path)
+
+    assert isinstance(exc_info.value.__cause__, OSError)
+
 
 def test_load_manifest_rejects_unknown_status(tmp_path: Path) -> None:
     path = tmp_path / "bad" / "manifest.json"
@@ -326,8 +354,12 @@ def test_load_manifest_rejects_unknown_status(tmp_path: Path) -> None:
     }
     path.write_text(json.dumps(payload), encoding="utf-8")
 
-    with pytest.raises(ContinuousRefactorError, match="Unknown migration status"):
+    with pytest.raises(
+        ContinuousRefactorError, match="Unknown migration status",
+    ) as exc_info:
         load_manifest(path)
+
+    assert exc_info.value.__cause__ is None
 
 
 def test_save_manifest_rejects_unknown_status_before_writing(tmp_path: Path) -> None:

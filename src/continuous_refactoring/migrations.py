@@ -151,24 +151,51 @@ def complete_manifest_phase(
 
 
 def load_manifest(path: Path) -> MigrationManifest:
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError as error:
+        raise ContinuousRefactorError(
+            f"Could not load manifest {path}: {error}"
+        ) from error
+    try:
+        raw = json.loads(content)
+    except json.JSONDecodeError as error:
+        raise ContinuousRefactorError(
+            f"Could not parse manifest {path}: {error}"
+        ) from error
     return decode_manifest_payload(raw)
 
 
 def save_manifest(manifest: MigrationManifest, path: Path) -> None:
     content = encode_manifest_payload(manifest)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with tempfile.NamedTemporaryFile(
-        mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False
-    ) as tmp:
-        tmp.write(content)
-        tmp_path = Path(tmp.name)
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as error:
+        raise ContinuousRefactorError(
+            f"Could not save manifest {path}: {error}"
+        ) from error
+
+    tmp_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False
+        ) as tmp:
+            tmp_path = Path(tmp.name)
+            tmp.write(content)
+    except OSError as error:
+        if tmp_path is not None:
+            tmp_path.unlink(missing_ok=True)
+        raise ContinuousRefactorError(
+            f"Could not save manifest {path}: {error}"
+        ) from error
 
     try:
         tmp_path.replace(path)
-    except Exception:
+    except OSError as error:
         tmp_path.unlink(missing_ok=True)
-        raise
+        raise ContinuousRefactorError(
+            f"Could not save manifest {path}: {error}"
+        ) from error
 
 
 # ---------------------------------------------------------------------------

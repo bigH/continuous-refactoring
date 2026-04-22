@@ -8,7 +8,7 @@ import subprocess
 import sys
 import threading
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from shutil import which
 from typing import TYPE_CHECKING, TextIO
@@ -547,6 +547,43 @@ def _command_display_name(command: Sequence[str]) -> str:
     return Path(command[0]).name or str(command[0])
 
 
+@dataclass(frozen=True)
+class _ObservedCommandOutcome:
+    returncode: int
+    timed_out: bool
+    was_stuck: bool
+
+
+def _wait_for_observed_command(
+    process: subprocess.Popen[str],
+    *,
+    timeout: int | None,
+    stdout_thread: threading.Thread,
+    stderr_thread: threading.Thread,
+    stop_watchdog: threading.Event,
+    watchdog_thread: threading.Thread,
+    stuck_detected: threading.Event,
+) -> _ObservedCommandOutcome:
+    timed_out = False
+    try:
+        returncode = process.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        timed_out = True
+        _terminate_process(process)
+        returncode = process.wait()
+
+    stdout_thread.join()
+    stderr_thread.join()
+    stop_watchdog.set()
+    watchdog_thread.join(timeout=10)
+
+    return _ObservedCommandOutcome(
+        returncode=returncode,
+        timed_out=timed_out,
+        was_stuck=stuck_detected.is_set(),
+    )
+
+
 def run_observed_command(
     command: Sequence[str],
     cwd: Path,
@@ -626,31 +663,25 @@ def run_observed_command(
         watchdog_thread = threading.Thread(target=watchdog, daemon=True)
         watchdog_thread.start()
 
-        timed_out = False
-        try:
-            returncode = process.wait(timeout=timeout)
-        except subprocess.TimeoutExpired:
-            timed_out = True
-            _terminate_process(process)
-            returncode = process.wait()
-
-        stdout_thread.join()
-        stderr_thread.join()
-        stop_watchdog.set()
-        watchdog_thread.join(timeout=10)
-        was_stuck = stuck_detected.is_set()
+        outcome = _wait_for_observed_command(
+            process,
+            timeout=timeout,
+            stdout_thread=stdout_thread,
+            stderr_thread=stderr_thread,
+            stop_watchdog=stop_watchdog,
+            watchdog_thread=watchdog_thread,
+            stuck_detected=stuck_detected,
+        )
 
         if not stdout_chunks:
             _write_timestamped_line(stdout_handle, "<no output>")
         if not stderr_chunks:
             _write_timestamped_line(stderr_handle, "<no output>")
 
-    if timed_out:
+    if outcome.timed_out:
         command_name = _command_display_name(command)
-        raise ContinuousRefactorError(
-            f"{command_name} timed out after {timeout}s"
-        )
-    if was_stuck:
+        raise ContinuousRefactorError(f"{command_name} timed out after {timeout}s")
+    if outcome.was_stuck:
         command_name = _command_display_name(command)
         raise ContinuousRefactorError(
             f"{command_name} produced no output for {stuck_timeout}s"
@@ -658,7 +689,7 @@ def run_observed_command(
 
     return CommandCapture(
         command=tuple(command),
-        returncode=returncode,
+        returncode=outcome.returncode,
         stdout="".join(stdout_chunks),
         stderr="".join(stderr_chunks),
         stdout_path=stdout_path,

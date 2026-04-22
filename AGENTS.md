@@ -77,7 +77,8 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 ## 9. Active migration of `loop.py`
 
 - Path: `migrations/src-continuous-refactoring-loop-py-20260417T124216/`
-- Plan: split `loop.py` (~1646 lines) into `decisions.py`, `failure_report.py`, `routing_pipeline.py`; target ~500 lines in `loop.py`.
+- Plan: phase 1 (`decisions.py`) is landed; the remaining live phases extract `failure_report.py` and `routing_pipeline.py`, then do a no-new-extraction tidy pass in `loop.py`.
+- Realistic size target for this live four-phase migration: `loop.py` roughly 950–1100 lines after phases 2–4. Reaching ~500 needs a later follow-up extraction migration; do not assume phase 3 or 4 can get there alone.
 - **Before editing `loop.py`, read `plan.md` and the current phase doc.** Structural edits may collide with in-flight phases.
 - **No re-export shims.** Symbol moves update every call site and every test monkeypatch target in the same commit.
 - When a migration completes, remove it from this section.

@@ -1,5 +1,6 @@
 {
   "awaiting_human_review": false,
+  "cooldown_until": null,
   "created_at": "2026-04-17T12:42:16.268-07:00",
   "current_phase": "failure-report",
   "human_review_reason": null,
@@ -22,13 +23,13 @@
       "done": false,
       "file": "phase-3-routing-pipeline.md",
       "name": "routing-pipeline",
-      "precondition": "phase-1-decisions.md and phase-2-failure-report.md are complete"
+      "precondition": "phase-1-decisions.md is complete"
     },
     {
       "done": false,
       "file": "phase-4-trim-loop.md",
       "name": "trim-loop",
-      "precondition": "phase-3-routing-pipeline.md is complete"
+      "precondition": "phase-2-failure-report.md and phase-3-routing-pipeline.md are complete"
     }
   ],
   "status": "ready",

@@ -2,9 +2,9 @@
   "awaiting_human_review": false,
   "cooldown_until": null,
   "created_at": "2026-04-22T05:47:42.030-07:00",
-  "current_phase": "extract-manifest-codec",
+  "current_phase": "tighten-io-boundaries",
   "human_review_reason": null,
-  "last_touch": "2026-04-22T06:01:37.759-07:00",
+  "last_touch": "2026-04-22T06:06:25.075-07:00",
   "name": "src-continuous-refactoring-migrations-py-20260422T054742",
   "phases": [
     {
@@ -14,7 +14,7 @@
       "precondition": "The migration has not created `src/continuous_refactoring/migration_manifest_codec.py` yet. `MigrationManifest`, `PhaseSpec`, `load_manifest()`, `save_manifest()`, and all manifest validation helpers still live in `src/continuous_refactoring/migrations.py`, and the existing `tests/test_migrations.py` suite passes."
     },
     {
-      "done": false,
+      "done": true,
       "file": "phase-2-extract-manifest-codec.md",
       "name": "extract-manifest-codec",
       "precondition": "Phase 1 is complete: focused tests characterize legacy `ready_when`, `precondition` precedence, missing phase preconditions, integer and empty current-phase compatibility, unknown current phases, duplicate phase names, exact JSON formatting, and failed atomic replace cleanup. Those tests pass with all manifest codec logic still implemented in `src/continuous_refactoring/migrations.py`."

@@ -150,6 +150,33 @@ def test_load_manifest_rejects_unknown_status(tmp_path: Path) -> None:
         load_manifest(path)
 
 
+def test_save_manifest_rejects_unknown_status_before_writing(tmp_path: Path) -> None:
+    path = tmp_path / "bad-save" / "manifest.json"
+    manifest = MigrationManifest(
+        name="bad-migration",
+        created_at="2025-01-01T00:00:00.000+00:00",
+        last_touch="2025-01-01T00:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="exploded",
+        current_phase="setup",
+        phases=(
+            PhaseSpec(
+                name="setup",
+                file="phase-0-setup.md",
+                done=False,
+                precondition="always",
+            ),
+        ),
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="Unknown migration status"):
+        save_manifest(manifest, path)
+
+    assert not path.exists()
+    assert not path.parent.exists()
+
+
 def test_load_manifest_rejects_non_mapping_payload(tmp_path: Path) -> None:
     path = tmp_path / "bad-mapping" / "manifest.json"
     path.parent.mkdir(parents=True)

@@ -269,7 +269,7 @@ def load_manifest(path: Path) -> MigrationManifest:
 
 
 def save_manifest(manifest: MigrationManifest, path: Path) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    _require_status(manifest.status)
     _require_unique_phase_names(manifest.phases)
     if manifest.current_phase and _phase_index(
         manifest.phases, manifest.current_phase,
@@ -277,6 +277,7 @@ def save_manifest(manifest: MigrationManifest, path: Path) -> None:
         raise ContinuousRefactorError(
             f"Cannot save manifest with unknown current phase {manifest.current_phase!r}"
         )
+    path.parent.mkdir(parents=True, exist_ok=True)
     payload = asdict(manifest)
     content = json.dumps(payload, indent=2, sort_keys=True) + "\n"
     with tempfile.NamedTemporaryFile(

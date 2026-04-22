@@ -15,7 +15,6 @@ from continuous_refactoring.prompts import DEFAULT_REFACTORING_PROMPT, compose_f
 from continuous_refactoring.targeting import resolve_targets
 
 from conftest import (
-    init_repo,
     make_run_loop_args,
     make_run_once_args,
     noop_agent,
@@ -121,15 +120,10 @@ def test_run_once_stays_on_invoked_branch(
 
 
 def test_run_loop_two_targets_unchanged(
+    run_loop_env: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo_root = tmp_path / "repo"
-    init_repo(repo_root)
-    (tmp_path / "tmpdir").mkdir()
-    (tmp_path / "xdg").mkdir()
-    monkeypatch.setenv("TMPDIR", str(tmp_path / "tmpdir"))
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     monkeypatch.setattr(
         "continuous_refactoring.routing_pipeline.classify_target", _classifier_trap,
     )
@@ -152,7 +146,7 @@ def test_run_loop_two_targets_unchanged(
     targets_file.write_text("\n".join(lines), encoding="utf-8")
 
     args = make_run_loop_args(
-        repo_root,
+        run_loop_env,
         targets=targets_file,
         commit_message_prefix="continuous refactor",
     )
@@ -162,7 +156,7 @@ def test_run_loop_two_targets_unchanged(
     assert len(agent_calls) == 2
 
     log = continuous_refactoring.run_command(
-        ["git", "log", "--oneline"], cwd=repo_root,
+        ["git", "log", "--oneline"], cwd=run_loop_env,
     ).stdout
     assert "continuous refactor: target-0" in log
     assert "continuous refactor: target-1" in log

@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 import pytest
-from conftest import extract_settle_path, init_taste_project, make_taste_agent_writer
+from conftest import init_taste_project, make_taste_agent_writer
 
 from continuous_refactoring.cli import _handle_taste, build_parser
 from continuous_refactoring.config import default_taste_text, global_dir
@@ -141,7 +141,8 @@ def test_refine_prompt_allows_open_ended_improvement_and_explicit_write_handoff(
     assert "do not modify either file again" in prompt
     assert "Do not add one unless the user explicitly asks for it" in prompt
     assert "- Keep helpers honest." in prompt
-    assert extract_settle_path(prompt) == taste_path.with_name("taste.md.done")
+    assert captured["content_path"] == str(taste_path)
+    assert captured["settle_path"] == str(taste_path.with_name("taste.md.done"))
 
 
 def test_taste_subparser_accepts_refine_flags() -> None:

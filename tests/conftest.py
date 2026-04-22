@@ -53,14 +53,15 @@ def make_taste_agent_writer(
         settle_window_seconds: float = 2.0,
         poll_interval_seconds: float = 0.1,
     ) -> int:
-        taste_path = extract_taste_path(prompt)
-        assert content_path == taste_path
+        assert content_path == extract_taste_path(prompt)
         assert settle_path == extract_settle_path(prompt)
         if captured is not None:
             captured["prompt"] = prompt
+            captured["content_path"] = str(content_path)
+            captured["settle_path"] = str(settle_path)
         if content is None:
             return return_code
-        taste_path.write_text(content, encoding="utf-8")
+        content_path.write_text(content, encoding="utf-8")
         settle_path.write_text(
             f"sha256:{hashlib.sha256(content.encode('utf-8')).hexdigest()}",
             encoding="utf-8",

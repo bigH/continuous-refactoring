@@ -1,0 +1,37 @@
+{
+  "awaiting_human_review": false,
+  "cooldown_until": null,
+  "created_at": "2026-04-22T05:12:54.812-07:00",
+  "current_phase": "characterize-attempt-behavior",
+  "human_review_reason": null,
+  "last_touch": "2026-04-22T05:30:44.084-07:00",
+  "name": "src-continuous-refactoring-loop-py-20260422T051254",
+  "phases": [
+    {
+      "done": false,
+      "file": "phase-1-characterize-attempt-behavior.md",
+      "name": "characterize-attempt-behavior",
+      "precondition": "The migration has not moved `_run_refactor_attempt()` or `_retry_context()` yet. Ordinary refactor attempts are still executed by `continuous_refactoring.loop._run_refactor_attempt`, `run_loop()` still imports `maybe_run_agent` and `run_tests` directly from `continuous_refactoring.agent`, and the existing focused loop tests pass. `AGENTS.md` may still say no active `loop.py` migration exists; that drift is the first thing this phase fixes before adding behavior coverage."
+    },
+    {
+      "done": false,
+      "file": "phase-2-extract-refactor-attempt.md",
+      "name": "extract-refactor-attempt",
+      "precondition": "Phase 1 is complete: `AGENTS.md` names this live `loop.py` migration and clarifies that `_SUBMODULES` controls root re-exporting, focused tests characterize current retryable attempt behavior, including rollback, retry-start cleanup, artifact paths, validation failure, validation infrastructure failure, agent-requested transitions, successful commits, and agent-created commit squashing. Those tests pass with `_run_refactor_attempt()` still implemented in `loop.py`."
+    },
+    {
+      "done": false,
+      "file": "phase-3-retarget-attempt-tests.md",
+      "name": "retarget-attempt-tests",
+      "precondition": "Phase 2 is complete: `src/continuous_refactoring/refactor_attempt.py` exists, has module-local `__all__`, is not listed in `__init__._SUBMODULES`, `run_loop()` calls `run_refactor_attempt()`, `retry_context()` is imported from the new module, `_finalize_commit()` still lives in `loop.py`, `run_once()` remains unchanged in behavior, the package root API is not widened, and all Phase 2 validation commands pass."
+    },
+    {
+      "done": false,
+      "file": "phase-4-contract-sweep.md",
+      "name": "contract-sweep",
+      "precondition": "Phase 3 is complete: tests patch the new attempt module where appropriate, `run_once()` tests retain their `loop.py` boundary, no test depends on `_run_refactor_attempt()` or `_retry_context()` in `loop.py`, the package-root API remains unchanged, and all Phase 3 validation commands pass."
+    }
+  ],
+  "status": "skipped",
+  "wake_up_on": null
+}

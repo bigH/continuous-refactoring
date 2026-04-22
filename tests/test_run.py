@@ -1595,7 +1595,7 @@ def test_run_agent_failure_undoes_commit_before_retry(
     run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Agent that commits then exits non-zero must not leak the commit into retry 2."""
+    """Agent commits that fail with the attempt must not leak into retry 2."""
     repo_root = run_loop_env
 
     base_sha = continuous_refactoring.run_command(
@@ -1610,12 +1610,18 @@ def test_run_agent_failure_undoes_commit_before_retry(
         agent_calls += 1
         rr = Path(str(kwargs.get("repo_root", "")))
         if agent_calls == 1:
-            # Agent commits a bad change, then exits non-zero (mirrors timeout
+            # Agent commits bad changes, then exits non-zero (mirrors timeout
             # or OOM after a commit).
             (rr / "bad_change.txt").write_text("bad\n", encoding="utf-8")
             continuous_refactoring.run_command(["git", "add", "-A"], cwd=rr)
             continuous_refactoring.run_command(
                 ["git", "commit", "-m", "agent bad commit before crash"], cwd=rr,
+            )
+            (rr / "worse_change.txt").write_text("worse\n", encoding="utf-8")
+            continuous_refactoring.run_command(["git", "add", "-A"], cwd=rr)
+            continuous_refactoring.run_command(
+                ["git", "commit", "-m", "agent second bad commit before crash"],
+                cwd=rr,
             )
             return _failing_agent(**kwargs)
         if agent_calls == 2:
@@ -1649,3 +1655,7 @@ def test_run_agent_failure_undoes_commit_before_retry(
         line for line in log.stdout.splitlines() if "continuous refactor" in line
     ]
     assert len(refactor_commits) == 1
+    status = continuous_refactoring.run_command(
+        ["git", "status", "--porcelain"], cwd=repo_root,
+    )
+    assert status.stdout == ""

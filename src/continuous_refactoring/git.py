@@ -107,10 +107,8 @@ def undo_last_commit(repo_root: Path) -> None:
 
 
 def revert_to(repo_root: Path, expected_head: str) -> None:
-    if get_head_sha(repo_root) != expected_head:
-        undo_last_commit(repo_root)
-    else:
-        discard_workspace_changes(repo_root)
+    run_command(["git", "reset", "--hard", expected_head], cwd=repo_root)
+    run_command(["git", "clean", "-fd"], cwd=repo_root)
 
 
 def get_head_sha(repo_root: Path) -> str:

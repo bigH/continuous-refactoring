@@ -513,6 +513,7 @@ def run_once(args: argparse.Namespace) -> int:
 
     final_status = "running"
     error_message: str | None = None
+    head_before: str | None = None
     try:
         require_clean_worktree(repo_root)
 
@@ -591,7 +592,6 @@ def run_once(args: argparse.Namespace) -> int:
         )
 
         if validation_result.returncode != 0:
-            revert_to(repo_root, head_before)
             final_status = "validation_failed"
             raise ContinuousRefactorError("Validation failed after agent run")
 
@@ -614,6 +614,8 @@ def run_once(args: argparse.Namespace) -> int:
         return 0
 
     except ContinuousRefactorError as error:
+        if head_before is not None:
+            revert_to(repo_root, head_before)
         if final_status == "running":
             final_status = "failed"
         error_message = str(error)

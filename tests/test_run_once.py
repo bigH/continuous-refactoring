@@ -84,6 +84,54 @@ def test_run_once_validation_gate(
     assert "agent commit" not in log.stdout
 
 
+def test_run_once_agent_failure_undoes_commits(
+    run_once_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def commit_twice_then_fail(**kwargs: object) -> CommandCapture:
+        rr = Path(str(kwargs.get("repo_root", "")))
+        stdout_path = Path(str(kwargs["stdout_path"]))
+        stderr_path = Path(str(kwargs["stderr_path"]))
+        for name in ("bad", "worse"):
+            (rr / f"{name}_change.txt").write_text(f"{name}\n", encoding="utf-8")
+            continuous_refactoring.run_command(["git", "add", "-A"], cwd=rr)
+            continuous_refactoring.run_command(
+                ["git", "commit", "-m", f"agent {name} commit"],
+                cwd=rr,
+            )
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stderr_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text("fail\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return CommandCapture(
+            command=("fake",),
+            returncode=1,
+            stdout="fail\n",
+            stderr="",
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.loop.maybe_run_agent",
+        commit_twice_then_fail,
+    )
+
+    args = make_run_once_args(run_once_env)
+    with pytest.raises(ContinuousRefactorError, match="Agent failed"):
+        continuous_refactoring.run_once(args)
+
+    log = continuous_refactoring.run_command(
+        ["git", "log", "--oneline"], cwd=run_once_env,
+    )
+    assert "agent bad commit" not in log.stdout
+    assert "agent worse commit" not in log.stdout
+    status = continuous_refactoring.run_command(
+        ["git", "status", "--porcelain"], cwd=run_once_env,
+    )
+    assert status.stdout == ""
+
+
 def test_run_once_no_fix_retry(
     run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -198,5 +246,3 @@ def test_ctrl_c_prints_file_paths(
     assert exit_code == 130
     captured = capsys.readouterr()
     assert "Artifact logs:" in captured.err
-
-

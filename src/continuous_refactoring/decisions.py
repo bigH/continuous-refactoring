@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Literal, get_args
 
 from continuous_refactoring.prompts import (
     CONTINUOUS_REFACTORING_STATUS_BEGIN,
@@ -32,20 +32,10 @@ RunnerDecision = Literal["commit", "retry", "abandon", "blocked"]
 RetryRecommendation = Literal["same-target", "new-target", "none", "human-review"]
 RouteOutcome = Literal["not-routed", "commit", "abandon", "blocked"]
 
-_VALID_DECISIONS = frozenset({
-    "commit",
-    "retry",
-    "abandon",
-    "blocked",
-    None,
-})
-_VALID_RETRY_RECOMMENDATIONS = frozenset({
-    "same-target",
-    "new-target",
-    "none",
-    "human-review",
-    None,
-})
+_VALID_DECISIONS = frozenset((*get_args(RunnerDecision), None))
+_VALID_RETRY_RECOMMENDATIONS = frozenset(
+    (*get_args(RetryRecommendation), None),
+)
 
 
 @dataclass(frozen=True)

@@ -3,10 +3,13 @@ from __future__ import annotations
 import random
 import string
 from pathlib import Path
+from typing import get_args
 
 import pytest
 
 from continuous_refactoring.decisions import (
+    RetryRecommendation,
+    RunnerDecision,
     error_failure_kind,
     parse_status_block,
     sanitize_text,
@@ -80,6 +83,28 @@ def test_parse_status_block_normalizes_invalid_enum_values() -> None:
     assert status.summary == "keep parsing"
 
 
+@pytest.mark.parametrize("decision", get_args(RunnerDecision))
+def test_parse_status_block_accepts_each_runner_decision(
+    decision: RunnerDecision,
+) -> None:
+    status = parse_status_block(_status_block(f"decision: {decision}"))
+
+    assert status is not None
+    assert status.decision == decision
+
+
+@pytest.mark.parametrize("retry_recommendation", get_args(RetryRecommendation))
+def test_parse_status_block_accepts_each_retry_recommendation(
+    retry_recommendation: RetryRecommendation,
+) -> None:
+    status = parse_status_block(
+        _status_block(f"retry_recommendation: {retry_recommendation}"),
+    )
+
+    assert status is not None
+    assert status.retry_recommendation == retry_recommendation
+
+
 @pytest.mark.parametrize(
     ("text", "expected"),
     [
@@ -114,8 +139,8 @@ def test_parse_status_block_never_raises_on_generated_corpus() -> None:
         ],
     )
 
-    allowed_decisions = {"commit", "retry", "abandon", "blocked", None}
-    allowed_retries = {"same-target", "new-target", "none", "human-review", None}
+    allowed_decisions = set(get_args(RunnerDecision)) | {None}
+    allowed_retries = set(get_args(RetryRecommendation)) | {None}
 
     for text in corpus:
         status = parse_status_block(text)

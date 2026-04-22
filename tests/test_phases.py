@@ -981,11 +981,13 @@ def test_execute_phase_unknown_phase_does_not_mark_manifest_complete(
         precondition="not in manifest",
     )
 
-    monkeypatch.setattr(
-        "continuous_refactoring.phases.get_head_sha", lambda _: "abc123",
-    )
-    _patch_agent(monkeypatch, "executed unknown phase\n", tmp_path)
-    monkeypatch.setattr("continuous_refactoring.phases.run_tests", _passing_tests)
+    def fail_if_called(*args: object, **kwargs: object) -> object:
+        pytest.fail("unknown phases must fail before side effects")
+
+    monkeypatch.setattr("continuous_refactoring.phases.get_head_sha", fail_if_called)
+    monkeypatch.setattr("continuous_refactoring.phases.maybe_run_agent", fail_if_called)
+    monkeypatch.setattr("continuous_refactoring.phases.run_tests", fail_if_called)
+    monkeypatch.setattr("continuous_refactoring.phases.revert_to", fail_if_called)
 
     with pytest.raises(ContinuousRefactorError, match="not found in manifest"):
         execute_phase(

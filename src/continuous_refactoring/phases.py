@@ -87,6 +87,13 @@ def _phase_target_label(manifest: MigrationManifest, phase: PhaseSpec) -> str:
     return f"{manifest.name} {phase_file_reference(phase)} ({phase.name})"
 
 
+def _phase_index(manifest: MigrationManifest, phase_name: str) -> int:
+    for index, manifest_phase in enumerate(manifest.phases):
+        if manifest_phase.name == phase_name:
+            return index
+    raise ContinuousRefactorError(f"Phase {phase_name!r} not found in manifest")
+
+
 def _parse_ready_verdict(stdout: str) -> tuple[ReadyVerdict, str]:
     nonempty_lines = [line.strip() for line in stdout.splitlines() if line.strip()]
     if not nonempty_lines:
@@ -508,16 +515,9 @@ def _complete_phase(
     manifest: MigrationManifest,
     live_dir: Path,
     *,
+    phase_index: int,
     retry: int,
 ) -> ExecutePhaseOutcome:
-    phase_index = None
-    for index, manifest_phase in enumerate(manifest.phases):
-        if manifest_phase.name == phase.name:
-            phase_index = index
-            break
-    if phase_index is None:
-        raise ContinuousRefactorError(f"Phase {phase.name!r} not found in manifest")
-
     updated_phases = tuple(
         replace(manifest_phase, done=True) if index == phase_index else manifest_phase
         for index, manifest_phase in enumerate(manifest.phases)
@@ -568,6 +568,7 @@ def execute_phase(
     validation_command: str,
     max_attempts: int | None,
 ) -> ExecutePhaseOutcome:
+    phase_index = _phase_index(manifest, phase.name)
     head_before = get_head_sha(repo_root)
     target_label = _phase_target_label(manifest, phase)
     retry_context: str | None = None
@@ -618,6 +619,7 @@ def execute_phase(
                 phase,
                 manifest,
                 live_dir,
+                phase_index=phase_index,
                 retry=retry_number,
             )
 

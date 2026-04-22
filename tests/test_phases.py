@@ -104,6 +104,51 @@ def _patch_agent(
     )
 
 
+def _status_block(
+    *,
+    phase_reached: str = "refactor",
+    decision: str = "commit",
+    failure_kind: str = "none",
+    summary: str = "Ready to commit.",
+    next_retry_focus: str = "none",
+) -> str:
+    return f"""\
+BEGIN_CONTINUOUS_REFACTORING_STATUS
+phase_reached: {phase_reached}
+decision: {decision}
+retry_recommendation: none
+failure_kind: {failure_kind}
+summary: {summary}
+next_retry_focus: {next_retry_focus}
+tests_run: none
+evidence:
+  - none
+END_CONTINUOUS_REFACTORING_STATUS
+"""
+
+
+def _patch_status_agent(
+    monkeypatch: pytest.MonkeyPatch,
+    stdout: str,
+    tmp_path: Path,
+    *,
+    returncode: int = 0,
+    prompts: list[str] | None = None,
+) -> None:
+    def fake_agent(**kwargs: object) -> CommandCapture:
+        if prompts is not None:
+            prompts.append(str(kwargs.get("prompt", "")))
+        for key in ("stdout_path", "stderr_path"):
+            path = Path(str(kwargs[key]))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+        return _fake_capture(stdout, returncode=returncode, tmp_path=tmp_path)
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.maybe_run_agent", fake_agent,
+    )
+
+
 @pytest.fixture(autouse=True)
 def _isolate_tmpdir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
@@ -349,6 +394,52 @@ def test_final_phase_completion_marks_migration_done(
     assert reloaded.phases[1].done is True
 
 
+def test_execute_phase_success_clears_deferred_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = tmp_path / "live"
+    old_touch = "2020-01-01T00:00:00.000+00:00"
+    manifest = replace(
+        _make_manifest(last_touch=old_touch),
+        wake_up_on="2020-01-08T00:00:00.000+00:00",
+        awaiting_human_review=True,
+        human_review_reason="needs a person",
+        cooldown_until="2020-01-01T06:00:00.000+00:00",
+    )
+    manifest_path = _save_manifest_to_disk(manifest, live_dir)
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.get_head_sha", lambda _: "abc123",
+    )
+    _patch_agent(monkeypatch, "executed phase work\n", tmp_path)
+    monkeypatch.setattr("continuous_refactoring.phases.run_tests", _passing_tests)
+
+    outcome = execute_phase(
+        _PHASE_0,
+        manifest,
+        _TASTE,
+        tmp_path,
+        live_dir,
+        _make_artifacts(tmp_path),
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        validation_command="true",
+        max_attempts=1,
+    )
+
+    assert outcome.status == "done"
+
+    reloaded = load_manifest(manifest_path)
+    assert reloaded.last_touch != old_touch
+    assert reloaded.wake_up_on is None
+    assert reloaded.awaiting_human_review is False
+    assert reloaded.human_review_reason is None
+    assert reloaded.cooldown_until is None
+    assert reloaded.current_phase == "migrate"
+
+
 # ---------------------------------------------------------------------------
 # ready=no leaves manifest untouched except last_touch + wake_up_on bump
 # ---------------------------------------------------------------------------
@@ -466,6 +557,121 @@ def test_execute_phase_test_failure_reverts_workspace(
     assert reloaded.current_phase == original.current_phase
 
 
+def test_execute_phase_agent_exception_fails_and_preserves_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = tmp_path / "live"
+    manifest = _make_manifest()
+    manifest_path = _save_manifest_to_disk(manifest, live_dir)
+    original = manifest_path.read_text(encoding="utf-8")
+    artifacts = _make_artifacts(tmp_path)
+
+    reverted: list[str] = []
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.get_head_sha", lambda _: "abc123",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.revert_to",
+        lambda _repo, head: reverted.append(head),
+    )
+
+    def broken_agent(**kwargs: object) -> CommandCapture:
+        raise ContinuousRefactorError(
+            f"codex exec --model fake HUGE-PROMPT\nfailed inside {tmp_path}"
+        )
+
+    def fail_if_called(*args: object, **kwargs: object) -> CommandCapture:
+        pytest.fail("validation should not run after agent execution failure")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.maybe_run_agent", broken_agent,
+    )
+    monkeypatch.setattr("continuous_refactoring.phases.run_tests", fail_if_called)
+
+    outcome = execute_phase(
+        _PHASE_0,
+        manifest,
+        _TASTE,
+        tmp_path,
+        live_dir,
+        artifacts,
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        validation_command="true",
+        max_attempts=1,
+    )
+
+    assert outcome == ExecutePhaseOutcome(
+        status="failed",
+        reason="failed inside <repo>",
+        call_role="phase.execute",
+        phase_reached="phase.execute",
+        failure_kind="agent-infra-failure",
+        retry=1,
+    )
+    assert reverted == ["abc123"]
+    assert artifacts.attempts[1].failure_summary == "failed inside <repo>"
+    assert manifest_path.read_text(encoding="utf-8") == original
+
+
+def test_execute_phase_agent_nonzero_uses_status_fallback_without_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = tmp_path / "live"
+    manifest = _make_manifest()
+    manifest_path = _save_manifest_to_disk(manifest, live_dir)
+    original = manifest_path.read_text(encoding="utf-8")
+
+    reverted: list[str] = []
+    validation_called = False
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.get_head_sha", lambda _: "abc123",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.revert_to",
+        lambda _repo, head: reverted.append(head),
+    )
+    _patch_status_agent(
+        monkeypatch,
+        _status_block(phase_reached="refactor", summary="agent status summary"),
+        tmp_path,
+        returncode=17,
+    )
+
+    def fail_if_called(*args: object, **kwargs: object) -> CommandCapture:
+        nonlocal validation_called
+        validation_called = True
+        pytest.fail("validation should not run after nonzero agent exit")
+
+    monkeypatch.setattr("continuous_refactoring.phases.run_tests", fail_if_called)
+
+    outcome = execute_phase(
+        _PHASE_0,
+        manifest,
+        _TASTE,
+        tmp_path,
+        live_dir,
+        _make_artifacts(tmp_path),
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        validation_command="true",
+        max_attempts=1,
+    )
+
+    assert outcome.status == "failed"
+    assert outcome.call_role == "phase.execute"
+    assert outcome.phase_reached == "refactor"
+    assert outcome.failure_kind == "agent-exited-nonzero"
+    assert outcome.reason == "agent status summary"
+    assert reverted == ["abc123"]
+    assert validation_called is False
+    assert manifest_path.read_text(encoding="utf-8") == original
+
+
 def test_execute_phase_retries_after_validation_failure_and_succeeds(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -548,6 +754,155 @@ def test_execute_phase_retries_after_validation_failure_and_succeeds(
     assert reloaded.phases[0].done is True
 
 
+def test_execute_phase_validation_infra_failure_retries_then_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = tmp_path / "live"
+    manifest = _make_manifest()
+    manifest_path = _save_manifest_to_disk(manifest, live_dir)
+    original = manifest_path.read_text(encoding="utf-8")
+
+    prompts: list[str] = []
+    validation_calls = 0
+    reverted: list[str] = []
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.get_head_sha", lambda _: "abc123",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.revert_to",
+        lambda _repo, head: reverted.append(head),
+    )
+    _patch_status_agent(
+        monkeypatch,
+        _status_block(
+            phase_reached="refactor",
+            summary="agent says retryable",
+            next_retry_focus="use the agent focus",
+        ),
+        tmp_path,
+        prompts=prompts,
+    )
+
+    def broken_validation(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        nonlocal validation_calls
+        validation_calls += 1
+        raise ContinuousRefactorError(
+            f"RAW-VALIDATION-OUTPUT leaked from {tmp_path}"
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.run_tests", broken_validation,
+    )
+
+    outcome = execute_phase(
+        _PHASE_0,
+        manifest,
+        _TASTE,
+        tmp_path,
+        live_dir,
+        _make_artifacts(tmp_path),
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        validation_command="true",
+        max_attempts=2,
+    )
+
+    assert outcome.status == "failed"
+    assert outcome.call_role == "phase.validation"
+    assert outcome.phase_reached == "refactor"
+    assert outcome.failure_kind == "validation-infra-failure"
+    assert outcome.reason == "agent says retryable"
+    assert outcome.retry == 2
+    assert validation_calls == 2
+    assert len(prompts) == 2
+    assert "## Retry Context" in prompts[1]
+    assert "agent says retryable" in prompts[1]
+    assert "use the agent focus" in prompts[1]
+    assert "RAW-VALIDATION-OUTPUT" not in prompts[1]
+    assert reverted == ["abc123", "abc123", "abc123"]
+    assert manifest_path.read_text(encoding="utf-8") == original
+
+
+def test_execute_phase_unlimited_retries_until_validation_succeeds(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = tmp_path / "live"
+    manifest = _make_manifest()
+    manifest_path = _save_manifest_to_disk(manifest, live_dir)
+
+    validation_calls = 0
+    reverted: list[str] = []
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.get_head_sha", lambda _: "abc123",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.revert_to",
+        lambda _repo, head: reverted.append(head),
+    )
+    _patch_status_agent(
+        monkeypatch,
+        _status_block(summary="agent says keep trying"),
+        tmp_path,
+    )
+
+    def fail_three_times_then_pass(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        nonlocal validation_calls
+        validation_calls += 1
+        if validation_calls <= 3:
+            return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return _passing_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.run_tests", fail_three_times_then_pass,
+    )
+
+    outcome = execute_phase(
+        _PHASE_0,
+        manifest,
+        _TASTE,
+        tmp_path,
+        live_dir,
+        _make_artifacts(tmp_path),
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        validation_command="true",
+        max_attempts=None,
+    )
+
+    assert outcome.status == "done"
+    assert outcome.retry == 4
+    assert validation_calls == 4
+    assert reverted == [
+        "abc123",
+        "abc123",
+        "abc123",
+        "abc123",
+        "abc123",
+        "abc123",
+    ]
+
+    reloaded = load_manifest(manifest_path)
+    assert reloaded.phases[0].done is True
+
+
 def test_execute_phase_exhausts_retry_budget_on_validation_failure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -612,6 +967,43 @@ def test_execute_phase_exhausts_retry_budget_on_validation_failure(
     reloaded = load_manifest(manifest_path)
     assert reloaded.phases == original.phases
     assert reloaded.current_phase == original.current_phase
+
+
+def test_execute_phase_unknown_phase_does_not_mark_manifest_complete(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = tmp_path / "live"
+    manifest = _make_manifest()
+    manifest_path = _save_manifest_to_disk(manifest, live_dir)
+    original = manifest_path.read_text(encoding="utf-8")
+    unknown_phase = PhaseSpec(
+        name="missing", file="phase-9-missing.md", done=False,
+        precondition="not in manifest",
+    )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.get_head_sha", lambda _: "abc123",
+    )
+    _patch_agent(monkeypatch, "executed unknown phase\n", tmp_path)
+    monkeypatch.setattr("continuous_refactoring.phases.run_tests", _passing_tests)
+
+    with pytest.raises(ContinuousRefactorError, match="not found in manifest"):
+        execute_phase(
+            unknown_phase,
+            manifest,
+            _TASTE,
+            tmp_path,
+            live_dir,
+            _make_artifacts(tmp_path),
+            agent="codex",
+            model="fake",
+            effort="low",
+            timeout=None,
+            validation_command="true",
+            max_attempts=1,
+        )
+
+    assert manifest_path.read_text(encoding="utf-8") == original
 
 
 def test_execute_phase_retry_prompt_uses_sanitized_validation_context(

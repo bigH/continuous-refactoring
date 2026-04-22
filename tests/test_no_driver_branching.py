@@ -22,22 +22,109 @@ from conftest import (
 )
 
 
-_BRANCHING_TOKENS = ("checkout", "switch")
-_BRANCHING_PAIRS = (
-    ("checkout", "-b"),
-    ("branch", "-c"),
-    ("branch", "-D"),
-)
+_BRANCH_SWITCH_COMMANDS = {"checkout", "switch"}
+_BRANCH_MUTATION_FLAGS = {
+    "--copy",
+    "--delete",
+    "--edit-description",
+    "--move",
+    "--no-track",
+    "--set-upstream-to",
+    "--track",
+    "--unset-upstream",
+    "-C",
+    "-D",
+    "-M",
+    "-c",
+    "-d",
+    "-m",
+    "-u",
+}
+_BRANCH_MUTATION_FLAG_PREFIXES = ("--set-upstream-to=",)
+_READ_ONLY_BRANCH_FLAGS = {
+    "--all",
+    "--contains",
+    "--format",
+    "--list",
+    "--merged",
+    "--no-contains",
+    "--no-merged",
+    "--points-at",
+    "--remotes",
+    "--show-current",
+    "--sort",
+    "-a",
+    "-l",
+    "-r",
+}
 
 
 def _is_branching_argv(argv: tuple[str, ...]) -> bool:
     if not argv or argv[0] != "git":
         return False
-    rest = argv[1:]
-    if any(token in rest for token in _BRANCHING_TOKENS):
+    command = argv[1] if len(argv) > 1 else ""
+    args = argv[2:]
+    if command in _BRANCH_SWITCH_COMMANDS:
         return True
-    adjacent_pairs = set(zip(rest, rest[1:]))
-    return any(pair in adjacent_pairs for pair in _BRANCHING_PAIRS)
+    if command != "branch":
+        return False
+    if _has_branch_mutation_flag(args):
+        return True
+    if _is_read_only_branch_args(args):
+        return False
+    return any(not arg.startswith("-") for arg in args)
+
+
+def _has_branch_mutation_flag(args: tuple[str, ...]) -> bool:
+    return any(
+        arg in _BRANCH_MUTATION_FLAGS
+        or any(arg.startswith(prefix) for prefix in _BRANCH_MUTATION_FLAG_PREFIXES)
+        for arg in args
+    )
+
+
+def _is_read_only_branch_args(args: tuple[str, ...]) -> bool:
+    return not args or args[0] in _READ_ONLY_BRANCH_FLAGS
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        ("git", "branch", "feature"),
+        ("git", "branch", "-c", "main", "feature"),
+        ("git", "branch", "-D", "feature"),
+        ("git", "branch", "--delete", "feature"),
+        ("git", "branch", "--edit-description"),
+        ("git", "branch", "--set-upstream-to=origin/main"),
+        ("git", "branch", "--unset-upstream"),
+        ("git", "checkout", "feature"),
+        ("git", "checkout", "-b", "feature"),
+        ("git", "switch", "feature"),
+    ],
+)
+def test_branching_detector_flags_branch_mutations(argv: tuple[str, ...]) -> None:
+    assert _is_branching_argv(argv)
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        (),
+        ("python", "-m", "pytest"),
+        ("git", "status", "--porcelain"),
+        ("git", "branch"),
+        ("git", "branch", "--show-current"),
+        ("git", "branch", "--list"),
+        ("git", "branch", "--list", "feature-*"),
+        ("git", "branch", "--contains", "HEAD"),
+        ("git", "branch", "--merged", "main"),
+        ("git", "branch", "--no-contains", "HEAD"),
+    ],
+)
+def test_branching_detector_allows_non_mutating_commands(
+    argv: tuple[str, ...],
+) -> None:
+    assert not _is_branching_argv(argv)
 
 
 def _install_argv_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:

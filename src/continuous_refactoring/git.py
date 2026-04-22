@@ -67,8 +67,7 @@ def require_clean_worktree(repo_root: Path) -> None:
 
 
 def discard_workspace_changes(repo_root: Path) -> None:
-    run_command(["git", "reset", "--hard", "HEAD"], cwd=repo_root)
-    run_command(["git", "clean", "-fd"], cwd=repo_root)
+    _reset_hard_and_clean(repo_root, "HEAD")
 
 
 def repo_change_count(repo_root: Path) -> int:
@@ -107,11 +106,15 @@ def undo_last_commit(repo_root: Path) -> None:
 
 
 def revert_to(repo_root: Path, expected_head: str) -> None:
-    run_command(["git", "reset", "--hard", expected_head], cwd=repo_root)
-    run_command(["git", "clean", "-fd"], cwd=repo_root)
+    _reset_hard_and_clean(repo_root, expected_head)
 
 
 def get_head_sha(repo_root: Path) -> str:
     return run_command(
         ["git", "rev-parse", "HEAD"], cwd=repo_root
     ).stdout.strip()
+
+
+def _reset_hard_and_clean(repo_root: Path, revision: str) -> None:
+    run_command(["git", "reset", "--hard", revision], cwd=repo_root)
+    run_command(["git", "clean", "-fd"], cwd=repo_root)

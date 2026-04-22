@@ -44,6 +44,9 @@ _READY_RE = re.compile(
     r"^ready:\s*(?P<verdict>yes|no|unverifiable)\b(?P<reason>.*)$",
     re.IGNORECASE,
 )
+_PHASE_EXECUTE_ROLE = "phase.execute"
+_PHASE_VALIDATION_ROLE = "phase.validation"
+_VALIDATION_FAILED_SUMMARY = "validation failed after phase execution"
 
 
 @dataclass(frozen=True)
@@ -181,7 +184,7 @@ def check_phase_ready(
     return _parse_ready_verdict(result.stdout)
 
 
-def _fail_execute(
+def _terminal_phase_failure(
     artifacts: RunArtifacts,
     *,
     attempt: int,
@@ -284,12 +287,11 @@ def _run_phase_agent(
     effort: str,
     timeout: int | None,
 ) -> _PhaseAgentRun:
-    call_role = "phase.execute"
     artifacts.log_call_started(
         attempt=attempt,
         retry=phase_attempt.retry,
         target=target_label,
-        call_role=call_role,
+        call_role=_PHASE_EXECUTE_ROLE,
     )
 
     try:
@@ -309,13 +311,13 @@ def _run_phase_agent(
         summary = sanitize_text(str(error), repo_root) or str(error)
         return _PhaseAgentRun(
             status=None,
-            phase_reached=call_role,
-            failure=_fail_execute(
+            phase_reached=_PHASE_EXECUTE_ROLE,
+            failure=_terminal_phase_failure(
                 artifacts,
                 attempt=attempt,
                 retry=phase_attempt.retry,
                 target_label=target_label,
-                call_role=call_role,
+                call_role=_PHASE_EXECUTE_ROLE,
                 phase_reached=None,
                 repo_root=repo_root,
                 head_before=head_before,
@@ -330,7 +332,7 @@ def _run_phase_agent(
         last_message_path=phase_attempt.last_message_path,
         fallback_text=result.stdout,
     )
-    phase_reached = resolved_phase_reached(agent_status, call_role)
+    phase_reached = resolved_phase_reached(agent_status, _PHASE_EXECUTE_ROLE)
 
     if result.returncode != 0:
         summary, _ = status_summary(
@@ -341,12 +343,12 @@ def _run_phase_agent(
         return _PhaseAgentRun(
             status=agent_status,
             phase_reached=phase_reached,
-            failure=_fail_execute(
+            failure=_terminal_phase_failure(
                 artifacts,
                 attempt=attempt,
                 retry=phase_attempt.retry,
                 target_label=target_label,
-                call_role=call_role,
+                call_role=_PHASE_EXECUTE_ROLE,
                 phase_reached=phase_reached,
                 repo_root=repo_root,
                 head_before=head_before,
@@ -361,7 +363,7 @@ def _run_phase_agent(
         attempt=attempt,
         retry=phase_attempt.retry,
         target=target_label,
-        call_role=call_role,
+        call_role=_PHASE_EXECUTE_ROLE,
         status="finished",
         returncode=result.returncode,
     )
@@ -381,12 +383,11 @@ def _run_phase_validation(
     repo_root: Path,
     validation_command: str,
 ) -> _PhaseValidationResult:
-    call_role = "phase.validation"
     artifacts.log_call_started(
         attempt=attempt,
         retry=phase_attempt.retry,
         target=target_label,
-        call_role=call_role,
+        call_role=_PHASE_VALIDATION_ROLE,
         phase_reached=agent_run.phase_reached,
     )
     try:
@@ -413,7 +414,7 @@ def _run_phase_validation(
     if test_result.returncode != 0:
         summary, focus = status_summary(
             agent_run.status,
-            fallback="validation failed after phase execution",
+            fallback=_VALIDATION_FAILED_SUMMARY,
             repo_root=repo_root,
         )
         return _PhaseValidationResult(
@@ -428,7 +429,7 @@ def _run_phase_validation(
         attempt=attempt,
         retry=phase_attempt.retry,
         target=target_label,
-        call_role=call_role,
+        call_role=_PHASE_VALIDATION_ROLE,
         phase_reached=agent_run.phase_reached,
         status="finished",
         returncode=test_result.returncode,
@@ -437,13 +438,13 @@ def _run_phase_validation(
 
 
 def _can_retry_phase_validation(
-    current_retry: int,
+    retry_number: int,
     max_attempts: int | None,
 ) -> bool:
-    return max_attempts is None or current_retry < max_attempts
+    return max_attempts is None or retry_number < max_attempts
 
 
-def _retry_phase_execution_context(
+def _record_retryable_validation_failure(
     validation_result: _PhaseValidationResult,
     artifacts: RunArtifacts,
     *,
@@ -454,13 +455,12 @@ def _retry_phase_execution_context(
     repo_root: Path,
     head_before: str,
 ) -> str:
-    call_role = "phase.validation"
-    summary = validation_result.summary or "validation failed after phase execution"
+    summary = validation_result.summary or _VALIDATION_FAILED_SUMMARY
     artifacts.log_call_finished(
         attempt=attempt,
         retry=retry,
         target=target_label,
-        call_role=call_role,
+        call_role=_PHASE_VALIDATION_ROLE,
         phase_reached=phase_reached,
         status="failed",
         level="WARN",
@@ -470,7 +470,7 @@ def _retry_phase_execution_context(
     revert_to(repo_root, head_before)
     return _phase_retry_context(
         target_label,
-        call_role,
+        _PHASE_VALIDATION_ROLE,
         summary,
         validation_result.focus,
     )
@@ -487,16 +487,16 @@ def _fail_phase_validation(
     repo_root: Path,
     head_before: str,
 ) -> ExecutePhaseOutcome:
-    return _fail_execute(
+    return _terminal_phase_failure(
         artifacts,
         attempt=attempt,
         retry=retry,
         target_label=target_label,
-        call_role="phase.validation",
+        call_role=_PHASE_VALIDATION_ROLE,
         phase_reached=phase_reached,
         repo_root=repo_root,
         head_before=head_before,
-        reason=validation_result.summary or "validation failed after phase execution",
+        reason=validation_result.summary or _VALIDATION_FAILED_SUMMARY,
         failure_kind=validation_result.failure_kind or "validation-failed",
         returncode=validation_result.returncode,
         summary=validation_result.summary,
@@ -571,7 +571,7 @@ def execute_phase(
     head_before = get_head_sha(repo_root)
     target_label = _phase_target_label(manifest, phase)
     retry_context: str | None = None
-    current_retry = retry
+    retry_number = retry
 
     while True:
         phase_attempt = _prepare_phase_attempt(
@@ -580,7 +580,7 @@ def execute_phase(
             taste,
             artifacts,
             attempt=attempt,
-            retry=current_retry,
+            retry=retry_number,
             first_retry=retry,
             agent=agent,
             repo_root=repo_root,
@@ -618,29 +618,29 @@ def execute_phase(
                 phase,
                 manifest,
                 live_dir,
-                retry=current_retry,
+                retry=retry_number,
             )
 
-        if not _can_retry_phase_validation(current_retry, max_attempts):
+        if not _can_retry_phase_validation(retry_number, max_attempts):
             return _fail_phase_validation(
                 validation_result,
                 artifacts,
                 attempt=attempt,
-                retry=current_retry,
+                retry=retry_number,
                 target_label=target_label,
                 phase_reached=agent_run.phase_reached,
                 repo_root=repo_root,
                 head_before=head_before,
             )
 
-        retry_context = _retry_phase_execution_context(
+        retry_context = _record_retryable_validation_failure(
             validation_result,
             artifacts,
             attempt=attempt,
-            retry=current_retry,
+            retry=retry_number,
             target_label=target_label,
             phase_reached=agent_run.phase_reached,
             repo_root=repo_root,
             head_before=head_before,
         )
-        current_retry += 1
+        retry_number += 1

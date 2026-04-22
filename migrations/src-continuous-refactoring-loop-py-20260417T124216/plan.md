@@ -2,8 +2,8 @@
 
 **Target:** `src/continuous_refactoring/loop.py` (1646 lines)
 **Chosen approach:** `split-by-domain`
-**Current landed state after rollback:** phase 1 (`decisions.py`) is still present in the repo. Phases 2–4 were reverted: `failure_report.py` and `routing_pipeline.py` do not exist, the corresponding helpers still live in `loop.py`, and the affected tests still monkeypatch `continuous_refactoring.loop` for those symbols.
-**Near-term goal shape:** finish the remaining extractions (`failure_report.py`, `routing_pipeline.py`) and then do a no-new-extraction tidy pass in `loop.py`. That scope should leave `loop.py` roughly **950–1100 lines**, not ~500.
+**Current landed state:** phases 1–3 are landed; `decisions.py`, `failure_report.py`, and `routing_pipeline.py` own their extracted symbols. Phase 4 is the remaining cleanup pass.
+**Near-term goal shape:** finish the no-new-extraction tidy pass in `loop.py`. That scope should leave `loop.py` roughly **950–1100 lines**, not ~500.
 **Stretch goal:** getting `loop.py` near ~500 lines needs a later migration with additional extraction scope (most likely `_run_refactor_attempt`, retry/commit plumbing, or the top-level loop orchestration). Phase 4 does **not** include that work.
 
 Each phase is a single commit / single PR, leaves the repo shippable, and is validated by the existing test suite plus the normal CLI import/help checks. No flags, no shims, no re-exports.
@@ -27,11 +27,11 @@ phase-1 (decisions)
 phase-2 + phase-3 ──► phase-4 (trim loop.py)
 ```
 
-The manifest still advances in numeric order, so after this rollback `current_phase` should remain `failure-report` until phase 2 lands again.
+The manifest advances in numeric order; with phases 2 and 3 complete, `current_phase` is `trim-loop`.
 
 ## Cross-Cutting Concerns
 
-- **Test monkeypatch paths reverted with the code.** Today the routing/failure-report tests still patch `continuous_refactoring.loop.*`. When phases 2 or 3 land, update the corresponding monkeypatch targets and imports in the same commit. The main files to grep are `tests/test_scope_loop_integration.py`, `tests/test_loop_migration_tick.py`, `tests/test_focus_on_live_migrations.py`, `tests/test_no_driver_branching.py`, and routing-related cases in `tests/test_run.py`.
+- **Moved-symbol monkeypatch paths are updated.** Routing/failure-report tests should patch `continuous_refactoring.routing_pipeline.*` or `continuous_refactoring.failure_report.*` for extracted symbols, not `continuous_refactoring.loop.*`.
 - **No re-export shims.** If a symbol moves out of `loop.py`, every call site and every test monkeypatch target must move to the new FQN in the same commit.
 - **Avoid circular imports.** Phase 3 must not import private helpers back from `loop.py`. If the extracted routing helpers still need data such as the resolved live-migrations dir or a commit finalizer, pass those in from `loop.py` or define local helpers inside `routing_pipeline.py`.
 - **Naming.** Keep concrete module names: `decisions`, `failure_report`, `routing_pipeline`. No `utils`, `helpers`, `common`.

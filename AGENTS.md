@@ -77,7 +77,7 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 ## 9. Active migration of `loop.py`
 
 - Path: `migrations/src-continuous-refactoring-loop-py-20260417T124216/`
-- Plan: phase 1 (`decisions.py`) is landed; the remaining live phases extract `failure_report.py` and `routing_pipeline.py`, then do a no-new-extraction tidy pass in `loop.py`.
+- Plan: phases 1–3 (`decisions.py`, `failure_report.py`, `routing_pipeline.py`) are landed; the active final phase is a no-new-extraction tidy pass in `loop.py`.
 - Realistic size target for this live four-phase migration: `loop.py` roughly 950–1100 lines after phases 2–4. Reaching ~500 needs a later follow-up extraction migration; do not assume phase 3 or 4 can get there alone.
 - **Before editing `loop.py`, read `plan.md` and the current phase doc.** Structural edits may collide with in-flight phases.
 - **No re-export shims.** Symbol moves update every call site and every test monkeypatch target in the same commit.
@@ -89,7 +89,7 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 - **Codex terminal reset** (`agent.py:342-372`) — raw ANSI reset after force-stop. Codex leaves the tty corrupt. Do not remove.
 - **Claude stream-json unwrap** (`agent.py:68-102`) — NDJSON; prefer the last `result` event, else join assistant text blocks, else return raw.
 - **Watchdog** (`agent.py:549-665`) — silent ≥5 min → SIGTERM → SIGKILL → `ContinuousRefactorError`.
-- **Driver owns commits** (`loop.py:1265-1269`) — if an agent commits mid-attempt, driver does `git reset --soft head_before` and re-commits with its own message.
+- **Driver owns commits** (`loop.py:474-479`) — if an agent commits mid-attempt, driver does `git reset --soft head_before` and re-commits with its own message.
 - **Migration scheduling split** (`migrations.py`, `loop.py`, `phases.py`) — `last_touch` is activity bookkeeping, not the 6-hour retry gate. Deferred/blocked migrations set `cooldown_until`; successful phase completion clears deferral markers so the next ready phase can run immediately.
 - **Migration terminology split** (`migrations.py`, `planning.py`, `prompts.py`) — manifest `precondition` gates phase start; phase markdown `## Definition of Done` governs completion. Legacy manifest `ready_when` is read-only compatibility.
 - **Phase execution validation gate** (`phases.py`, `prompts.py`, `loop.py`) — a migration phase is complete only after host-side full validation passes. `execute_phase()` retries validation-red attempts from `head_before` up to the effective `--max-attempts` budget, and the phase prompt must include the literal configured validation command plus the phase file's Definition of Done as the completion contract.

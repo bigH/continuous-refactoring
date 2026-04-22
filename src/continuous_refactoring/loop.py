@@ -106,6 +106,7 @@ def _retry_context(record: DecisionRecord) -> str:
         lines.append(f"- Next retry focus: {record.next_retry_focus}")
     return "\n".join(lines)
 
+
 def _run_refactor_attempt(
     *,
     repo_root: Path,
@@ -518,9 +519,14 @@ def run_once(args: argparse.Namespace) -> int:
 
         print(f"\n── Target: {target.description} ──")
         route_result = routing_pipeline.route_and_run(
-            target, taste, repo_root, artifacts,
+            target,
+            taste,
+            repo_root,
+            artifacts,
             live_dir=_resolve_live_migrations_dir(repo_root),
-            agent=args.agent, model=model, effort=effort,
+            agent=args.agent,
+            model=model,
+            effort=effort,
             timeout=timeout,
             commit_message_prefix="continuous refactor",
             validation_command=args.validation_command,
@@ -698,9 +704,14 @@ def run_loop(args: argparse.Namespace) -> int:
                 f"\n── Target {target_index}/{total_targets}: {target.description} ──"
             )
             route_result = routing_pipeline.route_and_run(
-                target, taste, repo_root, artifacts,
+                target,
+                taste,
+                repo_root,
+                artifacts,
                 live_dir=_resolve_live_migrations_dir(repo_root),
-                agent=args.agent, model=model, effort=effort,
+                agent=args.agent,
+                model=model,
+                effort=effort,
                 timeout=timeout,
                 commit_message_prefix=args.commit_message_prefix,
                 validation_command=args.validation_command,
@@ -921,7 +932,10 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
             now = datetime.now(timezone.utc)
             eligible = _focus_eligible_manifests(live_dir, now)
             if not eligible:
-                print("Focused migrations loop: nothing eligible — every migration is done or blocked.")
+                print(
+                    "Focused migrations loop: nothing eligible — "
+                    "every migration is done or blocked."
+                )
                 artifacts.log(
                     "INFO",
                     "No eligible migrations remain; terminating.",
@@ -936,7 +950,10 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
             print(f"\n── Migration tick {iteration} (eligible: {names}) ──")
 
             outcome, record = routing_pipeline.try_migration_tick(
-                live_dir, taste, repo_root, artifacts,
+                live_dir,
+                taste,
+                repo_root,
+                artifacts,
                 agent=args.agent,
                 model=args.model,
                 effort=args.effort,

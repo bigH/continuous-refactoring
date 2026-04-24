@@ -85,9 +85,9 @@ def run_baseline_checks(
 def _load_taste_safe(repo_root: Path) -> str:
     try:
         project = resolve_project(repo_root)
-        return load_taste(project)
+        return load_taste(project, repo_root=repo_root)
     except ContinuousRefactorError:
-        return load_taste(None)
+        return load_taste(None, repo_root=repo_root)
 
 
 def _resolve_live_migrations_dir(repo_root: Path) -> Path | None:

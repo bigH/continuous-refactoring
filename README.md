@@ -82,8 +82,8 @@ continuous-refactoring run \
 
 | Command | What it does |
 |---|---|
-| `init` | Registers this directory as a project, creates a default `taste.md`, and can store `--live-migrations-dir`. |
-| `taste` | Prints the active taste file path. Add `--interview` to have an agent author it, `--refine` to iteratively improve an existing taste doc, `--upgrade` to refresh stale taste dimensions, `--global` for the shared file, and `--force` to let `--interview` overwrite custom content after writing a `.bak`. |
+| `init` | Registers this directory as a project, creates a default `taste.md`, and can store `--live-migrations-dir`. Pass `--in-repo` to seed taste at `.continuous-refactoring/taste.md` instead of the XDG project dir. |
+| `taste` | Prints the active taste file path. Add `--interview` to have an agent author it, `--refine` to iteratively improve an existing taste doc, `--upgrade` to refresh stale taste dimensions, `--global` for the shared file, `--in-repo` for the checked-in `.continuous-refactoring/taste.md`, and `--force` to let `--interview` overwrite custom content after writing a `.bak`. |
 | `run-once` | Single pass on one resolved target. No retry. If there is a diff and validation passes, it commits locally and prints the diffstat. |
 | `run` | The loop. Iterates targets, retries on failure, and commits successful targets locally. |
 | `upgrade` | Checks that the global config manifest is current, rewrites it idempotently, and warns if the global taste file is stale. |
@@ -155,10 +155,11 @@ The path prints at startup. Grep it when something goes sideways.
 
 The taste file is a short bullet list of your refactoring preferences. It gets injected into every agent prompt.
 
-- Project taste: `~/.local/share/continuous-refactoring/projects/<uuid>/taste.md`
+- In-repo taste: `<repo>/.continuous-refactoring/taste.md` (committed to git, shared across contributors)
+- Project taste: `~/.local/share/continuous-refactoring/projects/<uuid>/taste.md` (per-developer, not shared)
 - Global taste: `~/.local/share/continuous-refactoring/global/taste.md`
 
-Project taste wins over global. Use `taste --interview` to bootstrap one, `taste --refine` to rework it with an agent, or edit the file directly any time.
+Precedence: in-repo wins over project, project wins over global, and a built-in default is used if none are present. Use `taste --interview` to bootstrap one, `taste --refine` to rework it with an agent, `taste --in-repo` to operate on the checked-in file, or edit the file directly any time.
 
 ## Larger refactorings
 

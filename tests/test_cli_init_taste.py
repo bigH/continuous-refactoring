@@ -12,6 +12,7 @@ from continuous_refactoring.cli import _handle_init, _handle_taste
 from continuous_refactoring.config import (
     ProjectEntry,
     default_taste_text,
+    in_repo_taste_path,
     load_manifest,
     register_project,
 )
@@ -255,6 +256,57 @@ def test_taste_global_flag(
     assert out == str(expected)
     assert expected.exists()
     assert expected.read_text(encoding="utf-8") == default_taste_text()
+
+
+def test_taste_in_repo_flag(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = _init_repo_with_temp_home(tmp_path, monkeypatch)
+    monkeypatch.chdir(repo)
+
+    args = argparse.Namespace(global_=False, in_repo=True)
+    _handle_taste(args)
+
+    out = capsys.readouterr().out.strip()
+    expected = in_repo_taste_path(repo)
+    assert out == str(expected)
+    assert expected.exists()
+    assert expected.read_text(encoding="utf-8") == default_taste_text()
+
+
+def test_taste_in_repo_and_global_conflict(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = _init_repo_with_temp_home(tmp_path, monkeypatch)
+    monkeypatch.chdir(repo)
+
+    args = argparse.Namespace(global_=True, in_repo=True)
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_taste(args)
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "mutually exclusive" in err
+
+
+def test_init_in_repo_seeds_repo_taste(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = _init_repo_with_temp_home(tmp_path, monkeypatch)
+
+    args = argparse.Namespace(path=repo, in_repo=True)
+    _handle_init(args)
+
+    entry = _single_manifest_entry()
+    xdg_taste = _taste_path(_xdg_home(tmp_path), entry.uuid)
+    repo_taste = in_repo_taste_path(repo)
+    assert repo_taste.exists()
+    assert repo_taste.read_text(encoding="utf-8") == default_taste_text()
+    assert not xdg_taste.exists()
 
 
 def test_taste_errors_without_init(

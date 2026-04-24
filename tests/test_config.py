@@ -18,6 +18,7 @@ from continuous_refactoring.config import (
     failure_snapshots_dir,
     find_project,
     global_dir,
+    in_repo_taste_path,
     load_manifest,
     load_taste,
     parse_taste_version,
@@ -346,6 +347,73 @@ def test_load_taste_project_overrides_global(
     gdir = global_dir()
     gdir.mkdir(parents=True, exist_ok=True)
     (gdir / "taste.md").write_text(global_taste, encoding="utf-8")
+
+    assert load_taste(resolved) == project_taste
+
+
+def test_load_taste_in_repo_wins_over_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_path = tmp_path / "taste-in-repo-vs-project"
+    _init_repo(project_path)
+    resolved = register_project(project_path)
+
+    project_taste = "- Project loses.\n"
+    (resolved.project_dir / "taste.md").write_text(project_taste, encoding="utf-8")
+
+    in_repo = in_repo_taste_path(project_path)
+    in_repo.parent.mkdir(parents=True, exist_ok=True)
+    repo_taste = "- In-repo wins.\n"
+    in_repo.write_text(repo_taste, encoding="utf-8")
+
+    assert load_taste(resolved, repo_root=project_path) == repo_taste
+
+
+def test_load_taste_in_repo_wins_over_global(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_path = tmp_path / "taste-in-repo-vs-global"
+    _init_repo(project_path)
+    resolved = register_project(project_path)
+
+    gdir = global_dir()
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "taste.md").write_text("- Global loses.\n", encoding="utf-8")
+
+    in_repo = in_repo_taste_path(project_path)
+    in_repo.parent.mkdir(parents=True, exist_ok=True)
+    repo_taste = "- In-repo wins over global.\n"
+    in_repo.write_text(repo_taste, encoding="utf-8")
+
+    assert load_taste(resolved, repo_root=project_path) == repo_taste
+
+
+def test_load_taste_falls_through_when_no_in_repo_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_path = tmp_path / "taste-fallthrough"
+    _init_repo(project_path)
+    resolved = register_project(project_path)
+
+    project_taste = "- Project used.\n"
+    (resolved.project_dir / "taste.md").write_text(project_taste, encoding="utf-8")
+
+    assert load_taste(resolved, repo_root=project_path) == project_taste
+
+
+def test_load_taste_ignores_in_repo_when_repo_root_none(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_path = tmp_path / "taste-norepo-arg"
+    _init_repo(project_path)
+    resolved = register_project(project_path)
+
+    in_repo = in_repo_taste_path(project_path)
+    in_repo.parent.mkdir(parents=True, exist_ok=True)
+    in_repo.write_text("- Should be ignored.\n", encoding="utf-8")
+
+    project_taste = "- Project used.\n"
+    (resolved.project_dir / "taste.md").write_text(project_taste, encoding="utf-8")
 
     assert load_taste(resolved) == project_taste
 

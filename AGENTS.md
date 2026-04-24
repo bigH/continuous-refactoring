@@ -103,6 +103,7 @@ migration explicitly scopes structural work.
 ## 12. XDG + artifacts
 
 - Durable: `~/.local/share/continuous-refactoring/manifest.json`, `projects/<uuid>/taste.md`, `…/failures/<snapshot>.md`, `global/taste.md`.
+- In-repo (optional, committed): `<repo>/.continuous-refactoring/taste.md`. `load_taste` precedence is in-repo > project > global > default. `init --in-repo` and `taste --in-repo` both target this path.
 - Per-run (ephemeral): `$TMPDIR/continuous-refactoring/<run-id>/summary.json`, `events.jsonl`, `run.log`.
 
 ## 13. Commit conventions

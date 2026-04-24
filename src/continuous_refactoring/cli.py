@@ -98,6 +98,12 @@ def _add_init_parser(subparsers: argparse._SubParsersAction) -> None:
         default=None,
         help="Directory for live migration artifacts (repo-relative path).",
     )
+    init_parser.add_argument(
+        "--in-repo",
+        dest="in_repo",
+        action="store_true",
+        help="Seed taste at .continuous-refactoring/taste.md instead of XDG project dir.",
+    )
 
 
 def _add_taste_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -110,6 +116,12 @@ def _add_taste_parser(subparsers: argparse._SubParsersAction) -> None:
         dest="global_",
         action="store_true",
         help="Use global taste file instead of project-level.",
+    )
+    taste_parser.add_argument(
+        "--in-repo",
+        dest="in_repo",
+        action="store_true",
+        help="Use in-repo taste at .continuous-refactoring/taste.md (checked in to git).",
     )
     taste_mode = taste_parser.add_mutually_exclusive_group()
     taste_mode.add_argument(
@@ -246,13 +258,17 @@ def build_parser() -> argparse.ArgumentParser:
 def _handle_init(args: argparse.Namespace) -> None:
     from continuous_refactoring.config import (
         ensure_taste_file,
+        in_repo_taste_path,
         register_project,
         set_live_migrations_dir,
     )
 
     path = (args.path or Path.cwd()).resolve()
     project = register_project(path)
-    taste_path = project.project_dir / "taste.md"
+    if getattr(args, "in_repo", False):
+        taste_path = in_repo_taste_path(path)
+    else:
+        taste_path = project.project_dir / "taste.md"
     ensure_taste_file(taste_path)
 
     live_dir_arg: Path | None = getattr(args, "live_migrations_dir", None)
@@ -275,11 +291,27 @@ def _handle_init(args: argparse.Namespace) -> None:
         print(f"Live migrations dir: {resolved_live}")
 
 
-def _resolve_taste_path(global_: bool) -> Path:
-    from continuous_refactoring.config import global_dir, resolve_project
+def _resolve_taste_path(global_: bool, in_repo: bool = False) -> Path:
+    from continuous_refactoring.config import (
+        global_dir,
+        in_repo_taste_path,
+        resolve_project,
+    )
+
+    if global_ and in_repo:
+        print(
+            "Error: --global and --in-repo are mutually exclusive.",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
 
     if global_:
         path = global_dir() / "taste.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    if in_repo:
+        path = in_repo_taste_path(Path.cwd().resolve())
         path.parent.mkdir(parents=True, exist_ok=True)
         return path
 
@@ -376,7 +408,7 @@ def _run_taste_agent(
 def _handle_plain_taste(args: argparse.Namespace) -> None:
     from continuous_refactoring.config import ensure_taste_file
 
-    path = _resolve_taste_path(args.global_)
+    path = _resolve_taste_path(args.global_, getattr(args, "in_repo", False))
     ensure_taste_file(path)
     print(str(path))
 
@@ -415,7 +447,7 @@ def _handle_taste_interview(args: argparse.Namespace) -> None:
     from continuous_refactoring.config import default_taste_text
     from continuous_refactoring.prompts import compose_interview_prompt
 
-    path = _resolve_taste_path(args.global_)
+    path = _resolve_taste_path(args.global_, getattr(args, "in_repo", False))
     default_text = default_taste_text()
     existing: str | None = None
     file_exists = path.exists()
@@ -448,7 +480,7 @@ def _handle_taste_refine(args: argparse.Namespace) -> None:
     from continuous_refactoring.config import default_taste_text
     from continuous_refactoring.prompts import compose_taste_refine_prompt
 
-    path = _resolve_taste_path(args.global_)
+    path = _resolve_taste_path(args.global_, getattr(args, "in_repo", False))
     starting_taste = (
         path.read_text(encoding="utf-8") if path.exists() else default_taste_text()
     )
@@ -475,7 +507,7 @@ def _handle_taste_upgrade(args: argparse.Namespace) -> None:
     )
     from continuous_refactoring.prompts import compose_taste_upgrade_prompt
 
-    path = _resolve_taste_path(args.global_)
+    path = _resolve_taste_path(args.global_, getattr(args, "in_repo", False))
 
     existing: str | None = None
     stored_version: int | None = None
@@ -580,12 +612,13 @@ def _handle_run(args: argparse.Namespace) -> None:
 def _maybe_warn_stale_taste() -> None:
     from continuous_refactoring.config import load_taste, resolve_project, taste_is_stale
 
+    repo_root = Path.cwd().resolve()
     try:
-        project = resolve_project(Path.cwd().resolve())
+        project = resolve_project(repo_root)
     except ContinuousRefactorError:
         project = None
 
-    taste_text = load_taste(project)
+    taste_text = load_taste(project, repo_root=repo_root)
     if taste_is_stale(taste_text):
         print(_TASTE_WARNING, file=sys.stderr)
 

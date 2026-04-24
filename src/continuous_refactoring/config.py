@@ -23,6 +23,7 @@ __all__ = [
     "failure_snapshots_dir",
     "find_project",
     "global_dir",
+    "in_repo_taste_path",
     "load_config_version",
     "load_manifest",
     "load_taste",
@@ -317,7 +318,19 @@ def ensure_taste_file(path: Path) -> Path:
     return path
 
 
-def load_taste(project: ResolvedProject | None) -> str:
+def in_repo_taste_path(repo_root: Path) -> Path:
+    return repo_root / ".continuous-refactoring" / "taste.md"
+
+
+def load_taste(
+    project: ResolvedProject | None,
+    repo_root: Path | None = None,
+) -> str:
+    if repo_root is not None:
+        repo_taste = in_repo_taste_path(repo_root)
+        if repo_taste.exists():
+            return repo_taste.read_text(encoding="utf-8")
+
     if project is not None:
         project_taste = project.project_dir / "taste.md"
         if project_taste.exists():

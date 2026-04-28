@@ -73,7 +73,7 @@ from continuous_refactoring.refactor_attempts import (
 import continuous_refactoring.migration_tick as migration_tick
 import continuous_refactoring.refactor_attempts as refactor_attempts_module
 import continuous_refactoring.routing_pipeline as routing_pipeline
-from continuous_refactoring.targeting import Target, resolve_targets
+from continuous_refactoring.targeting import Target, parse_paths_arg, resolve_targets
 
 
 def run_baseline_checks(
@@ -207,13 +207,6 @@ def _resolve_fix_amendment_text(args: argparse.Namespace) -> str:
     return DEFAULT_FIX_AMENDMENT
 
 
-def _parse_paths_arg(raw_paths: str | None) -> tuple[str, ...] | None:
-    if not raw_paths:
-        return None
-    parsed = tuple(path.strip() for path in raw_paths.split(":") if path.strip())
-    return parsed or None
-
-
 def _resolve_targets_from_args(
     args: argparse.Namespace,
     repo_root: Path,
@@ -222,7 +215,7 @@ def _resolve_targets_from_args(
         extensions=args.extensions,
         globs=args.globs,
         targets_path=args.targets,
-        paths=_parse_paths_arg(args.paths),
+        paths=parse_paths_arg(args.paths),
         repo_root=repo_root,
     )
 

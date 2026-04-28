@@ -1010,6 +1010,75 @@ def test_run_globs_targeting(
     assert "tests/test_foo.py" not in prompt
 
 
+def test_run_paths_targeting_keeps_non_empty_target_list_shape(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    _repo_with_py_files(repo_root)
+
+    captured_prompts: list[str] = []
+
+    def capture_agent(**kwargs: object) -> CommandCapture:
+        captured_prompts.append(str(kwargs.get("prompt", "")))
+        return noop_agent(**kwargs)
+
+    _patch_run_loop_agent(monkeypatch, capture_agent)
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+
+    args = make_run_loop_args(
+        repo_root,
+        paths="src/foo.py: src/bar.py",
+        max_refactors=1,
+    )
+    continuous_refactoring.run_loop(args)
+
+    assert len(captured_prompts) == 1
+    prompt = captured_prompts[0]
+    assert "## Target Files" in prompt
+    assert "- src/foo.py" in prompt
+    assert "- src/bar.py" in prompt
+
+
+def test_run_targets_precedence_over_other_selectors(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    _repo_with_py_files(repo_root)
+
+    captured_prompts: list[str] = []
+
+    def capture_agent(**kwargs: object) -> CommandCapture:
+        captured_prompts.append(str(kwargs.get("prompt", "")))
+        return noop_agent(**kwargs)
+
+    _patch_run_loop_agent(monkeypatch, capture_agent)
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+
+    targets_file = tmp_path / "targets.jsonl"
+    targets_file.write_text(
+        json.dumps({"description": "jsonl wins", "files": ["from-targets.py"]}) + "\n",
+        encoding="utf-8",
+    )
+
+    args = make_run_loop_args(
+        repo_root,
+        targets=targets_file,
+        globs="src/**/*.py",
+        extensions=".py",
+        paths="src/foo.py: src/bar.py",
+    )
+    continuous_refactoring.run_loop(args)
+
+    assert len(captured_prompts) == 1
+    prompt = captured_prompts[0]
+    assert "from-targets.py" in prompt
+    assert "src/foo.py" not in prompt
+    assert "src/bar.py" not in prompt
+
+
 def test_run_max_refactors_samples_from_extensions(
     run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,

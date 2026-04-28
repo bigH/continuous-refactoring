@@ -13,7 +13,7 @@ import continuous_refactoring.refactor_attempts
 from continuous_refactoring.artifacts import CommandCapture
 from continuous_refactoring.config import default_taste_text, load_taste
 from continuous_refactoring.prompts import DEFAULT_REFACTORING_PROMPT, compose_full_prompt
-from continuous_refactoring.targeting import resolve_targets
+from continuous_refactoring.targeting import parse_paths_arg, resolve_targets
 
 from conftest import (
     assert_single_prompt,
@@ -108,6 +108,46 @@ def test_run_once_paths_arg_trims_whitespace(
     assert exit_code == 0
     prompt = assert_single_prompt(prompt_capture, "- src/foo.py", "- src/bar.py")
     assert "-  src/bar.py" not in prompt
+
+
+def test_run_once_paths_target_prompt_matches_targeting_parser(
+    run_once_env: Path,
+    prompt_capture: list[str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    src = run_once_env / "src"
+    src.mkdir()
+    (src / "foo.py").write_text("print('foo')\n", encoding="utf-8")
+    (src / "bar.py").write_text("print('bar')\n", encoding="utf-8")
+    continuous_refactoring.run_command(["git", "add", "src"], cwd=run_once_env)
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "add explicit paths"], cwd=run_once_env,
+    )
+
+    patch_classifier_trap(
+        monkeypatch,
+        "classify_target must not be called when live-migrations-dir is unset",
+    )
+    args = make_run_once_args(run_once_env, paths="src/foo.py: src/bar.py")
+    exit_code = continuous_refactoring.run_once(args)
+
+    assert exit_code == 0
+    expected_target = resolve_targets(
+        extensions=None,
+        globs=None,
+        targets_path=None,
+        paths=parse_paths_arg(args.paths),
+        repo_root=run_once_env,
+    )[0]
+    expected = compose_full_prompt(
+        base_prompt=DEFAULT_REFACTORING_PROMPT,
+        taste=load_taste(None),
+        target=expected_target,
+        scope_instruction=args.scope_instruction,
+        validation_command=args.validation_command,
+        attempt=1,
+    )
+    assert assert_single_prompt(prompt_capture) == expected
 
 
 # ---------------------------------------------------------------------------

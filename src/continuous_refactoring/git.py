@@ -11,6 +11,7 @@ __all__ = [
     "current_branch",
     "discard_workspace_changes",
     "get_head_sha",
+    "GitCommandError",
     "git_commit",
     "repo_change_count",
     "repo_has_changes",
@@ -22,6 +23,10 @@ __all__ = [
 ]
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
+
+
+class GitCommandError(ContinuousRefactorError):
+    pass
 
 
 def run_command(
@@ -40,11 +45,14 @@ def run_command(
         capture_output=capture_output,
     )
     if check and proc.returncode != 0:
-        raise ContinuousRefactorError(
-            f"command failed ({' '.join(command)})\n"
-            f"stdout:\n{proc.stdout}\n"
-            f"stderr:\n{proc.stderr}"
-        )
+        try:
+            proc.check_returncode()
+        except subprocess.CalledProcessError as exc:
+            raise GitCommandError(
+                f"command failed ({' '.join(command)})\n"
+                f"stdout:\n{proc.stdout}\n"
+                f"stderr:\n{proc.stderr}"
+            ) from exc
     return proc
 
 

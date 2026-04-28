@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 
+import pytest
 import continuous_refactoring
 
 from conftest import init_repo
@@ -50,3 +52,50 @@ def test_revert_to_restores_requested_head_and_removes_untracked(
     assert not (repo / "scratch.txt").exists()
     assert continuous_refactoring.current_branch(repo) == starting_branch
     assert continuous_refactoring.workspace_status_lines(repo) == []
+
+
+def test_run_command_checked_failure_raises_git_command_error(tmp_path: Path) -> None:
+    command = [
+        "python",
+        "-c",
+        "import sys\nprint('out')\nprint('err', file=sys.stderr)\nraise SystemExit(1)",
+    ]
+
+    with pytest.raises(continuous_refactoring.GitCommandError):
+        continuous_refactoring.run_command(command, cwd=tmp_path)
+
+
+def test_run_command_checked_failure_includes_cause_and_payload(tmp_path: Path) -> None:
+    command = [
+        "python",
+        "-c",
+        "import sys\nprint('out')\nprint('err', file=sys.stderr)\nraise SystemExit(1)",
+    ]
+
+    with pytest.raises(continuous_refactoring.GitCommandError) as exc:
+        continuous_refactoring.run_command(command, cwd=tmp_path)
+
+    error = exc.value
+    assert isinstance(error.__cause__, subprocess.CalledProcessError)
+    assert "command failed (python -c" in str(error)
+    assert "stdout:\nout\n" in str(error)
+    assert "stderr:\nerr\n" in str(error)
+
+
+def test_run_command_unchecked_returns_completed_process(tmp_path: Path) -> None:
+    command = [
+        "python",
+        "-c",
+        "import sys\nprint('out')\nprint('err', file=sys.stderr)\nraise SystemExit(1)",
+    ]
+
+    result = continuous_refactoring.run_command(
+        command,
+        cwd=tmp_path,
+        check=False,
+    )
+
+    assert isinstance(result, subprocess.CompletedProcess)
+    assert result.returncode == 1
+    assert result.stdout == "out\n"
+    assert result.stderr == "err\n"

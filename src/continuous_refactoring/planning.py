@@ -51,8 +51,8 @@ class PlanningOutcome:
 class _PlanningStageSpec:
     prompt_stage: PlanningStage
     stage_label: str
-    context_builder: Callable[["_PlanningStageState"], str]
-    rediscover_phases: bool = False
+    build_context: Callable[["_PlanningStageState"], str]
+    refresh_phase_listing: bool = False
 
 
 @dataclass
@@ -316,7 +316,7 @@ def _build_context(target: str, mig_relative: Path, extra: str = "") -> str:
     return "\n\n".join(parts)
 
 
-def _plan_text(plan_path: Path) -> str:
+def _read_plan_text(plan_path: Path) -> str:
     return plan_path.read_text(encoding="utf-8") if plan_path.exists() else ""
 
 
@@ -324,7 +324,7 @@ def _join_nonempty(*parts: str) -> str:
     return "\n\n".join(part for part in parts if part)
 
 
-def _approach_listing(live_dir: Path, migration_name: str) -> str:
+def _read_approach_listing(live_dir: Path, migration_name: str) -> str:
     app_dir = approaches_dir(live_dir, migration_name)
     if not app_dir.exists():
         return ""
@@ -334,7 +334,7 @@ def _approach_listing(live_dir: Path, migration_name: str) -> str:
     )
 
 
-def _run_planning_pipeline_stage(
+def _run_pipeline_stage(
     spec: _PlanningStageSpec,
     state: _PlanningStageState,
     manifest: MigrationManifest,
@@ -356,7 +356,7 @@ def _run_planning_pipeline_stage(
         migration_name,
         target,
         taste,
-        spec.context_builder(state),
+        spec.build_context(state),
         repo_root,
         artifacts,
         attempt=attempt,
@@ -364,16 +364,16 @@ def _run_planning_pipeline_stage(
         **agent_kw,
     )
     if spec.stage_label == "approaches":
-        state.approach_listing = _approach_listing(live_dir, migration_name)
+        state.approach_listing = _read_approach_listing(live_dir, migration_name)
     elif spec.stage_label == "pick-best":
         state.pick_stdout = stdout
     elif spec.stage_label == "review":
         state.review_stdout = stdout
-    touch_kw = {"mig_root": mig_root} if spec.rediscover_phases else {}
-    return _touch_manifest(manifest, manifest_path, **touch_kw), stdout
+    refresh_kw = {"mig_root": mig_root} if spec.refresh_phase_listing else {}
+    return _refresh_manifest(manifest, manifest_path, **refresh_kw), stdout
 
 
-def _touch_manifest(
+def _refresh_manifest(
     manifest: MigrationManifest,
     manifest_path: Path,
     *,
@@ -450,14 +450,14 @@ def run_planning(
         _PlanningStageSpec(
             prompt_stage="approaches",
             stage_label="approaches",
-            context_builder=lambda current: _build_context(
+            build_context=lambda current: _build_context(
                 target, mig_relative, current.extra_context
             ),
         ),
         _PlanningStageSpec(
             prompt_stage="pick-best",
             stage_label="pick-best",
-            context_builder=lambda current: _build_context(
+            build_context=lambda current: _build_context(
                 target,
                 mig_relative,
                 _join_nonempty(
@@ -469,7 +469,7 @@ def run_planning(
         _PlanningStageSpec(
             prompt_stage="expand",
             stage_label="expand",
-            context_builder=lambda current: _build_context(
+            build_context=lambda current: _build_context(
                 target,
                 mig_relative,
                 _join_nonempty(
@@ -477,20 +477,20 @@ def run_planning(
                     f"Chosen approach:\n{current.pick_stdout}",
                 ),
             ),
-            rediscover_phases=True,
+            refresh_phase_listing=True,
         ),
         _PlanningStageSpec(
             prompt_stage="review",
             stage_label="review",
-            context_builder=lambda current: _build_context(
+            build_context=lambda current: _build_context(
                 target,
                 mig_relative,
-                _join_nonempty(current.extra_context, f"Plan:\n{_plan_text(plan_path)}"),
+                _join_nonempty(current.extra_context, f"Plan:\n{_read_plan_text(plan_path)}"),
             ),
         ),
     )
     for spec in always_run_stages:
-        manifest, _ = _run_planning_pipeline_stage(
+        manifest, _ = _run_pipeline_stage(
             spec,
             state,
             manifest,
@@ -527,7 +527,7 @@ def run_planning(
             stage_label="revise",
             **agent_kw,
         )
-        manifest = _touch_manifest(manifest, manifest_path, mig_root=mig_root)
+        manifest = _refresh_manifest(manifest, manifest_path, mig_root=mig_root)
 
         review_two_stdout = _run_stage(
             "review", migration_name, target, taste,
@@ -536,7 +536,7 @@ def run_planning(
                 mig_relative,
                 _join_nonempty(
                     extra_context,
-                    f"Plan (revised):\n{_plan_text(plan_path)}",
+                    f"Plan (revised):\n{_read_plan_text(plan_path)}",
                 ),
             ),
             repo_root,
@@ -547,7 +547,7 @@ def run_planning(
             **agent_kw,
         )
         _require_review_clear(review_two_stdout, "review-2")
-        manifest = _touch_manifest(manifest, manifest_path)
+        manifest = _refresh_manifest(manifest, manifest_path)
 
     # Stage 6: final-review
     final_stdout = _run_stage(
@@ -555,7 +555,7 @@ def run_planning(
         _build_context(
             target,
             mig_relative,
-            _join_nonempty(extra_context, f"Plan:\n{_plan_text(plan_path)}"),
+            _join_nonempty(extra_context, f"Plan:\n{_read_plan_text(plan_path)}"),
         ),
         repo_root, artifacts, attempt=attempt, retry=retry, **agent_kw,
     )
@@ -566,14 +566,14 @@ def run_planning(
         raise ContinuousRefactorError(
             f"planning.final-review failed: {error}"
         ) from error
-    manifest = _touch_manifest(manifest, manifest_path)
+    manifest = _refresh_manifest(manifest, manifest_path)
 
     if decision == "approve-auto":
-        manifest = _touch_manifest(manifest, manifest_path, status="ready")
+        manifest = _refresh_manifest(manifest, manifest_path, status="ready")
         return PlanningOutcome(status="ready", reason=reason)
 
     if decision == "approve-needs-human":
-        manifest = _touch_manifest(
+        manifest = _refresh_manifest(
             manifest,
             manifest_path,
             status="ready",
@@ -583,6 +583,6 @@ def run_planning(
         return PlanningOutcome(status="awaiting_human_review", reason=reason)
 
     # reject
-    manifest = _touch_manifest(manifest, manifest_path, status="skipped")
+    manifest = _refresh_manifest(manifest, manifest_path, status="skipped")
     _write_skip_file(live_dir, migration_name, target, reason)
     return PlanningOutcome(status="skipped", reason=reason)

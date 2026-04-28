@@ -19,7 +19,7 @@ from continuous_refactoring.migrations import (
 )
 from continuous_refactoring.planning import (
     _parse_final_decision,
-    _touch_manifest,
+    _refresh_manifest,
     _review_has_findings,
     _discover_phase_files,
     PlanningOutcome,
@@ -413,7 +413,7 @@ def test_manifest_phase_discovery_refreshes_only_after_file_writing_stages(
     ]
 
 
-def test_touch_manifest_initializes_and_repairs_current_phase_only_when_rediscovering(
+def test_refresh_manifest_initializes_and_repairs_current_phase_only_when_rediscovering(
     tmp_path: Path,
 ) -> None:
     mig_root = tmp_path / "live" / "repair-phase"
@@ -436,14 +436,16 @@ def test_touch_manifest_initializes_and_repairs_current_phase_only_when_rediscov
     )
     save_manifest(manifest, manifest_path)
 
-    manifest = _touch_manifest(manifest, manifest_path, mig_root=mig_root)
+    manifest = _refresh_manifest(manifest, manifest_path, mig_root=mig_root)
     assert manifest.current_phase == "setup"
     assert tuple(phase.name for phase in manifest.phases) == ("setup", "ship")
 
-    untouched = _touch_manifest(manifest, manifest_path, status="ready")
+    untouched = _refresh_manifest(manifest, manifest_path, status="ready")
     assert untouched.current_phase == "setup"
 
-    repaired = _touch_manifest(manifest, manifest_path, mig_root=mig_root, current_phase="missing")
+    repaired = _refresh_manifest(
+        manifest, manifest_path, mig_root=mig_root, current_phase="missing"
+    )
     assert repaired.current_phase == "setup"
 
 

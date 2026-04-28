@@ -2,7 +2,7 @@
 
 ## Status
 
-Human review on `2026-04-27` confirmed that the live tree already satisfies this phase and the full test suite passes. This file now records the characterization baseline that later phases must preserve.
+Human review on `2026-04-27` confirmed that the live tree already satisfies this phase. This file now records the characterization baseline that later phases must preserve.
 
 ## Objective
 

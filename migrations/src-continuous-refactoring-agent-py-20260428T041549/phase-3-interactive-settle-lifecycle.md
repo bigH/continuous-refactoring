@@ -23,8 +23,7 @@ effort_reason: This seam mixes subprocess lifecycle, settle timing, tty state, a
 
 ## Precondition
 - Phase 2 is marked done in `migrations/src-continuous-refactoring-agent-py-20260428T041549/manifest.json`.
-- Phase 2 validation commands pass on the current tree.
-- Phase 1 characterization tests for settle behavior and Codex terminal recovery still pass on the current tree.
+- Phase 1 characterization coverage for settle behavior and Codex terminal recovery is still present.
 
 ## Definition of Done
 - `src/continuous_refactoring/agent.py` keeps the interactive settle helpers contiguous with `run_agent_interactive_until_settled()` and `_gracefully_stop_interactive_process()`.

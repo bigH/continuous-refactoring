@@ -23,8 +23,8 @@ Ensure loop and CLI behavior remains shippable when artifact/config/git boundari
 6. Ensure `tests/test_phases.py` still validates unchanged high-level phase outcomes under loop/cli boundary stress paths.
 
 ## Precondition
-- Phase 3 complete and passing targeted gates.
-- Current behavior in `tests/test_cli_init_taste.py`, `tests/test_cli_taste_warning.py`, `tests/test_run_once.py`, and `tests/test_run_once_regression.py` is green.
+- Phase 3 is marked complete in the migration manifest.
+- Boundary wrappers from phase 3 are present at the intended module seams.
 - No edits in `__init__.py` in this phase yet.
 
 ## Definition of Done

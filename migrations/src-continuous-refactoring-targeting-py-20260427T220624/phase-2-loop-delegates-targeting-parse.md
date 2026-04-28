@@ -23,11 +23,9 @@ Make `loop.py` a thin orchestration layer by delegating all target argument pars
 6. Ensure parse helper ownership is visible at callsite by importing from `continuous_refactoring.targeting` rather than local path parsing implementations.
 
 ## Precondition
-- `phase-1-targeting-parse-foundation.md` completion checks are green:
-  - `uv run pytest tests/test_targeting.py`
-  - `rg -n \"def parse_paths_arg\\(\" src/continuous_refactoring/targeting.py`
-  - `rg -n \"def _parse_paths_arg\\(\" src/continuous_refactoring/loop.py`
-- `uv run pytest tests/test_run_once_regression.py tests/test_run.py` passes.
+- `phase-1-targeting-parse-foundation.md` is marked complete in the migration manifest.
+- `rg -n \"def parse_paths_arg\\(\" src/continuous_refactoring/targeting.py` finds the parser in `targeting.py`.
+- `rg -n \"def _parse_paths_arg\\(\" src/continuous_refactoring/loop.py` returns no matches.
 - `rg -n \"_resolve_targets_from_args\\(\" src/continuous_refactoring/loop.py` matches one call path for argument resolution.
 
 ## Definition of Done

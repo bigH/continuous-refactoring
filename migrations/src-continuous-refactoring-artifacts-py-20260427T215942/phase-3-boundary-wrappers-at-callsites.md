@@ -28,9 +28,8 @@ Apply boundary wrappers at adjacent module seams, preserving causes while keepin
    - `tests/test_loop_migration_tick.py` to ensure migration-tick summaries still include meaningful root-cause context.
 
 ## Precondition
-- Phase 2 complete and green.
-- `tests/test_continuous_refactoring.py`, `tests/test_loop_migration_tick.py`, and `tests/test_routing.py` pass with phase-2 contracts in place.
-- `tests/test_phases.py` is green before this phase.
+- Phase 2 is marked complete in the migration manifest.
+- Phase-2 boundary contracts are present in `artifacts.py` and their tests.
 - No edits are made in `config.py`, `loop.py`, or `cli.py` during this phase.
 
 ## Definition of Done

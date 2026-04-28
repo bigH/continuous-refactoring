@@ -18,7 +18,7 @@ Simplify entry parsing and path resolution inside `config.py` with explicit help
 5. Add or update tests in `tests/test_config.py` for any changed `ContinuousRefactorError` messages caused by the new helpers.
 
 ## Precondition
-- Phase 2 is complete in migration status and `uv run pytest tests/test_config.py` passes.
+- Phase 2 is complete in migration status.
 - `src/continuous_refactoring/config.py` has no behavioral edits outside functions listed in this phase.
 - No edits are present in `src/continuous_refactoring/cli.py`, `src/continuous_refactoring/loop.py`, `src/continuous_refactoring/prompts.py`, `src/continuous_refactoring/agent.py`, `src/continuous_refactoring/artifacts.py`, `src/continuous_refactoring/git.py` at phase start.
 

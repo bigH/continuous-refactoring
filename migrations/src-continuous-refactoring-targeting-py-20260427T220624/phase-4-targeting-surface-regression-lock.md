@@ -24,10 +24,7 @@ Lock in regression coverage across CLI, loop, and planning surfaces after in-pla
    - scope-fallback and max-target behavior semantics.
 
 ## Precondition
-- Phase 1, 2, and 3 DoD gates are green:
-  - `uv run pytest tests/test_targeting.py`
-  - `uv run pytest tests/test_targeting.py tests/test_run_once_regression.py tests/test_run.py`
-  - `uv run pytest tests/test_targeting.py tests/test_run.py`
+- Phases 1, 2, and 3 are marked complete in the migration manifest.
 - `rg -n \"parse_paths_arg\\(\" src/continuous_refactoring/loop.py` shows only callsite usage from `targeting`.
 - `rg -n \"_parse_paths_arg\\(\" src/continuous_refactoring/loop.py` returns no matches.
 

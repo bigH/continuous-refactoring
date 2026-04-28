@@ -407,6 +407,18 @@ def run_once(args: argparse.Namespace) -> int:
     try:
         require_clean_worktree(repo_root)
 
+        baseline_ok, baseline_context = run_baseline_checks(
+            args.validation_command,
+            repo_root,
+            stdout_path=artifacts.baseline_dir("initial") / "tests.stdout.log",
+            stderr_path=artifacts.baseline_dir("initial") / "tests.stderr.log",
+        )
+        if not baseline_ok:
+            final_status = "baseline_failed"
+            raise ContinuousRefactorError(
+                f"Baseline validation failed\n{baseline_context}"
+            )
+
         artifacts.mark_attempt_started(1)
 
         print(f"\n── Target: {target.description} ──")

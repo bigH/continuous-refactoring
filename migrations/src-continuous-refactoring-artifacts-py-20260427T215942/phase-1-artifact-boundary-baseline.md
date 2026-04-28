@@ -17,7 +17,6 @@ Create a failing-ready baseline for cause-preserving failure behavior without ch
 4. Keep all production files untouched in this phase.
 
 ## Precondition
-- `tests/test_continuous_refactoring.py`, `tests/test_phases.py`, and `tests/test_loop_migration_tick.py` are green on the branch before edits.
 - No production files in the migration scope have been modified yet.
 - The target migration scope is unchanged in production modules.
 

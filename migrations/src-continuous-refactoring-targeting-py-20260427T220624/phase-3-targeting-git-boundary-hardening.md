@@ -18,7 +18,7 @@ Standardize failure handling for tracked-file enumeration so git subprocess fail
 5. Keep `list_tracked_files` return value and shape stable when git succeeds.
 
 ## Precondition
-- `uv run pytest tests/test_targeting.py tests/test_run_once_regression.py tests/test_run.py` passes after phase-2 behavior changes.
+- Phase 2 is marked complete in the migration manifest.
 - `rg -n \"parse_paths_arg\\(\" src/continuous_refactoring/loop.py` reports only callsite usage, confirming runtime targets now flow through the boundary for all callers.
 - `rg -n \"list_tracked_files\\(\" src/continuous_refactoring/targeting.py` resolves to exactly one implementation path.
 

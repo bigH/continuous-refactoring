@@ -23,7 +23,6 @@ Create a single, explicit read path in `config.py` where manifest I/O and decode
 
 ## Precondition
 - Phase 1 is marked complete in the migration manifest.
-- `uv run pytest tests/test_config.py` is green before edits.
 - `src/continuous_refactoring/config.py` contains only production edits introduced in this phase.
 - The public config API surface before this phase includes these names in `__all__`:  
   `find_project`, `load_config_version`, `load_manifest`, `load_taste`, `register_project`, `resolve_live_migrations_dir`, `resolve_project`.

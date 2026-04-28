@@ -24,8 +24,7 @@ effort_reason: The cleanup is still local, but it touches watchdog failure handl
 
 ## Precondition
 - Phase 3 is marked done in `migrations/src-continuous-refactoring-agent-py-20260428T041549/manifest.json`.
-- Phase 3 validation commands pass on the current tree.
-- Phase 1 characterization tests for observed-command logging and timeout/stuck failures still pass on the current tree.
+- Phase 1 characterization coverage for observed-command logging and timeout/stuck failures is still present.
 
 ## Definition of Done
 - In `src/continuous_refactoring/agent.py`, observed-command and watchdog helpers are grouped with `run_observed_command()` rather than interleaved with unrelated command or settle helpers.

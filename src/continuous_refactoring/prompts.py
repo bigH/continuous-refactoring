@@ -575,6 +575,19 @@ risk for later ones. Every phase must leave the repository shippable.
 The precondition must describe what must already be true before the phase may
 start. The Definition of Done must describe what must be true for the phase to
 count as complete. Do not conflate them.
+
+Baseline contract:
+- The harness enforces that the repository is green under the configured
+  validation command before refactoring starts and after each completed phase.
+- Phase preconditions must not restate that invariant. Do not write
+  preconditions such as "full test suite passes", "tests are green", "fresh
+  validation evidence exists", or equivalent baseline-green requirements.
+- Preconditions should be phase-local: previous phases are complete, expected
+  files/symbols/contracts still exist, the worktree is safe, and required
+  effort fits.
+- A phase Definition of Done may still require the full configured validation
+  command to pass before the phase counts as complete.
+
 Valid effort labels are `low`, `medium`, `high`, `xhigh`. Use the lowest safe
 `required_effort` for each phase. A phase may require higher effort than this
 run allows; that phase will wait for a future higher-budget run.
@@ -594,6 +607,9 @@ approaches/<idea>.md for context. Check:
 - Each phase has a concrete precondition for start gating.
 - Each phase has a concrete Definition of Done for completion assessment.
 - Preconditions and Definitions of Done are not conflated.
+- Phase preconditions do not restate the harness-owned baseline-green
+  invariant. Flag requirements like "tests pass now", "full test suite passes",
+  or missing fresh validation evidence when they appear in preconditions.
 - Any phase `required_effort` uses one of `low`, `medium`, `high`, `xhigh`,
   is the lowest safe tier, and has a useful `effort_reason`.
 - The plan does not modify source files outside the migration scope.
@@ -614,6 +630,9 @@ The plan has been through at least one review-revise cycle. Assess:
 Review plan.md, phase-<n>-<name>.md files, and approaches/<idea>.md.
 Verify effort labels use the lowest safe tier; phases may exceed the current
 run max allowed effort, but those phases will wait for a future run.
+Verify phase preconditions do not require baseline-green or fresh validation
+evidence. The harness owns that invariant; Definition of Done may require full
+configured validation before completion.
 
 Refactoring taste is injected by the caller. Use it as the quality bar.
 
@@ -631,6 +650,14 @@ Assess:
 - Is the precondition for this phase currently met?
 - Are prerequisites from earlier phases actually complete?
 - Is the working tree in a state where this phase can safely execute?
+
+Baseline validation under the configured validation command is enforced by the
+harness before migration work and after phase completion. Do not treat missing
+fresh test evidence, "tests pass now", or "full test suite passes" as a
+human-review blocker during readiness. If a stale precondition includes that
+kind of baseline-green clause, ignore that clause and assess the phase-local
+facts. Use `ready: unverifiable` only for facts that truly require human or
+external judgment.
 
 Refactoring taste is injected by the caller. Respect it when assessing readiness.
 

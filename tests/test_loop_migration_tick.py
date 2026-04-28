@@ -612,6 +612,33 @@ def test_not_ready_phase_defers_without_overwriting_existing_wake_up(
     assert reloaded.awaiting_human_review is False
 
 
+def test_missing_fresh_validation_evidence_defers_without_human_review(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir, _, manifest_path = _seed_manifest(
+        run_once_env,
+        name="rework-auth",
+        last_touch=_utc_now() - timedelta(hours=24),
+    )
+
+    reason = "full test suite passes has no fresh validation evidence"
+    _patch_check_ready(monkeypatch, "unverifiable", reason)
+    _patch_execute_phase_trap(monkeypatch)
+
+    outcome, record = _tick(live_dir, run_once_env)
+
+    reloaded = load_manifest(manifest_path)
+    assert outcome == "not-routed"
+    assert record is not None
+    assert record.decision == "retry"
+    assert record.call_role == "phase.ready-check"
+    assert record.failure_kind == "phase-ready-no"
+    assert record.summary == reason
+    assert reloaded.awaiting_human_review is False
+    assert reloaded.human_review_reason is None
+    assert reloaded.cooldown_until is not None
+
+
 def test_phase_above_max_effort_defers_without_ready_check_or_failure(
     run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -762,6 +789,29 @@ def test_unverifiable_phase_blocks_and_persists_human_review_fields(
     assert reloaded.human_review_reason == reason
     assert reloaded.cooldown_until is not None
     assert reloaded.wake_up_on is not None
+
+
+def test_unverifiable_human_approval_uncertainty_still_blocks_for_review(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir, _, manifest_path = _seed_manifest(
+        run_once_env,
+        name="rework-auth",
+        last_touch=_utc_now() - timedelta(hours=24),
+    )
+    reason = "no fresh evidence of human approval"
+
+    _patch_check_ready(monkeypatch, "unverifiable", reason)
+    _patch_execute_phase_trap(monkeypatch)
+
+    outcome, record = _tick(live_dir, run_once_env)
+
+    reloaded = load_manifest(manifest_path)
+    assert outcome == "blocked"
+    assert record is not None
+    assert record.failure_kind == "phase-ready-unverifiable"
+    assert reloaded.awaiting_human_review is True
+    assert reloaded.human_review_reason == reason
 
 
 # ---------------------------------------------------------------------------

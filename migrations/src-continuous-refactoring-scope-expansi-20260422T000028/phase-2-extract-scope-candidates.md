@@ -8,7 +8,7 @@ Move pure candidate discovery into a domain-focused module with meaningful FQNs,
 
 ## Precondition
 
-Phase 1 is complete: discovery behavior is covered by focused tests, `build_scope_candidates()` has a clear internal discovery flow, and all tests pass with the public symbols still exported from `scope_expansion.py`.
+Phase 1 is complete: discovery behavior is covered by focused tests, `build_scope_candidates()` has a clear internal discovery flow, and public symbols are still exported from `scope_expansion.py`.
 
 ## Scope
 

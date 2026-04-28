@@ -41,7 +41,22 @@ from continuous_refactoring.migrations import (
     resolve_current_phase,
     save_manifest,
 )
-from continuous_refactoring.phases import check_phase_ready, execute_phase
+from continuous_refactoring.phases import (
+    ReadyVerdict,
+    check_phase_ready,
+    execute_phase,
+)
+
+
+_BASELINE_VALIDATION_UNCERTAINTY_PHRASES = (
+    "baseline green",
+    "baseline validation",
+    "current tests pass",
+    "fresh test evidence",
+    "fresh validation evidence",
+    "full test suite passes",
+    "tests pass now",
+)
 
 
 class _FinalizeCommit(Protocol):
@@ -214,6 +229,8 @@ def try_migration_tick(
         except ContinuousRefactorError as error:
             return "abandon", _ready_check_failure_record(error, repo_root, target_label)
 
+        verdict, reason = _normalize_ready_verdict(verdict, reason)
+
         if verdict == "yes":
             head_before = get_head_sha(repo_root)
             outcome = execute_phase(
@@ -270,6 +287,25 @@ def try_migration_tick(
 
 def _target_label(manifest: MigrationManifest, phase: PhaseSpec) -> str:
     return f"{manifest.name} {phase_file_reference(phase)} ({phase.name})"
+
+
+def _normalize_ready_verdict(
+    verdict: ReadyVerdict,
+    reason: str,
+) -> tuple[ReadyVerdict, str]:
+    if verdict != "unverifiable":
+        return verdict, reason
+    if not _is_baseline_validation_uncertainty(reason):
+        return verdict, reason
+    return "no", reason
+
+
+def _is_baseline_validation_uncertainty(reason: str) -> bool:
+    reason_lower = reason.lower()
+    return any(
+        phrase in reason_lower
+        for phrase in _BASELINE_VALIDATION_UNCERTAINTY_PHRASES
+    )
 
 
 def _effort_defer_reason(

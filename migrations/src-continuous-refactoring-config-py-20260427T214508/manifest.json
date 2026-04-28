@@ -11,25 +11,25 @@
       "done": true,
       "file": "phase-1-manifest-boundary-baseline.md",
       "name": "manifest-boundary-baseline",
-      "precondition": "- `tests/test_config.py` currently passes. - `src/continuous_refactoring/config.py` has no uncommitted edits in this branch. - `tests/test_config.py` is the only file modified before this phase begins."
+      "precondition": "- `src/continuous_refactoring/config.py` has no uncommitted edits in this branch. - `tests/test_config.py` is the only file modified before this phase begins."
     },
     {
       "done": true,
       "file": "phase-2-manifest-io-contract.md",
       "name": "manifest-io-contract",
-      "precondition": "- Phase 1 is marked complete in the migration manifest. - `uv run pytest tests/test_config.py` is green before edits. - `src/continuous_refactoring/config.py` contains only production edits introduced in this phase. - The public config API surface before this phase includes these names in `__all__`: `find_project`, `load_config_version`, `load_manifest`, `load_taste`, `register_project`, `resolve_live_migrations_dir`, `resolve_project`."
+      "precondition": "- Phase 1 is marked complete in the migration manifest. - `src/continuous_refactoring/config.py` contains only production edits introduced in this phase. - The public config API surface before this phase includes these names in `__all__`: `find_project`, `load_config_version`, `load_manifest`, `load_taste`, `register_project`, `resolve_live_migrations_dir`, `resolve_project`."
     },
     {
       "done": true,
       "file": "phase-3-project-resolution-hygiene.md",
       "name": "project-resolution-hygiene",
-      "precondition": "- Phase 2 is complete in migration status and `uv run pytest tests/test_config.py` passes. - `src/continuous_refactoring/config.py` has no behavioral edits outside functions listed in this phase. - No edits are present in `src/continuous_refactoring/cli.py`, `src/continuous_refactoring/loop.py`, `src/continuous_refactoring/prompts.py`, `src/continuous_refactoring/agent.py`, `src/continuous_refactoring/artifacts.py`, `src/continuous_refactoring/git.py` at phase start."
+      "precondition": "- Phase 2 is complete in migration status. - `src/continuous_refactoring/config.py` has no behavioral edits outside functions listed in this phase. - No edits are present in `src/continuous_refactoring/cli.py`, `src/continuous_refactoring/loop.py`, `src/continuous_refactoring/prompts.py`, `src/continuous_refactoring/agent.py`, `src/continuous_refactoring/artifacts.py`, `src/continuous_refactoring/git.py` at phase start."
     },
     {
       "done": true,
       "file": "phase-4-consumer-boundary-resilience.md",
       "name": "consumer-boundary-resilience",
-      "precondition": "- Phase 3 is complete in migration status and `uv run pytest tests/test_config.py` passes. - `uv run pytest tests/test_cli_taste_warning.py tests/test_cli_init_taste.py tests/test_cli_upgrade.py tests/test_run_once_regression.py` pass on the current tree. - No private helper name added in phase 2/3 is imported from `continuous_refactoring.config` outside `config.py`. - Concrete check: no `from continuous_refactoring.config import _...` in `src/continuous_refactoring` or cluster test modules."
+      "precondition": "- Phase 3 is complete in migration status. - No private helper name added in phase 2/3 is imported from `continuous_refactoring.config` outside `config.py`. - Concrete check: no `from continuous_refactoring.config import _...` in `src/continuous_refactoring` or cluster test modules."
     }
   ],
   "status": "done",

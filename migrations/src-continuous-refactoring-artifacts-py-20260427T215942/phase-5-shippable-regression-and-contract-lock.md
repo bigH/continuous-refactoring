@@ -36,8 +36,7 @@ Lock export/runtime contracts after boundary hardening and complete migration-wi
 5. Verify `migrations/src-continuous-refactoring-artifacts-py-20260427T215942/manifest.json` phase graph and metadata remain consistent with this plan (no missing or renamed phase files).
 
 ## Precondition
-- Phase 4 complete and green.
-- `tests/test_continuous_refactoring.py` and phase-3/4 targeted suites pass.
+- Phase 4 is marked complete in the migration manifest.
 - All intended phase edits are present in working tree.
 - All phase documents in this migration directory match their intended scope (especially phase names referenced in `manifest.json`).
 

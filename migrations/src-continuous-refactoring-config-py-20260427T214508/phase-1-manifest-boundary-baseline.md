@@ -14,7 +14,6 @@ Lock current manifest boundary behavior and encode failure-causality expectation
 5. Do not edit production files in phase 1.
 
 ## Precondition
-- `tests/test_config.py` currently passes.
 - `src/continuous_refactoring/config.py` has no uncommitted edits in this branch.
 - `tests/test_config.py` is the only file modified before this phase begins.
 

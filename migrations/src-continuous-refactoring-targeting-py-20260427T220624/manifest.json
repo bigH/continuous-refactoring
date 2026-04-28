@@ -11,25 +11,25 @@
       "done": false,
       "file": "phase-1-targeting-parse-foundation.md",
       "name": "targeting-parse-foundation",
-      "precondition": "- `uv run pytest tests/test_targeting.py` passes on the current state. - `rg -n \\\"def _parse_paths_arg\\\\(|parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` returns no matches before edits. - `rg -n \\\"def parse_paths_arg\\\\(\\\" src/continuous_refactoring/targeting.py` returns no matches before edits."
+      "precondition": "- `rg -n \\\"def _parse_paths_arg\\\\(|parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` returns no matches before edits. - `rg -n \\\"def parse_paths_arg\\\\(\\\" src/continuous_refactoring/targeting.py` returns no matches before edits."
     },
     {
       "done": false,
       "file": "phase-2-loop-delegates-targeting-parse.md",
       "name": "loop-delegates-targeting-parse",
-      "precondition": "- `phase-1-targeting-parse-foundation.md` completion checks are green: - `uv run pytest tests/test_targeting.py` - `rg -n \\\"def parse_paths_arg\\\\(\\\" src/continuous_refactoring/targeting.py` - `rg -n \\\"def _parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` - `uv run pytest tests/test_run_once_regression.py tests/test_run.py` passes. - `rg -n \\\"_resolve_targets_from_args\\\\(\\\" src/continuous_refactoring/loop.py` matches one call path for argument resolution."
+      "precondition": "- `phase-1-targeting-parse-foundation.md` is marked complete in the migration manifest. - `rg -n \\\"def parse_paths_arg\\\\(\\\" src/continuous_refactoring/targeting.py` finds the parser in `targeting.py`. - `rg -n \\\"def _parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` returns no matches. - `rg -n \\\"_resolve_targets_from_args\\\\(\\\" src/continuous_refactoring/loop.py` matches one call path for argument resolution."
     },
     {
       "done": false,
       "file": "phase-3-targeting-git-boundary-hardening.md",
       "name": "targeting-git-boundary-hardening",
-      "precondition": "- `uv run pytest tests/test_targeting.py tests/test_run_once_regression.py tests/test_run.py` passes after phase-2 behavior changes. - `rg -n \\\"parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` reports only callsite usage, confirming runtime targets now flow through the boundary for all callers. - `rg -n \\\"list_tracked_files\\\\(\\\" src/continuous_refactoring/targeting.py` resolves to exactly one implementation path."
+      "precondition": "- Phase 2 is marked complete in the migration manifest. - `rg -n \\\"parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` reports only callsite usage, confirming runtime targets now flow through the boundary for all callers. - `rg -n \\\"list_tracked_files\\\\(\\\" src/continuous_refactoring/targeting.py` resolves to exactly one implementation path."
     },
     {
       "done": false,
       "file": "phase-4-targeting-surface-regression-lock.md",
       "name": "targeting-surface-regression-lock",
-      "precondition": "- Phase 1, 2, and 3 DoD gates are green: - `uv run pytest tests/test_targeting.py` - `uv run pytest tests/test_targeting.py tests/test_run_once_regression.py tests/test_run.py` - `uv run pytest tests/test_targeting.py tests/test_run.py` - `rg -n \\\"parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` shows only callsite usage from `targeting`. - `rg -n \\\"_parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` returns no matches."
+      "precondition": "- Phases 1, 2, and 3 are marked complete in the migration manifest. - `rg -n \\\"parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` shows only callsite usage from `targeting`. - `rg -n \\\"_parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` returns no matches."
     }
   ],
   "status": "ready",

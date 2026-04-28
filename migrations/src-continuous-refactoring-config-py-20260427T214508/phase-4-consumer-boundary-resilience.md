@@ -38,8 +38,7 @@ Keep adjacent cluster modules robust against stricter config boundary errors wit
 9. Keep existing `tests/test_cli_init_taste.py` and `tests/test_cli_upgrade.py` behavior green; do not add synthetic signature-lock tests unless the public config API actually changes.
 
 ## Precondition
-- Phase 3 is complete in migration status and `uv run pytest tests/test_config.py` passes.
-- `uv run pytest tests/test_cli_init_taste.py tests/test_cli_upgrade.py tests/test_run_once_regression.py` pass on the current tree.
+- Phase 3 is complete in migration status.
 - No private helper name added in phase 2/3 is imported from `continuous_refactoring.config` outside `config.py`.
   - Concrete check: no `from continuous_refactoring.config import _...` in `src/continuous_refactoring` or cluster test modules.
 

@@ -8,7 +8,7 @@ This phase should be small. It is for contract tests, docs alignment, and dead i
 
 ## Precondition
 
-Phases 1 through 3 are complete: candidate discovery lives in `scope_candidates.py`, selection orchestration remains in `scope_expansion.py`, candidate formatting has a single final home, and the full test suite passes.
+Phases 1 through 3 are complete: candidate discovery lives in `scope_candidates.py`, selection orchestration remains in `scope_expansion.py`, and candidate formatting has a single final home.
 
 ## Scope
 

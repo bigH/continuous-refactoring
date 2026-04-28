@@ -1,9 +1,9 @@
 {
-  "awaiting_human_review": true,
-  "cooldown_until": "2026-04-28T10:37:07.935+00:00",
+  "awaiting_human_review": false,
+  "cooldown_until": null,
   "created_at": "2026-04-22T00:00:28.596-07:00",
   "current_phase": "trim-expansion-orchestration",
-  "human_review_reason": "Phase 2 and earlier phase completion are reflected in migration state and symbol ownership/imports are in the expected places, and the tree is clean, but the precondition\u2019s \u201cfull test suite passes\u201d requirement has no fresh verification evidence available in this check.",
+  "human_review_reason": null,
   "last_touch": "2026-04-28T04:37:07.935+00:00",
   "name": "src-continuous-refactoring-scope-expansi-20260422T000028",
   "phases": [
@@ -17,21 +17,21 @@
       "done": true,
       "file": "phase-2-extract-scope-candidates.md",
       "name": "extract-scope-candidates",
-      "precondition": "Phase 1 is complete: discovery behavior is covered by focused tests, `build_scope_candidates()` has a clear internal discovery flow, and all tests pass with the public symbols still exported from `scope_expansion.py`."
+      "precondition": "Phase 1 is complete: discovery behavior is covered by focused tests, `build_scope_candidates()` has a clear internal discovery flow, and public symbols are still exported from `scope_expansion.py`."
     },
     {
       "done": false,
       "file": "phase-3-trim-expansion-orchestration.md",
       "name": "trim-expansion-orchestration",
-      "precondition": "Phase 2 is complete: `scope_candidates.py` owns candidate data and discovery, moved symbols are imported directly from their new module, no compatibility shims exist in `scope_expansion.py`, and the full test suite passes."
+      "precondition": "Phase 2 is complete: `scope_candidates.py` owns candidate data and discovery, moved symbols are imported directly from their new module, and no compatibility shims exist in `scope_expansion.py`."
     },
     {
       "done": false,
       "file": "phase-4-contract-sweep.md",
       "name": "contract-sweep",
-      "precondition": "Phases 1 through 3 are complete: candidate discovery lives in `scope_candidates.py`, selection orchestration remains in `scope_expansion.py`, candidate formatting has a single final home, and the full test suite passes."
+      "precondition": "Phases 1 through 3 are complete: candidate discovery lives in `scope_candidates.py`, selection orchestration remains in `scope_expansion.py`, and candidate formatting has a single final home."
     }
   ],
   "status": "ready",
-  "wake_up_on": "2026-05-05T04:37:07.935+00:00"
+  "wake_up_on": null
 }

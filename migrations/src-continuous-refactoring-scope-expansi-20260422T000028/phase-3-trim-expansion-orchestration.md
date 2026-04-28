@@ -8,7 +8,7 @@ Finish the boundary cleanup after extraction.
 
 ## Precondition
 
-Phase 2 is complete: `scope_candidates.py` owns candidate data and discovery, moved symbols are imported directly from their new module, no compatibility shims exist in `scope_expansion.py`, and the full test suite passes.
+Phase 2 is complete: `scope_candidates.py` owns candidate data and discovery, moved symbols are imported directly from their new module, and no compatibility shims exist in `scope_expansion.py`.
 
 ## Scope
 

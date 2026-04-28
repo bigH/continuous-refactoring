@@ -20,7 +20,6 @@ Move path and selection parsing into `targeting.py` without changing public targ
 4. Keep warning text and exception behavior stable unless a test in this phase requires a deliberate, documented assertion.
 
 ## Precondition
-- `uv run pytest tests/test_targeting.py` passes on the current state.
 - `rg -n \"def _parse_paths_arg\\(|parse_paths_arg\\(\" src/continuous_refactoring/loop.py` returns no matches before edits.
 - `rg -n \"def parse_paths_arg\\(\" src/continuous_refactoring/targeting.py` returns no matches before edits.
 

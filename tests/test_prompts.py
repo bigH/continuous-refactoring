@@ -167,6 +167,24 @@ def test_planning_review_prompt_separates_precondition_and_definition_of_done() 
     assert "not conflated" in PLANNING_REVIEW_PROMPT
 
 
+def test_planning_prompts_keep_baseline_green_out_of_phase_preconditions() -> None:
+    assert "harness enforces" in PLANNING_EXPAND_PROMPT
+    assert "Phase preconditions must not restate" in PLANNING_EXPAND_PROMPT
+    assert "full test suite passes" in PLANNING_EXPAND_PROMPT
+    assert "Definition of Done may still require" in PLANNING_EXPAND_PROMPT
+    assert "baseline-green" in PLANNING_REVIEW_PROMPT
+    assert "fresh validation" in PLANNING_FINAL_REVIEW_PROMPT
+    assert "evidence" in PLANNING_FINAL_REVIEW_PROMPT
+
+
+def test_phase_ready_prompt_does_not_make_fresh_test_evidence_human_review() -> None:
+    assert "Do not treat missing" in PHASE_READY_CHECK_PROMPT
+    assert "fresh test evidence" in PHASE_READY_CHECK_PROMPT
+    assert "human-review blocker" in PHASE_READY_CHECK_PROMPT
+    assert "ignore that clause" in PHASE_READY_CHECK_PROMPT
+    assert "Use `ready: unverifiable` only" in PHASE_READY_CHECK_PROMPT
+
+
 @pytest.mark.parametrize("prompt", _PLANNING_PROMPTS_THAT_MENTION_PLAN_MD)
 @pytest.mark.parametrize("fragment", ("plan.md", "phase-<n>-<name>.md"))
 def test_planning_prompts_reference_plan_artifacts(prompt: str, fragment: str) -> None:

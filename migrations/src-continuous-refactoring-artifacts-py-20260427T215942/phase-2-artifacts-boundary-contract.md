@@ -21,8 +21,7 @@ Create a strict, low-churn boundary contract in `artifacts.py` around artifact w
 5. Update tests to pin that nested causes are preserved for event-write, summary-serialization, and atomic-write boundary failures.
 
 ## Precondition
-- Phase 1 complete and passing.
-- `tests/test_continuous_refactoring.py` passes before edits.
+- Phase 1 is marked complete in the migration manifest.
 - `src/continuous_refactoring/artifacts.py` has not been edited yet in this migration.
 
 ## Definition of Done

@@ -139,7 +139,7 @@ If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`, the
 - Refuses to start with a dirty worktree.
 - Runs on the current branch. Commits land there.
 - Successful commits include a `Why:` body section from the agent's reported rationale, plus validation context when available.
-- `run` baselines your validation command before touching anything. If the baseline is already red, it stops.
+- `run-once`, `run`, and focused live-migration runs baseline your validation command before touching anything. If the baseline is already red, they stop.
 - On a failed attempt, resets back to the pre-attempt HEAD and cleans workspace changes before retrying or moving on.
 - Watchdog kills any agent or test process that's been silent for 5 minutes.
 
@@ -228,7 +228,7 @@ Each migration moves through phases sequentially.
 - Each phase markdown file stores its **Definition of Done** under `## Definition of Done` — what must be true for that phase to count as completed.
 - A phase may declare optional `required_effort` and `effort_reason` in the manifest. The driver escalates up to `--max-allowed-effort`; if a phase needs more, the phase is deferred without failing the run and can be picked up by a later higher-budget run.
 
-Before executing a phase, a ready-check agent verifies that the current phase precondition is met. Possible outcomes:
+Before executing a phase, a ready-check agent verifies that the current phase precondition is met. Phase preconditions are for phase-local facts only; the harness owns baseline-green validation before work and full validation after phase execution. Possible outcomes:
 
 - **ready: yes** — phase executes; on green tests, the phase is marked done, any prior deferral markers are cleared, and the migration advances immediately to the next phase.
 - **ready: no** — manifest activity is bumped, a retry cooldown is started, and a future `wake_up_on` is recorded when needed; the tick moves on.

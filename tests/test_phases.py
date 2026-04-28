@@ -577,6 +577,67 @@ def test_execute_phase_test_failure_reverts_workspace(
     assert reloaded.current_phase == original.current_phase
 
 
+def test_execute_phase_requires_configured_validation_green_even_when_agent_claims_done(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = tmp_path / "live"
+    manifest = _make_manifest()
+    manifest_path = _save_manifest_to_disk(manifest, live_dir)
+    original = load_manifest(manifest_path)
+    validation_calls: list[str] = []
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.get_head_sha", lambda _: "abc123",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.revert_to",
+        lambda _repo, _head: None,
+    )
+    _patch_status_agent(
+        monkeypatch,
+        _status_block(summary="agent claims phase is done"),
+        tmp_path,
+    )
+
+    def fail_configured_validation(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        validation_calls.append(test_command)
+        return _failing_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.run_tests",
+        fail_configured_validation,
+    )
+
+    outcome = execute_phase(
+        _PHASE_0,
+        manifest,
+        _TASTE,
+        tmp_path,
+        live_dir,
+        _make_artifacts(tmp_path),
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        validation_command="custom validation",
+        max_attempts=1,
+    )
+
+    assert outcome.status == "failed"
+    assert outcome.call_role == "phase.validation"
+    assert outcome.failure_kind == "validation-failed"
+    assert validation_calls == ["custom validation"]
+    reloaded = load_manifest(manifest_path)
+    assert reloaded.phases == original.phases
+    assert reloaded.current_phase == original.current_phase
+
+
 def test_execute_phase_agent_exception_fails_and_preserves_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

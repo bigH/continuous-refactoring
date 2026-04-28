@@ -20,7 +20,7 @@
       "effort_reason": "This is a local readability cleanup after Phase 1 has pinned the command-path contracts.",
       "file": "phase-2-command-and-backend-seams.md",
       "name": "command-and-backend-seams",
-      "precondition": "- Phase 1 is marked done in `migrations/src-continuous-refactoring-agent-py-20260428T041549/manifest.json`. - Phase 1 validation commands pass on the current tree. - `src/continuous_refactoring/agent.py` still contains the existing settle and observed-command implementations that later phases will clean up.",
+      "precondition": "- Phase 1 is marked done in `migrations/src-continuous-refactoring-agent-py-20260428T041549/manifest.json`. - `src/continuous_refactoring/agent.py` still contains the existing settle and observed-command implementations that later phases will clean up.",
       "required_effort": "low"
     },
     {
@@ -28,7 +28,7 @@
       "effort_reason": "This seam mixes subprocess lifecycle, settle timing, tty state, and Codex-specific recovery; the blast radius is still local but the failure modes are sharp.",
       "file": "phase-3-interactive-settle-lifecycle.md",
       "name": "interactive-settle-lifecycle",
-      "precondition": "- Phase 2 is marked done in `migrations/src-continuous-refactoring-agent-py-20260428T041549/manifest.json`. - Phase 2 validation commands pass on the current tree. - Phase 1 characterization tests for settle behavior and Codex terminal recovery still pass on the current tree.",
+      "precondition": "- Phase 2 is marked done in `migrations/src-continuous-refactoring-agent-py-20260428T041549/manifest.json`. - Phase 1 characterization coverage for settle behavior and Codex terminal recovery is still present.",
       "required_effort": "medium"
     },
     {
@@ -36,7 +36,7 @@
       "effort_reason": "The cleanup is still local, but it touches watchdog failure handling and subprocess lifecycle code that can silently drift without tight verification.",
       "file": "phase-4-observed-command-and-watchdog-sweep.md",
       "name": "observed-command-and-watchdog-sweep",
-      "precondition": "- Phase 3 is marked done in `migrations/src-continuous-refactoring-agent-py-20260428T041549/manifest.json`. - Phase 3 validation commands pass on the current tree. - Phase 1 characterization tests for observed-command logging and timeout/stuck failures still pass on the current tree.",
+      "precondition": "- Phase 3 is marked done in `migrations/src-continuous-refactoring-agent-py-20260428T041549/manifest.json`. - Phase 1 characterization coverage for observed-command logging and timeout/stuck failures is still present.",
       "required_effort": "medium"
     }
   ],

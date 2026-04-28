@@ -22,7 +22,6 @@ effort_reason: This is a local readability cleanup after Phase 1 has pinned the 
 
 ## Precondition
 - Phase 1 is marked done in `migrations/src-continuous-refactoring-agent-py-20260428T041549/manifest.json`.
-- Phase 1 validation commands pass on the current tree.
 - `src/continuous_refactoring/agent.py` still contains the existing settle and observed-command implementations that later phases will clean up.
 
 ## Definition of Done

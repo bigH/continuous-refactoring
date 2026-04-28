@@ -29,6 +29,11 @@ def _run_once_prompt_capture(
     return prompt_capture[0]
 
 
+def _is_baseline_validation(stdout_path: Path) -> bool:
+    parts = stdout_path.parts
+    return "baseline" in parts and "initial" in parts
+
+
 @pytest.mark.parametrize(
     ("kwargs", "needles"),
     [
@@ -54,6 +59,87 @@ def test_run_once_prompt_composition(
         assert needle in prompt
 
 
+def test_run_once_baseline_validation_blocks_routing_and_agent_when_red(
+    run_once_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    validation_stdout_paths: list[Path] = []
+
+    def fail_validation(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        validation_stdout_paths.append(stdout_path)
+        return failing_tests(
+            test_command,
+            repo_root,
+            stdout_path,
+            stderr_path,
+            **kwargs,
+        )
+
+    def trap_route(*_args: object, **_kwargs: object) -> object:
+        pytest.fail("run-once must not route work when baseline validation is red")
+
+    def trap_agent(**_kwargs: object) -> CommandCapture:
+        pytest.fail("run-once must not invoke the refactor agent when baseline is red")
+
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", fail_validation)
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.route_and_run",
+        trap_route,
+    )
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", trap_agent)
+
+    args = make_run_once_args(run_once_env)
+    with pytest.raises(ContinuousRefactorError, match="Baseline validation failed"):
+        continuous_refactoring.run_once(args)
+
+    assert len(validation_stdout_paths) == 1
+    assert _is_baseline_validation(validation_stdout_paths[0])
+    summary = read_single_run_summary(run_once_env)
+    assert summary["final_status"] == "baseline_failed"
+
+
+def test_run_once_runs_baseline_before_refactor_validation(
+    run_once_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order: list[str] = []
+
+    def tracking_tests(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        if _is_baseline_validation(stdout_path):
+            order.append("baseline-validation")
+        else:
+            order.append("refactor-validation")
+        return noop_tests(
+            test_command,
+            repo_root,
+            stdout_path,
+            stderr_path,
+            **kwargs,
+        )
+
+    def tracking_agent(**kwargs: object) -> CommandCapture:
+        order.append("agent")
+        return noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", tracking_tests)
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", tracking_agent)
+
+    assert continuous_refactoring.run_once(make_run_once_args(run_once_env)) == 0
+    assert order == ["baseline-validation", "agent", "refactor-validation"]
+
+
 def test_run_once_validation_gate(
     run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -68,12 +154,44 @@ def test_run_once_validation_gate(
         return noop_agent(**kwargs)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", committing_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", failing_tests)
+
+    validation_calls = 0
+
+    def baseline_passes_then_fails(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        nonlocal validation_calls
+        validation_calls += 1
+        if _is_baseline_validation(stdout_path):
+            return noop_tests(
+                test_command,
+                repo_root,
+                stdout_path,
+                stderr_path,
+                **kwargs,
+            )
+        return failing_tests(
+            test_command,
+            repo_root,
+            stdout_path,
+            stderr_path,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.loop.run_tests",
+        baseline_passes_then_fails,
+    )
 
     args = make_run_once_args(run_once_env)
-    with pytest.raises(ContinuousRefactorError, match="Validation failed"):
+    with pytest.raises(ContinuousRefactorError, match="Validation failed after agent"):
         continuous_refactoring.run_once(args)
 
+    assert validation_calls == 2
     log = continuous_refactoring.run_command(
         ["git", "log", "--oneline"], cwd=run_once_env,
     )
@@ -140,10 +258,37 @@ def test_run_once_no_fix_retry(
         return noop_agent(**kwargs)
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", counting_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", failing_tests)
+
+    def baseline_passes_then_fails(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        if _is_baseline_validation(stdout_path):
+            return noop_tests(
+                test_command,
+                repo_root,
+                stdout_path,
+                stderr_path,
+                **kwargs,
+            )
+        return failing_tests(
+            test_command,
+            repo_root,
+            stdout_path,
+            stderr_path,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.loop.run_tests",
+        baseline_passes_then_fails,
+    )
 
     args = make_run_once_args(run_once_env)
-    with pytest.raises(ContinuousRefactorError, match="Validation failed"):
+    with pytest.raises(ContinuousRefactorError, match="Validation failed after agent"):
         continuous_refactoring.run_once(args)
 
     assert agent_call_count == 1

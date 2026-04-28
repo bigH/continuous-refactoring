@@ -2,9 +2,9 @@
   "awaiting_human_review": false,
   "cooldown_until": null,
   "created_at": "2026-04-22T00:00:28.596-07:00",
-  "current_phase": "extract-scope-candidates",
+  "current_phase": "trim-expansion-orchestration",
   "human_review_reason": null,
-  "last_touch": "2026-04-27T21:20:40.136-07:00",
+  "last_touch": "2026-04-27T21:37:07.848-07:00",
   "name": "src-continuous-refactoring-scope-expansi-20260422T000028",
   "phases": [
     {
@@ -14,7 +14,7 @@
       "precondition": "The migration is still in planning or ready state, `scope_expansion.py` still defines and exports `ScopeCandidate`, `ScopeCandidateKind`, and `build_scope_candidates`, and no `src/continuous_refactoring/scope_candidates.py` module exists."
     },
     {
-      "done": false,
+      "done": true,
       "file": "phase-2-extract-scope-candidates.md",
       "name": "extract-scope-candidates",
       "precondition": "Phase 1 is complete: discovery behavior is covered by focused tests, `build_scope_candidates()` has a clear internal discovery flow, and all tests pass with the public symbols still exported from `scope_expansion.py`."

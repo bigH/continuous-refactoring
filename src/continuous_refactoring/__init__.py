@@ -16,6 +16,7 @@ from continuous_refactoring import planning
 from continuous_refactoring import prompts
 from continuous_refactoring import routing
 from continuous_refactoring import routing_pipeline
+from continuous_refactoring import scope_candidates
 from continuous_refactoring import scope_expansion
 
 _SUBMODULES: tuple[ModuleType, ...] = (
@@ -33,6 +34,7 @@ _SUBMODULES: tuple[ModuleType, ...] = (
     prompts,
     routing,
     routing_pipeline,
+    scope_candidates,
     scope_expansion,
 )
 

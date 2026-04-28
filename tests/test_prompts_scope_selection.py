@@ -5,10 +5,7 @@ from itertools import combinations
 import pytest
 
 from continuous_refactoring.prompts import compose_scope_selection_prompt
-from continuous_refactoring.scope_expansion import (
-    ScopeCandidate,
-    ScopeCandidateKind,
-)
+from continuous_refactoring.scope_candidates import ScopeCandidate, ScopeCandidateKind
 from continuous_refactoring.targeting import Target
 
 

@@ -32,13 +32,13 @@ from continuous_refactoring.migration_tick import try_migration_tick as _try_mig
 from continuous_refactoring.planning import run_planning
 from continuous_refactoring.routing import classify_target
 from continuous_refactoring.scope_expansion import (
-    build_scope_candidates,
     describe_scope_candidate,
     scope_candidate_to_target,
     scope_expansion_bypass_reason,
     select_scope_candidate,
     write_scope_expansion_artifacts,
 )
+from continuous_refactoring.scope_candidates import build_scope_candidates
 from continuous_refactoring.targeting import Target
 
 

@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from continuous_refactoring.migrations import MigrationManifest, PhaseSpec
-    from continuous_refactoring.scope_expansion import ScopeCandidate, ScopeCandidateKind
+    from continuous_refactoring.scope_candidates import ScopeCandidate, ScopeCandidateKind
     from continuous_refactoring.targeting import Target
 
 __all__ = [

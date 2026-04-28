@@ -5,6 +5,7 @@ import hashlib
 import io
 import os
 from datetime import datetime, timezone
+import json
 import re
 import sys
 import time
@@ -120,6 +121,37 @@ def test_migration_manifest_codec_stays_internal() -> None:
     assert migration_manifest_codec.__name__ not in {
         module.__name__ for module in continuous_refactoring._SUBMODULES
     }
+
+
+def test_load_manifest_wraps_malformed_payload_and_preserves_cause(
+    tmp_path: Path,
+) -> None:
+    manifest_path = tmp_path / "broken" / "manifest.json"
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text("{", encoding="utf-8")
+
+    with pytest.raises(
+        ContinuousRefactorError, match=f"Could not parse manifest {manifest_path}",
+    ) as exc_info:
+        load_manifest(manifest_path)
+
+    assert isinstance(exc_info.value.__cause__, json.JSONDecodeError)
+
+
+def test_load_manifest_rejects_filesystem_read_error_as_refactor_error(
+    tmp_path: Path,
+) -> None:
+    manifest_path = tmp_path / "manifest.json"
+    manifest_path.write_text("{}", encoding="utf-8")
+    manifest_path.unlink()
+    manifest_path.mkdir()
+
+    with pytest.raises(
+        ContinuousRefactorError, match=f"Could not load manifest {manifest_path}",
+    ) as exc_info:
+        load_manifest(manifest_path)
+
+    assert isinstance(exc_info.value.__cause__, OSError)
 
 
 def test_package_init_follows_source_import_conventions() -> None:
@@ -784,3 +816,26 @@ def test_run_summary_write_preserves_previous_content_on_replace_failure(
 
     assert run.summary_path.read_text(encoding="utf-8") == "previous summary\n"
     assert list(tmp_path.glob("*.tmp")) == []
+
+
+def test_run_summary_write_fails_fast_on_unmakable_parent(
+    tmp_path: Path,
+) -> None:
+    blocked_parent = tmp_path / "blocked"
+    blocked_parent.write_text("blocked", encoding="utf-8")
+    run = artifacts.RunArtifacts(
+        root=tmp_path,
+        run_id="run-1",
+        repo_root=tmp_path,
+        agent="codex",
+        model="fake-model",
+        effort="medium",
+        test_command="true",
+        events_path=tmp_path / "events.jsonl",
+        summary_path=blocked_parent / "summary.json",
+        log_path=tmp_path / "run.log",
+        started_at="2026-04-15T12:34:56.123+00:00",
+    )
+
+    with pytest.raises(OSError):
+        run.write_summary()

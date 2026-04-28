@@ -525,6 +525,56 @@ def test_failed_ready_phase_abandons_and_preserves_retry_used(
     assert record.retry_used == 4
 
 
+def test_failed_phase_records_preserve_failure_text_while_sanitizing_paths(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir, _, _ = _seed_manifest(
+        run_once_env,
+        name="rework-auth",
+        last_touch=_utc_now() - timedelta(hours=24),
+    )
+    noisy_reason = (
+        "validation failed at /tmp/build/transient.log\n"
+        "codex exec --model fake TOO-HUGE\n"
+        "please restart the migration flow"
+    )
+
+    def fake_execute(*_args: object, **_kwargs: object) -> ExecutePhaseOutcome:
+        return ExecutePhaseOutcome(
+            status="failed",
+            reason=noisy_reason,
+            call_role="phase.validation",
+            phase_reached="phase.validation",
+            failure_kind="validation-failed",
+            retry=2,
+        )
+
+    def finalize_trap(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("failed phase execution must not be committed")
+
+    _patch_check_ready(monkeypatch, "yes")
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.execute_phase",
+        fake_execute,
+    )
+
+    outcome, record = _tick(
+        live_dir,
+        run_once_env,
+        finalize_commit=finalize_trap,
+    )
+
+    assert outcome == "abandon"
+    assert record is not None
+    assert record.decision == "abandon"
+    assert record.call_role == "phase.validation"
+    assert record.phase_reached == "phase.validation"
+    assert record.summary == (
+        "validation failed at <tmp> please restart the migration flow"
+    )
+    assert record.retry_used == 2
+
+
 def test_not_ready_phase_defers_without_overwriting_existing_wake_up(
     run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

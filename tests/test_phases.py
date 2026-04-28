@@ -252,6 +252,26 @@ def test_check_ready_rejects_unparseable_output(
         )
 
 
+def test_check_ready_propagates_agent_cause(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    failure = OSError("agent transport is down")
+
+    def fail_agent(*_args: object, **_kwargs: object) -> None:
+        raise ContinuousRefactorError("agent command failed") from failure
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.maybe_run_agent",
+        fail_agent,
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="agent command failed") as exc_info:
+        check_phase_ready(
+            _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
+            taste=_TASTE, agent="codex", model="fake", effort="low", timeout=None,
+        )
+
+    assert exc_info.value.__cause__ is failure
+
+
 def test_check_ready_no(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -989,7 +1009,7 @@ def test_execute_phase_unknown_phase_does_not_mark_manifest_complete(
     monkeypatch.setattr("continuous_refactoring.phases.run_tests", fail_if_called)
     monkeypatch.setattr("continuous_refactoring.phases.revert_to", fail_if_called)
 
-    with pytest.raises(ContinuousRefactorError, match="not found in manifest"):
+    with pytest.raises(ContinuousRefactorError, match="not found in manifest") as exc_info:
         execute_phase(
             unknown_phase,
             manifest,
@@ -1005,6 +1025,7 @@ def test_execute_phase_unknown_phase_does_not_mark_manifest_complete(
             max_attempts=1,
         )
 
+    assert exc_info.value.__cause__ is None
     assert manifest_path.read_text(encoding="utf-8") == original
 
 

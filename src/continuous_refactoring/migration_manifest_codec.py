@@ -5,6 +5,7 @@ from dataclasses import asdict
 from typing import cast
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
+from continuous_refactoring.effort import EffortTier, require_effort_tier
 from continuous_refactoring.migrations import (
     MIGRATION_STATUSES,
     MigrationManifest,
@@ -95,11 +96,22 @@ def _require_phase_precondition(phase: dict[str, object], *, prefix: str) -> str
 def _require_phase(raw_phase: object, *, index: int) -> PhaseSpec:
     phase = _require_mapping(raw_phase, field=f"phases[{index}]")
     prefix = f"phases[{index}]"
+    required_effort_raw = phase.get("required_effort")
+    required_effort: EffortTier | None = None
+    if required_effort_raw is not None:
+        required_effort = require_effort_tier(
+            required_effort_raw,
+            field=f"{prefix}.required_effort",
+        )
     return PhaseSpec(
         name=_require_str(phase.get("name"), field=f"{prefix}.name"),
         file=_require_str(phase.get("file"), field=f"{prefix}.file"),
         done=_require_bool(phase.get("done"), field=f"{prefix}.done"),
         precondition=_require_phase_precondition(phase, prefix=prefix),
+        required_effort=required_effort,
+        effort_reason=_optional_str(
+            phase.get("effort_reason"), field=f"{prefix}.effort_reason"
+        ),
     )
 
 

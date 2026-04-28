@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Literal
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
+from continuous_refactoring.effort import require_effort_tier
 
 
 __all__ = [
@@ -81,6 +82,17 @@ def _optional_str(data: dict[str, object], key: str) -> str | None:
     raise _InvalidTargetFieldError(key)
 
 
+def _optional_effort_override(data: dict[str, object]) -> str | None:
+    value = _optional_str(data, "effort-override")
+    if value is None:
+        return None
+    try:
+        return require_effort_tier(value, field="effort-override")
+    except ContinuousRefactorError:
+        _warn_skip("invalid effort-override")
+        raise _InvalidTargetFieldError("effort-override")
+
+
 def validate_target_line(data: object) -> Target | None:
     """Validate a parsed JSON dict and return a Target, or None if invalid."""
     if not isinstance(data, dict):
@@ -103,7 +115,7 @@ def validate_target_line(data: object) -> Target | None:
     try:
         scoping = _optional_str(data, "scoping")
         model_override = _optional_str(data, "model-override")
-        effort_override = _optional_str(data, "effort-override")
+        effort_override = _optional_effort_override(data)
     except _InvalidTargetFieldError:
         return None
 

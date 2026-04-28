@@ -11,6 +11,7 @@ import continuous_refactoring
 from continuous_refactoring.artifacts import ContinuousRefactorError
 from continuous_refactoring.cli import build_parser
 from continuous_refactoring.decisions import DecisionRecord, RouteOutcome
+from continuous_refactoring.effort import EffortBudget
 from continuous_refactoring.migrations import (
     MigrationManifest,
     PhaseSpec,
@@ -144,6 +145,38 @@ def test_run_parser_focus_flag_defaults_false() -> None:
         ],
     )
     assert args.focus_on_live_migrations is False
+
+
+def test_focused_loop_eligibility_rechecks_effort_deferred_phase_when_cap_rises(
+    tmp_path: Path,
+) -> None:
+    live_dir = tmp_path / "live-migrations"
+    live_dir.mkdir()
+    high_phase = replace(_PHASE, required_effort="xhigh")
+    cooldown_until = _utc_now() + timedelta(hours=5)
+    _seed_manifest(
+        live_dir,
+        "high-effort",
+        phases=(high_phase,),
+        cooldown_until=cooldown_until,
+    )
+
+    low_budget = EffortBudget(default_effort="high", max_allowed_effort="high")
+    high_budget = EffortBudget(default_effort="high", max_allowed_effort="xhigh")
+
+    assert continuous_refactoring.loop._focus_eligible_manifests(
+        live_dir,
+        _utc_now(),
+        low_budget,
+    ) == []
+    assert [
+        manifest.name
+        for manifest, _ in continuous_refactoring.loop._focus_eligible_manifests(
+            live_dir,
+            _utc_now(),
+            high_budget,
+        )
+    ] == ["high-effort"]
 
 
 # ---------------------------------------------------------------------------

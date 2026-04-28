@@ -46,6 +46,7 @@ def classify_target(
     model: str,
     effort: str,
     timeout: int | None,
+    effort_metadata: dict[str, object] | None = None,
 ) -> ClassifierDecision:
     prompt = compose_classifier_prompt(target, taste)
     classify_dir = artifacts.root / "classify"
@@ -57,6 +58,7 @@ def classify_target(
         retry=retry,
         target=target.description,
         call_role=call_role,
+        effort=effort_metadata,
     )
 
     try:
@@ -83,6 +85,7 @@ def classify_target(
             status="failed",
             level="WARN",
             summary=str(error),
+            effort=effort_metadata,
         )
         raise
 
@@ -96,6 +99,7 @@ def classify_target(
             level="WARN",
             returncode=result.returncode,
             summary=f"{agent} exited with code {result.returncode}",
+            effort=effort_metadata,
         )
         raise ContinuousRefactorError(
             f"Classifier agent failed with exit code {result.returncode}"
@@ -113,6 +117,7 @@ def classify_target(
             level="WARN",
             returncode=result.returncode,
             summary=str(error),
+            effort=effort_metadata,
         )
         raise
 
@@ -123,5 +128,6 @@ def classify_target(
         call_role=call_role,
         status="finished",
         returncode=result.returncode,
+        effort=effort_metadata,
     )
     return decision

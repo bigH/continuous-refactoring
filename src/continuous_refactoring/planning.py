@@ -10,6 +10,7 @@ if TYPE_CHECKING:
 
 from continuous_refactoring.agent import maybe_run_agent
 from continuous_refactoring.artifacts import ContinuousRefactorError, iso_timestamp
+from continuous_refactoring.effort import EffortBudget, require_effort_tier
 from continuous_refactoring.migrations import (
     MigrationManifest,
     PhaseSpec,
@@ -31,6 +32,12 @@ _FINAL_DECISION_RE = re.compile(
 
 _PRECONDITION_LINE_RE = re.compile(
     r"^precondition:\s*(.+)$", re.IGNORECASE | re.MULTILINE,
+)
+_REQUIRED_EFFORT_LINE_RE = re.compile(
+    r"^required_effort:\s*(.+)$", re.IGNORECASE | re.MULTILINE,
+)
+_EFFORT_REASON_LINE_RE = re.compile(
+    r"^effort_reason:\s*(.+)$", re.IGNORECASE | re.MULTILINE,
 )
 
 
@@ -99,6 +106,27 @@ def _phase_precondition(content: str, phase_file: str) -> str:
     return f"prerequisites in {phase_file} are met"
 
 
+def _phase_required_effort(content: str, phase_file: str) -> str | None:
+    raw = _phase_section_text(content, "Required Effort")
+    if raw is None:
+        match = _REQUIRED_EFFORT_LINE_RE.search(content)
+        raw = match.group(1).strip() if match else None
+    if raw is None:
+        return None
+    candidate = raw.strip().strip("`").split()[0].strip("`.,;:")
+    return require_effort_tier(candidate, field=f"{phase_file} required_effort")
+
+
+def _phase_effort_reason(content: str) -> str | None:
+    section = _phase_section_text(content, "Effort Reason")
+    if section is not None:
+        return section
+    match = _EFFORT_REASON_LINE_RE.search(content)
+    if match:
+        return match.group(1).strip()
+    return None
+
+
 def _discover_phase_files(mig_root: Path) -> tuple[PhaseSpec, ...]:
     phase_files: list[tuple[int, Path]] = []
     for pf in mig_root.glob("phase-*-*.md"):
@@ -125,6 +153,8 @@ def _discover_phase_files(mig_root: Path) -> tuple[PhaseSpec, ...]:
                 file=pf.name,
                 done=False,
                 precondition=_phase_precondition(content, pf.name),
+                required_effort=_phase_required_effort(content, pf.name),
+                effort_reason=_phase_effort_reason(content),
             )
         )
     return tuple(phases)
@@ -171,9 +201,17 @@ def _run_stage(
     model: str,
     effort: str,
     timeout: int | None,
+    effort_metadata: dict[str, object] | None = None,
+    effort_budget: EffortBudget | None = None,
     stage_label: str | None = None,
 ) -> str:
-    prompt = compose_planning_prompt(stage, migration_name, taste, context)
+    prompt = compose_planning_prompt(
+        stage,
+        migration_name,
+        taste,
+        context,
+        effort_budget=effort_budget,
+    )
     label = stage_label or stage
     call_role = f"planning.{label}"
     stage_dir = artifacts.root / "planning" / label
@@ -184,6 +222,7 @@ def _run_stage(
         retry=retry,
         target=target,
         call_role=call_role,
+        effort=effort_metadata,
     )
 
     try:
@@ -210,6 +249,7 @@ def _run_stage(
             status="failed",
             level="WARN",
             summary=str(error),
+            effort=effort_metadata,
         )
         raise ContinuousRefactorError(f"{call_role} failed: {error}") from error
 
@@ -223,6 +263,7 @@ def _run_stage(
             level="WARN",
             returncode=result.returncode,
             summary=f"{agent} exited with code {result.returncode}",
+            effort=effort_metadata,
         )
         raise ContinuousRefactorError(
             f"{call_role} failed: {agent} exited with code {result.returncode}"
@@ -235,6 +276,7 @@ def _run_stage(
         call_role=call_role,
         status="finished",
         returncode=result.returncode,
+        effort=effort_metadata,
     )
     return result.stdout
 
@@ -310,6 +352,8 @@ def run_planning(
     model: str,
     effort: str,
     timeout: int | None,
+    effort_budget: EffortBudget | None = None,
+    effort_metadata: dict[str, object] | None = None,
     extra_context: str = "",
 ) -> PlanningOutcome:
     mig_root = migration_root(live_dir, migration_name)
@@ -330,7 +374,14 @@ def run_planning(
     )
     save_manifest(manifest, manifest_path)
 
-    agent_kw = dict(agent=agent, model=model, effort=effort, timeout=timeout)
+    agent_kw = dict(
+        agent=agent,
+        model=model,
+        effort=effort,
+        timeout=timeout,
+        effort_metadata=effort_metadata,
+        effort_budget=effort_budget,
+    )
 
     # Stage 1: approaches
     _run_stage(

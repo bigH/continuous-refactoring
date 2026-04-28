@@ -24,6 +24,12 @@ from continuous_refactoring.decisions import (
     error_failure_kind,
     sanitize_text,
 )
+from continuous_refactoring.effort import (
+    EffortBudget,
+    effort_exceeds,
+    resolve_effort_budget,
+    resolve_phase_effort,
+)
 from continuous_refactoring.git import get_head_sha
 from continuous_refactoring.migrations import (
     bump_last_touch,
@@ -52,7 +58,9 @@ class _FinalizeCommit(Protocol):
 
 
 def enumerate_eligible_manifests(
-    live_dir: Path, now: datetime,
+    live_dir: Path,
+    now: datetime,
+    effort_budget: EffortBudget | None = None,
 ) -> list[tuple[MigrationManifest, Path]]:
     if not live_dir.is_dir():
         return []
@@ -73,8 +81,56 @@ def enumerate_eligible_manifests(
         if not eligible_now(manifest, now):
             continue
         candidates.append((manifest, manifest_path))
+    if effort_budget is not None:
+        seen_paths = {path for _, path in candidates}
+        for manifest, manifest_path in _cooling_effort_candidates(
+            live_dir, now, effort_budget,
+        ):
+            if manifest_path not in seen_paths:
+                candidates.append((manifest, manifest_path))
     candidates.sort(key=lambda pair: datetime.fromisoformat(pair[0].created_at))
     return candidates
+
+
+def _cooling_effort_candidates(
+    live_dir: Path,
+    now: datetime,
+    budget: EffortBudget,
+) -> list[tuple[MigrationManifest, Path]]:
+    if not live_dir.is_dir():
+        return []
+    candidates: list[tuple[MigrationManifest, Path]] = []
+    for entry in sorted(live_dir.iterdir()):
+        if not entry.is_dir() or entry.name.startswith("__"):
+            continue
+        manifest_path = entry / "manifest.json"
+        if not manifest_path.exists():
+            continue
+        manifest = load_manifest(manifest_path)
+        if not _can_ignore_effort_cooldown(manifest, now, budget):
+            continue
+        candidates.append((manifest, manifest_path))
+    return candidates
+
+
+def _can_ignore_effort_cooldown(
+    manifest: MigrationManifest,
+    now: datetime,
+    budget: EffortBudget,
+) -> bool:
+    if manifest.status not in ("ready", "in-progress"):
+        return False
+    if manifest.awaiting_human_review or not has_executable_phase(manifest):
+        return False
+    if manifest.cooldown_until is None:
+        return False
+    if datetime.fromisoformat(manifest.cooldown_until) <= now:
+        return False
+    phase = resolve_current_phase(manifest)
+    return (
+        phase.required_effort is not None
+        and not effort_exceeds(phase.required_effort, budget.max_allowed_effort)
+    )
 
 
 def try_migration_tick(
@@ -92,14 +148,53 @@ def try_migration_tick(
     max_attempts: int | None,
     attempt: int,
     finalize_commit: _FinalizeCommit,
+    effort_budget: EffortBudget | None = None,
 ) -> tuple[RouteOutcome, DecisionRecord | None]:
+    resolved_budget = effort_budget or resolve_effort_budget(effort, None)
     now = datetime.now(timezone.utc)
-    candidates = enumerate_eligible_manifests(live_dir, now)
+    candidates = enumerate_eligible_manifests(live_dir, now, resolved_budget)
     deferred_record: DecisionRecord | None = None
 
     for manifest, manifest_path in candidates:
         phase = resolve_current_phase(manifest)
         target_label = _target_label(manifest, phase)
+        if (
+            phase.required_effort is not None
+            and effort_exceeds(
+                phase.required_effort,
+                resolved_budget.max_allowed_effort,
+            )
+        ):
+            reason = _effort_defer_reason(
+                phase,
+                max_allowed_effort=resolved_budget.max_allowed_effort,
+            )
+            _log_phase_effort_deferred(
+                artifacts,
+                target_label,
+                phase,
+                reason,
+                max_allowed_effort=resolved_budget.max_allowed_effort,
+            )
+            save_manifest(
+                _defer_manifest(
+                    manifest,
+                    now,
+                    verdict="effort-over-budget",
+                    reason=reason,
+                ),
+                manifest_path,
+            )
+            deferred_record = _effort_deferred_record(reason, repo_root, target_label)
+            continue
+
+        phase_resolution = resolve_phase_effort(
+            resolved_budget,
+            phase.required_effort,
+            reason=phase.effort_reason,
+        )
+        phase_effort = phase_resolution.effective_effort
+        effort_metadata = phase_resolution.event_fields()
         try:
             verdict, reason = check_phase_ready(
                 phase,
@@ -111,7 +206,8 @@ def try_migration_tick(
                 retry=1,
                 agent=agent,
                 model=model,
-                effort=effort,
+                effort=phase_effort,
+                effort_metadata=effort_metadata,
                 timeout=timeout,
             )
         except ContinuousRefactorError as error:
@@ -130,7 +226,8 @@ def try_migration_tick(
                 retry=1,
                 agent=agent,
                 model=model,
-                effort=effort,
+                effort=phase_effort,
+                effort_metadata=effort_metadata,
                 timeout=timeout,
                 validation_command=validation_command,
                 max_attempts=max_attempts,
@@ -168,6 +265,42 @@ def try_migration_tick(
 
 def _target_label(manifest: MigrationManifest, phase: PhaseSpec) -> str:
     return f"{manifest.name} {phase_file_reference(phase)} ({phase.name})"
+
+
+def _effort_defer_reason(
+    phase: PhaseSpec,
+    *,
+    max_allowed_effort: str,
+) -> str:
+    detail = (
+        f" Reason: {phase.effort_reason}."
+        if phase.effort_reason
+        else ""
+    )
+    return (
+        f"Phase requires {phase.required_effort} effort, above this run's "
+        f"max allowed effort {max_allowed_effort}.{detail}"
+    )
+
+
+def _log_phase_effort_deferred(
+    artifacts: RunArtifacts,
+    target_label: str,
+    phase: PhaseSpec,
+    reason: str,
+    *,
+    max_allowed_effort: str,
+) -> None:
+    artifacts.log(
+        "INFO",
+        f"phase effort deferred: {target_label}",
+        event="phase_effort_deferred",
+        target=target_label,
+        required_effort=phase.required_effort,
+        max_allowed_effort=max_allowed_effort,
+        effort_reason=phase.effort_reason,
+        summary=reason,
+    )
 
 
 def _ready_check_failure_record(
@@ -259,4 +392,18 @@ def _deferred_record(reason: str, repo_root: Path, target_label: str) -> Decisio
         phase_reached="phase.ready-check",
         failure_kind="phase-ready-no",
         summary=sanitize_text(reason, repo_root) or "Migration phase not ready",
+    )
+
+
+def _effort_deferred_record(
+    reason: str, repo_root: Path, target_label: str,
+) -> DecisionRecord:
+    return DecisionRecord(
+        decision="retry",
+        retry_recommendation="same-target",
+        target=target_label,
+        call_role="phase.effort-budget",
+        phase_reached="phase.effort-budget",
+        failure_kind="phase-effort-over-budget",
+        summary=sanitize_text(reason, repo_root) or "Migration phase over effort budget",
     )

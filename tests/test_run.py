@@ -144,6 +144,78 @@ def test_run_parser_accepts_sleep_flag() -> None:
     assert args.sleep == 0.25
 
 
+def test_run_parser_accepts_default_and_max_allowed_effort() -> None:
+    args = build_parser().parse_args(
+        [
+            "run",
+            "--with", "codex",
+            "--model", "m",
+            "--default-effort", "high",
+            "--max-allowed-effort", "xhigh",
+            "--scope-instruction", "s",
+            "--max-refactors", "1",
+        ],
+    )
+
+    assert args.default_effort == "high"
+    assert args.effort == "high"
+    assert args.max_allowed_effort == "xhigh"
+
+
+def test_run_parser_keeps_effort_alias_for_default_effort() -> None:
+    args = build_parser().parse_args(
+        [
+            "run-once",
+            "--with", "codex",
+            "--model", "m",
+            "--effort", "medium",
+            "--scope-instruction", "s",
+        ],
+    )
+
+    assert args.default_effort == "medium"
+    assert args.effort == "medium"
+    assert args.max_allowed_effort is None
+
+
+@pytest.mark.parametrize("flag", ["--effort", "--default-effort", "--max-allowed-effort"])
+def test_run_parser_rejects_unknown_effort_tiers(flag: str) -> None:
+    argv = [
+        "run",
+        "--with", "codex",
+        "--model", "m",
+        "--default-effort", "medium",
+        "--scope-instruction", "s",
+        "--max-refactors", "1",
+    ]
+    if flag == "--effort":
+        argv[argv.index("--default-effort")] = "--effort"
+        argv[argv.index("medium")] = "extreme"
+    elif flag == "--default-effort":
+        argv[argv.index("medium")] = "extreme"
+    else:
+        argv.extend([flag, "extreme"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        build_parser().parse_args(argv)
+
+    assert exc_info.value.code == 2
+
+
+def test_run_fails_fast_when_max_effort_is_below_default(
+    run_loop_env: Path,
+) -> None:
+    args = make_run_loop_args(
+        run_loop_env,
+        default_effort="high",
+        max_allowed_effort="medium",
+        max_refactors=1,
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="max-allowed-effort"):
+        continuous_refactoring.run_loop(args)
+
+
 def test_run_commits_after_successful_change(
     run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -536,6 +608,67 @@ def test_run_target_overrides(
 
     assert len(captured_models) == 1
     assert captured_models[0] == "special-model"
+
+
+def test_run_target_effort_override_caps_to_max_and_is_audited(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    captured_efforts: list[str] = []
+
+    def effort_capturing_agent(**kwargs: object) -> CommandCapture:
+        captured_efforts.append(str(kwargs.get("effort", "")))
+        return noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", effort_capturing_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+
+    targets_file = tmp_path / "targets.jsonl"
+    targets_file.write_text(
+        json.dumps({
+            "description": "override effort target",
+            "files": ["foo.py"],
+            "effort-override": "xhigh",
+        }),
+        encoding="utf-8",
+    )
+
+    args = make_run_loop_args(
+        repo_root,
+        targets=targets_file,
+        default_effort="low",
+        max_allowed_effort="medium",
+        scope_instruction=None,
+    )
+    continuous_refactoring.run_loop(args)
+
+    assert captured_efforts == ["medium"]
+
+    summary = _read_single_run_summary(repo_root)
+    assert summary["effort"] == "low"
+    assert summary["default_effort"] == "low"
+    assert summary["max_allowed_effort"] == "medium"
+    attempt = summary["attempts"][0]
+    assert attempt["requested_effort"] == "xhigh"
+    assert attempt["effective_effort"] == "medium"
+    assert attempt["max_allowed_effort"] == "medium"
+    assert attempt["effort_source"] == "target-override"
+    assert attempt["effort_capped"] is True
+
+    events = _read_single_run_events(repo_root)
+    refactor_events = [
+        event for event in events
+        if event.get("event") == "call_started"
+        and event.get("call_role") == "refactor"
+    ]
+    assert refactor_events
+    assert refactor_events[0]["requested_effort"] == "xhigh"
+    assert refactor_events[0]["effective_effort"] == "medium"
+    assert refactor_events[0]["max_allowed_effort"] == "medium"
+    assert refactor_events[0]["effort_source"] == "target-override"
+    assert refactor_events[0]["effort_capped"] is True
 
 
 def test_run_undo_commit_on_validation_failure(

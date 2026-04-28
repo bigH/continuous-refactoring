@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from continuous_refactoring.config import TASTE_CURRENT_VERSION, default_taste_text
+from continuous_refactoring.effort import EffortBudget
 from continuous_refactoring.migrations import MigrationManifest, PhaseSpec
 from continuous_refactoring.prompts import (
     CLASSIFIER_PROMPT,
@@ -341,6 +342,53 @@ def test_compose_full_prompt_omits_blank_retry_context() -> None:
 def test_planning_approaches_mentions_artifacts() -> None:
     result = compose_planning_prompt("approaches", "mig", _TASTE, "ctx")
     assert "approaches/" in result
+
+
+def test_planning_prompt_includes_effort_budget_guidance() -> None:
+    result = compose_planning_prompt(
+        "expand",
+        "mig",
+        _TASTE,
+        "ctx",
+        effort_budget=EffortBudget(default_effort="medium", max_allowed_effort="high"),
+    )
+
+    assert "Valid effort labels: `low`, `medium`, `high`, `xhigh`." in result
+    assert "Current run max allowed effort: `high`." in result
+    assert "lowest safe `required_effort`" in result
+    assert "wait for a future run" in result
+
+
+def test_planning_prompts_describe_phase_effort_metadata() -> None:
+    assert "required_effort: <label>" in PLANNING_EXPAND_PROMPT
+    assert "effort_reason" in PLANNING_EXPAND_PROMPT
+    assert "`low`, `medium`, `high`, `xhigh`" in PLANNING_EXPAND_PROMPT
+    assert "lowest safe" in PLANNING_REVIEW_PROMPT
+    assert "future run" in PLANNING_FINAL_REVIEW_PROMPT
+
+
+def test_phase_prompts_include_required_effort_metadata() -> None:
+    manifest = _manifest()
+    phase = PhaseSpec(
+        name="migrate",
+        file="phase-1-migrate.md",
+        done=False,
+        precondition="prep complete",
+        required_effort="high",
+        effort_reason="cross-module risk",
+    )
+
+    ready_prompt = compose_phase_ready_prompt(phase, manifest, _TASTE)
+    execute_prompt = compose_phase_execution_prompt(
+        phase,
+        manifest,
+        _TASTE,
+        "uv run pytest",
+    )
+
+    for prompt in (ready_prompt, execute_prompt):
+        assert "Required effort: high" in prompt
+        assert "Effort reason: cross-module risk" in prompt
 
 
 def test_full_prompt_prefers_target_scope_over_scope_instruction() -> None:

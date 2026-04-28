@@ -264,6 +264,15 @@ def test_validate_target_line_rejects_empty_and_invalid_optional_fields() -> Non
     )
     assert target is None
 
+    target = validate_target_line(
+        {
+            "description": "good",
+            "files": ["src/**/*.py"],
+            "effort-override": "extreme",
+        },
+    )
+    assert target is None
+
 
 def test_validate_target_line_warns_for_each_invalid_optional_field(capsys) -> None:
     for key in ("scoping", "model-override", "effort-override"):
@@ -611,7 +620,7 @@ def test_target_jsonl_hyphenated_keys(tmp_path: Path) -> None:
     data = {
         "description": "hyphen test",
         "files": ["*.py"],
-        "effort-override": "max",
+        "effort-override": "xhigh",
         "model-override": "claude-opus-4-20250514",
     }
     jsonl.write_text(json.dumps(data) + "\n", encoding="utf-8")
@@ -619,5 +628,5 @@ def test_target_jsonl_hyphenated_keys(tmp_path: Path) -> None:
     targets = load_targets_jsonl(jsonl)
 
     assert len(targets) == 1
-    assert targets[0].effort_override == "max"
+    assert targets[0].effort_override == "xhigh"
     assert targets[0].model_override == "claude-opus-4-20250514"

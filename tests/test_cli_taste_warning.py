@@ -32,7 +32,7 @@ _SUBCOMMANDS: list[tuple[list[str], str]] = [
     (
         [
             "cr", "run-once",
-            "--with", "codex", "--model", "m", "--effort", "e",
+            "--with", "codex", "--model", "m", "--effort", "high",
             "--scope-instruction", "s",
         ],
         "run-once",
@@ -40,7 +40,7 @@ _SUBCOMMANDS: list[tuple[list[str], str]] = [
     (
         [
             "cr", "run",
-            "--with", "codex", "--model", "m", "--effort", "e",
+            "--with", "codex", "--model", "m", "--effort", "high",
             "--scope-instruction", "s", "--max-refactors", "1",
         ],
         "run",

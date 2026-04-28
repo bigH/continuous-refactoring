@@ -387,6 +387,39 @@ def test_discover_phase_files_falls_back_when_precondition_is_missing(
     assert phases[0].precondition == "prerequisites in phase-1-legacy.md are met"
 
 
+def test_discover_phase_files_reads_optional_effort_metadata(tmp_path: Path) -> None:
+    mig_root = tmp_path / "live" / "effort"
+    mig_root.mkdir(parents=True)
+
+    (mig_root / "phase-1-risky.md").write_text(
+        (
+            "required_effort: high\n"
+            "effort_reason: touches routing and planning\n\n"
+            + _phase_doc("always", "Risky phase complete.")
+        ),
+        encoding="utf-8",
+    )
+
+    phases = _discover_phase_files(mig_root)
+
+    assert len(phases) == 1
+    assert phases[0].required_effort == "high"
+    assert phases[0].effort_reason == "touches routing and planning"
+
+
+def test_discover_phase_files_rejects_invalid_required_effort(tmp_path: Path) -> None:
+    mig_root = tmp_path / "live" / "bad-effort"
+    mig_root.mkdir(parents=True)
+
+    (mig_root / "phase-1-risky.md").write_text(
+        "required_effort: extreme\n\n" + _phase_doc("always", "Done."),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="phase-1-risky.md"):
+        _discover_phase_files(mig_root)
+
+
 
 def test_discover_phase_files_rejects_duplicate_phase_names(tmp_path: Path) -> None:
     mig_root = tmp_path / "live" / "duplicate-names"

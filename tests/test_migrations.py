@@ -63,12 +63,18 @@ def _phase_payload(
     done: bool = False,
     precondition: str | None = "always",
     ready_when: str | None = None,
+    required_effort: str | None = None,
+    effort_reason: str | None = None,
 ) -> dict[str, object]:
     payload: dict[str, object] = {"name": name, "file": file, "done": done}
     if precondition is not None:
         payload["precondition"] = precondition
     if ready_when is not None:
         payload["ready_when"] = ready_when
+    if required_effort is not None:
+        payload["required_effort"] = required_effort
+    if effort_reason is not None:
+        payload["effort_reason"] = effort_reason
     return payload
 
 
@@ -99,6 +105,61 @@ def test_manifest_roundtrip_property(tmp_path: Path) -> None:
         save_manifest(manifest, path)
         loaded = load_manifest(path)
         assert loaded == manifest
+
+
+def test_manifest_roundtrip_preserves_phase_effort_metadata(tmp_path: Path) -> None:
+    manifest = MigrationManifest(
+        name="effort-metadata",
+        created_at="2025-01-01T00:00:00.000+00:00",
+        last_touch="2025-01-01T00:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="ready",
+        current_phase="setup",
+        phases=(
+            PhaseSpec(
+                name="setup",
+                file="phase-0-setup.md",
+                done=False,
+                precondition="always",
+                required_effort="high",
+                effort_reason="cross-module risk",
+            ),
+            PhaseSpec(
+                name="finish",
+                file="phase-1-finish.md",
+                done=False,
+                precondition="setup done",
+            ),
+        ),
+    )
+    path = tmp_path / "effort-metadata" / "manifest.json"
+
+    save_manifest(manifest, path)
+
+    assert load_manifest(path) == manifest
+
+
+def test_load_manifest_defaults_missing_phase_effort_metadata(tmp_path: Path) -> None:
+    loaded = load_manifest(
+        _write_manifest_payload(tmp_path, "legacy-effort", _manifest_payload())
+    )
+
+    assert loaded.phases[0].required_effort is None
+    assert loaded.phases[0].effort_reason is None
+
+
+def test_load_manifest_rejects_unknown_required_effort(tmp_path: Path) -> None:
+    path = _write_manifest_payload(
+        tmp_path,
+        "bad-effort",
+        _manifest_payload(
+            phases=[_phase_payload(required_effort="extreme")],
+        ),
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="phases\\[0\\]\\.required_effort"):
+        load_manifest(path)
 
 
 def test_has_executable_phase_rejects_invalid_phase_names() -> None:

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal, cast, get_args
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
+from continuous_refactoring.effort import EffortTier
 
 __all__ = [
     "advance_phase_cursor",
@@ -39,6 +40,8 @@ class PhaseSpec:
     file: str
     done: bool
     precondition: str
+    required_effort: EffortTier | None = None
+    effort_reason: str | None = None
 
 
 @dataclass(frozen=True)

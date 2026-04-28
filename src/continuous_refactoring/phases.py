@@ -126,6 +126,7 @@ def check_phase_ready(
     model: str,
     effort: str,
     timeout: int | None,
+    effort_metadata: dict[str, object] | None = None,
 ) -> tuple[ReadyVerdict, str]:
     prompt = compose_phase_ready_prompt(phase, manifest, taste)
     check_dir = artifacts.root / "phase-ready-check"
@@ -138,6 +139,7 @@ def check_phase_ready(
         retry=retry,
         target=target_label,
         call_role=call_role,
+        effort=effort_metadata,
     )
 
     try:
@@ -164,6 +166,7 @@ def check_phase_ready(
             status="failed",
             level="WARN",
             summary=str(error),
+            effort=effort_metadata,
         )
         raise
 
@@ -177,6 +180,7 @@ def check_phase_ready(
             level="WARN",
             returncode=result.returncode,
             summary=f"{agent} exited with code {result.returncode}",
+            effort=effort_metadata,
         )
         raise ContinuousRefactorError(
             f"Phase ready-check agent failed with exit code {result.returncode}"
@@ -189,6 +193,7 @@ def check_phase_ready(
         call_role=call_role,
         status="finished",
         returncode=result.returncode,
+        effort=effort_metadata,
     )
     return _parse_ready_verdict(result.stdout)
 
@@ -207,6 +212,7 @@ def _terminal_phase_failure(
     failure_kind: str,
     returncode: int | None = None,
     summary: str | None = None,
+    effort_metadata: dict[str, object] | None = None,
 ) -> ExecutePhaseOutcome:
     artifacts.log_call_finished(
         attempt=attempt,
@@ -218,6 +224,7 @@ def _terminal_phase_failure(
         level="WARN",
         returncode=returncode,
         summary=summary,
+        effort=effort_metadata,
     )
     revert_to(repo_root, head_before)
     return ExecutePhaseOutcome(
@@ -294,6 +301,7 @@ def _run_phase_agent(
     agent: str,
     model: str,
     effort: str,
+    effort_metadata: dict[str, object] | None,
     timeout: int | None,
 ) -> _PhaseAgentRun:
     artifacts.log_call_started(
@@ -301,6 +309,7 @@ def _run_phase_agent(
         retry=phase_attempt.retry,
         target=target_label,
         call_role=_PHASE_EXECUTE_ROLE,
+        effort=effort_metadata,
     )
 
     try:
@@ -333,6 +342,7 @@ def _run_phase_agent(
                 reason=summary,
                 failure_kind=error_failure_kind(str(error)),
                 summary=summary,
+                effort_metadata=effort_metadata,
             ),
         )
 
@@ -365,6 +375,7 @@ def _run_phase_agent(
                 failure_kind="agent-exited-nonzero",
                 returncode=result.returncode,
                 summary=summary,
+                effort_metadata=effort_metadata,
             ),
         )
 
@@ -375,6 +386,7 @@ def _run_phase_agent(
         call_role=_PHASE_EXECUTE_ROLE,
         status="finished",
         returncode=result.returncode,
+        effort=effort_metadata,
     )
     return _PhaseAgentRun(
         status=agent_status,
@@ -551,6 +563,7 @@ def execute_phase(
     timeout: int | None,
     validation_command: str,
     max_attempts: int | None,
+    effort_metadata: dict[str, object] | None = None,
 ) -> ExecutePhaseOutcome:
     _require_phase_in_manifest(manifest, phase.name)
     head_before = get_head_sha(repo_root)
@@ -583,6 +596,7 @@ def execute_phase(
             agent=agent,
             model=model,
             effort=effort,
+            effort_metadata=effort_metadata,
             timeout=timeout,
         )
         if agent_run.failure is not None:

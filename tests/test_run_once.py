@@ -24,6 +24,17 @@ def _read_single_run_summary(run_once_env: Path) -> dict[str, object]:
     return json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
 
 
+def _read_single_run_events(run_once_env: Path) -> list[dict[str, object]]:
+    run_root = run_once_env.parent / "tmpdir" / "continuous-refactoring"
+    run_dirs = list(run_root.iterdir())
+    assert len(run_dirs) == 1
+    return [
+        json.loads(line)
+        for line in (run_dirs[0] / "events.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+
+
 def _run_once_prompt_capture(
     run_once_env: Path, prompt_capture: list[str], **kwargs: object
 ) -> str:
@@ -151,6 +162,58 @@ def test_run_once_no_fix_retry(
         continuous_refactoring.run_once(args)
 
     assert agent_call_count == 1
+
+
+def test_run_once_direct_refactor_audits_effort_budget(
+    run_once_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured_efforts: list[str] = []
+
+    def effort_capturing_agent(**kwargs: object) -> CommandCapture:
+        captured_efforts.append(str(kwargs.get("effort", "")))
+        return noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", effort_capturing_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+
+    targets_file = tmp_path / "targets.jsonl"
+    targets_file.write_text(
+        json.dumps({
+            "description": "direct override",
+            "files": ["foo.py"],
+            "effort-override": "xhigh",
+        }),
+        encoding="utf-8",
+    )
+    args = make_run_once_args(
+        run_once_env,
+        targets=targets_file,
+        scope_instruction=None,
+        default_effort="low",
+        max_allowed_effort="medium",
+    )
+
+    assert continuous_refactoring.run_once(args) == 0
+    assert captured_efforts == ["medium"]
+
+    summary = _read_single_run_summary(run_once_env)
+    attempt = summary["attempts"][0]
+    assert attempt["requested_effort"] == "xhigh"
+    assert attempt["effective_effort"] == "medium"
+    assert attempt["max_allowed_effort"] == "medium"
+    assert attempt["effort_source"] == "target-override"
+    assert attempt["effort_capped"] is True
+
+    refactor_events = [
+        event for event in _read_single_run_events(run_once_env)
+        if event.get("event") == "call_started"
+        and event.get("call_role") == "refactor"
+    ]
+    assert refactor_events
+    assert refactor_events[0]["requested_effort"] == "xhigh"
+    assert refactor_events[0]["effective_effort"] == "medium"
 
 
 def test_run_once_prints_diff(

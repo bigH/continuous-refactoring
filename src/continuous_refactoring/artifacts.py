@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import tempfile
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +51,12 @@ class AttemptStats:
     reason_doc_path: str | None = None
     commit_sha: str | None = None
     commit_phase: str | None = None
+    requested_effort: str | None = None
+    effective_effort: str | None = None
+    max_allowed_effort: str | None = None
+    effort_source: str | None = None
+    effort_capped: bool | None = None
+    effort_reason: str | None = None
 
 
 @dataclass
@@ -65,6 +72,8 @@ class RunArtifacts:
     summary_path: Path
     log_path: Path
     started_at: str
+    default_effort: str | None = None
+    max_allowed_effort: str | None = None
     finished_at: str | None = None
     final_status: str = "running"
     error_message: str | None = None
@@ -109,6 +118,7 @@ class RunArtifacts:
         failure_kind: str | None | object = _UNSET,
         failure_summary: str | None | object = _UNSET,
         reason_doc_path: Path | None | object = _UNSET,
+        effort: Mapping[str, object] | None | object = _UNSET,
     ) -> None:
         stats = self.ensure_attempt(attempt)
         if target is not _UNSET:
@@ -131,6 +141,8 @@ class RunArtifacts:
             stats.reason_doc_path = (
                 str(reason_doc_path) if reason_doc_path is not None else None
             )
+        if effort is not _UNSET:
+            _apply_effort_fields(stats, effort if effort is not None else None)
         self.write_summary()
 
     def log(self, level: str, message: str, **fields: object) -> None:
@@ -157,6 +169,7 @@ class RunArtifacts:
         target: str,
         call_role: str,
         phase_reached: str | None = None,
+        effort: Mapping[str, object] | None = None,
     ) -> None:
         self.update_attempt(
             attempt,
@@ -164,7 +177,9 @@ class RunArtifacts:
             retry=retry,
             call_role=call_role,
             phase_reached=phase_reached or call_role,
+            effort=effort,
         )
+        effort_fields = dict(effort or {})
         self.log(
             "INFO",
             f"call start: {call_role} — {target}",
@@ -174,6 +189,7 @@ class RunArtifacts:
             target=target,
             call_role=call_role,
             phase_reached=phase_reached or call_role,
+            **effort_fields,
         )
 
     def log_call_finished(
@@ -188,6 +204,7 @@ class RunArtifacts:
         level: str = "INFO",
         returncode: int | None = None,
         summary: str | None = None,
+        effort: Mapping[str, object] | None = None,
     ) -> None:
         self.update_attempt(
             attempt,
@@ -196,7 +213,9 @@ class RunArtifacts:
             call_role=call_role,
             phase_reached=phase_reached or call_role,
             failure_summary=summary,
+            effort=effort,
         )
+        effort_fields = dict(effort or {})
         self.log(
             level,
             f"call {status}: {call_role} — {target}",
@@ -209,6 +228,7 @@ class RunArtifacts:
             call_status=status,
             returncode=returncode,
             summary=summary,
+            **effort_fields,
         )
 
     def log_transition(
@@ -274,6 +294,8 @@ class RunArtifacts:
             "agent": self.agent,
             "model": self.model,
             "effort": self.effort,
+            "default_effort": self.default_effort or self.effort,
+            "max_allowed_effort": self.max_allowed_effort or self.effort,
             "test_command": self.test_command,
             "started_at": self.started_at,
             "finished_at": self.finished_at,
@@ -322,6 +344,8 @@ def create_run_artifacts(
     agent: str,
     model: str,
     effort: str,
+    default_effort: str | None = None,
+    max_allowed_effort: str | None = None,
     test_command: str,
 ) -> RunArtifacts:
     started_at_dt = _now()
@@ -336,6 +360,8 @@ def create_run_artifacts(
         agent=agent,
         model=model,
         effort=effort,
+        default_effort=default_effort or effort,
+        max_allowed_effort=max_allowed_effort or effort,
         test_command=test_command,
         events_path=root / "events.jsonl",
         summary_path=root / "summary.json",
@@ -344,3 +370,24 @@ def create_run_artifacts(
     )
     artifacts.write_summary()
     return artifacts
+
+
+def _apply_effort_fields(
+    stats: AttemptStats,
+    effort: Mapping[str, object] | None,
+) -> None:
+    if effort is None:
+        return
+    fields = {
+        "requested_effort",
+        "effective_effort",
+        "max_allowed_effort",
+        "effort_source",
+        "effort_capped",
+        "effort_reason",
+    }
+    for field_name in fields:
+        if field_name not in effort:
+            continue
+        value = effort[field_name]
+        setattr(stats, field_name, value if value is not None else None)

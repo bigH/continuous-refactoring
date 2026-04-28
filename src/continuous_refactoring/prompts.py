@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
+    from continuous_refactoring.effort import EffortBudget
     from continuous_refactoring.migrations import MigrationManifest, PhaseSpec
     from continuous_refactoring.scope_candidates import ScopeCandidate, ScopeCandidateKind
     from continuous_refactoring.targeting import Target
@@ -561,13 +562,18 @@ Read the chosen approach from approaches/<idea>.md and produce:
 1. plan.md \u2014 the full migration plan with numbered phases, dependencies, and
    validation strategy.
 2. phase-<n>-<name>.md for each phase \u2014 detailed instructions, scope,
-   `## Precondition`, `## Definition of Done`, and validation steps.
+   `## Precondition`, `## Definition of Done`, and validation steps. Include
+   `required_effort: <label>` and `effort_reason: <short reason>` only when a
+   phase needs a specific effort tier.
 
 Each phase must be independently verifiable. Order phases so earlier ones reduce
 risk for later ones. Every phase must leave the repository shippable.
 The precondition must describe what must already be true before the phase may
 start. The Definition of Done must describe what must be true for the phase to
 count as complete. Do not conflate them.
+Valid effort labels are `low`, `medium`, `high`, `xhigh`. Use the lowest safe
+`required_effort` for each phase. A phase may require higher effort than this
+run allows; that phase will wait for a future higher-budget run.
 
 Refactoring taste is injected by the caller. Respect it when scoping phases
 and defining quality bars.\
@@ -584,6 +590,8 @@ approaches/<idea>.md for context. Check:
 - Each phase has a concrete precondition for start gating.
 - Each phase has a concrete Definition of Done for completion assessment.
 - Preconditions and Definitions of Done are not conflated.
+- Any phase `required_effort` uses one of `low`, `medium`, `high`, `xhigh`,
+  is the lowest safe tier, and has a useful `effort_reason`.
 - The plan does not modify source files outside the migration scope.
 
 List findings as numbered items. If no findings, state "no findings."
@@ -600,6 +608,8 @@ The plan has been through at least one review-revise cycle. Assess:
 - Is it fundamentally flawed and should be rejected?
 
 Review plan.md, phase-<n>-<name>.md files, and approaches/<idea>.md.
+Verify effort labels use the lowest safe tier; phases may exceed the current
+run max allowed effort, but those phases will wait for a future run.
 
 Refactoring taste is injected by the caller. Use it as the quality bar.
 
@@ -657,12 +667,49 @@ _PLANNING_STAGE_PROMPTS: dict[str, str] = {
 }
 
 
+def _format_effort_budget(effort_budget: EffortBudget | None) -> str | None:
+    if effort_budget is None:
+        return None
+    return (
+        "## Effort Budget\n"
+        "Valid effort labels: `low`, `medium`, `high`, `xhigh`.\n"
+        f"Current run max allowed effort: `{effort_budget.max_allowed_effort}`.\n"
+        f"Default effort for this planning run: `{effort_budget.default_effort}`.\n"
+        "Use the lowest safe `required_effort` for each phase. Phases may "
+        "require higher effort than the current run allows; those phases will "
+        "wait for a future run."
+    )
+
+
+def _format_phase_summary(phase: PhaseSpec) -> str:
+    lines = [
+        f"Name: {phase.name}",
+        f"File: {phase.file}",
+        f"Precondition: {phase.precondition}",
+    ]
+    if phase.required_effort is not None:
+        lines.append(f"Required effort: {phase.required_effort}")
+    if phase.effort_reason is not None:
+        lines.append(f"Effort reason: {phase.effort_reason}")
+    return "\n".join(lines)
+
+
 def _format_manifest_summary(manifest: MigrationManifest) -> str:
     phases = "\n".join(
         (
             f"  - {phase_file_reference(phase)}"
             f" ({phase.name}, {'done' if phase.done else 'pending'})"
             f" \u2014 precondition: {phase.precondition}"
+            + (
+                f"; required_effort: {phase.required_effort}"
+                if phase.required_effort is not None
+                else ""
+            )
+            + (
+                f"; effort_reason: {phase.effort_reason}"
+                if phase.effort_reason is not None
+                else ""
+            )
         )
         for phase in manifest.phases
     )
@@ -714,10 +761,12 @@ def compose_planning_prompt(
     migration_name: str,
     taste: str,
     context: str,
+    effort_budget: EffortBudget | None = None,
 ) -> str:
     base = _PLANNING_STAGE_PROMPTS[stage]
     return _join_sections(
         base,
+        _format_effort_budget(effort_budget),
         f"## Migration\n{migration_name}",
         f"## Context\n{context}" if context else None,
         f"## Taste\n{taste}",
@@ -729,7 +778,7 @@ def compose_phase_ready_prompt(
 ) -> str:
     return _join_sections(
         PHASE_READY_CHECK_PROMPT,
-        f"## Phase\nName: {phase.name}\nFile: {phase.file}\nPrecondition: {phase.precondition}",
+        f"## Phase\n{_format_phase_summary(phase)}",
         f"## Manifest\n{_format_manifest_summary(manifest)}",
         f"## Taste\n{taste}",
     )
@@ -744,7 +793,7 @@ def compose_phase_execution_prompt(
 ) -> str:
     sections: list[str] = [
         PHASE_EXECUTION_PROMPT,
-        f"## Phase\nName: {phase.name}\nFile: {phase.file}\nPrecondition: {phase.precondition}",
+        f"## Phase\n{_format_phase_summary(phase)}",
         f"## Manifest\n{_format_manifest_summary(manifest)}",
         f"## Taste\n{taste}",
         f"## Validation\nRun: `{validation_command}`",

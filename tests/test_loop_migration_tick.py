@@ -18,6 +18,7 @@ from continuous_refactoring.artifacts import (
 )
 from continuous_refactoring.config import default_taste_text
 from continuous_refactoring.decisions import DecisionRecord, RouteOutcome
+from continuous_refactoring.effort import EffortBudget
 from continuous_refactoring.migrations import (
     MigrationManifest,
     PhaseSpec,
@@ -103,6 +104,7 @@ def _seed_manifest(
     last_touch: datetime,
     wake_up_on: datetime | None = None,
     created_at: datetime | None = None,
+    phases: tuple[PhaseSpec, ...] = (_PHASE_0, _PHASE_1),
     commit: bool = False,
 ) -> tuple[Path, MigrationManifest, Path]:
     live_dir = _migrations_dir(run_once_env)
@@ -111,6 +113,7 @@ def _seed_manifest(
         last_touch=last_touch,
         wake_up_on=wake_up_on,
         created_at=created_at,
+        phases=phases,
     )
     path = _save(manifest, live_dir)
     if commit:
@@ -238,6 +241,7 @@ def _tick(
     validation_command: str = "uv run pytest",
     max_attempts: int | None = 3,
     attempt: int = 7,
+    effort_budget: EffortBudget | None = None,
     finalize_commit: Callable[..., object] | None = None,
 ) -> tuple[RouteOutcome, DecisionRecord | None]:
     artifacts = create_run_artifacts(
@@ -265,6 +269,7 @@ def _tick(
         max_attempts=max_attempts,
         attempt=attempt,
         finalize_commit=finalize_commit or noop_finalize,
+        effort_budget=effort_budget,
     )
 
 
@@ -443,7 +448,7 @@ def test_ready_phase_execution_receives_runtime_settings_and_commits_phase_file(
         captured["finalize_phase"] = kwargs["phase"]
         commits.append(commit_message)
 
-    _patch_check_ready(monkeypatch, "yes")
+    ready_calls = _patch_check_ready(monkeypatch, "yes")
     monkeypatch.setattr(
         "continuous_refactoring.migration_tick.execute_phase",
         fake_execute,
@@ -503,7 +508,7 @@ def test_failed_ready_phase_abandons_and_preserves_retry_used(
     def finalize_trap(*_args: object, **_kwargs: object) -> None:
         raise AssertionError("failed phase execution must not be committed")
 
-    _patch_check_ready(monkeypatch, "yes")
+    ready_calls = _patch_check_ready(monkeypatch, "yes")
     monkeypatch.setattr(
         "continuous_refactoring.migration_tick.execute_phase",
         fake_execute,
@@ -603,6 +608,129 @@ def test_not_ready_phase_defers_without_overwriting_existing_wake_up(
     assert datetime.fromisoformat(reloaded.cooldown_until) > now
     assert reloaded.wake_up_on == existing_wake.isoformat(timespec="milliseconds")
     assert reloaded.awaiting_human_review is False
+
+
+def test_phase_above_max_effort_defers_without_ready_check_or_failure(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    high_phase = replace(
+        _PHASE_0,
+        required_effort="xhigh",
+        effort_reason="broad architectural judgment",
+    )
+    live_dir, _, manifest_path = _seed_manifest(
+        run_once_env,
+        name="rework-auth",
+        last_touch=_utc_now() - timedelta(hours=24),
+        phases=(high_phase, _PHASE_1),
+    )
+    ready_calls = _patch_check_ready(monkeypatch, "yes")
+    _patch_execute_phase_trap(monkeypatch)
+
+    outcome, record = _tick(
+        live_dir,
+        run_once_env,
+        effort_budget=EffortBudget(default_effort="high", max_allowed_effort="high"),
+    )
+
+    reloaded = load_manifest(manifest_path)
+    assert outcome == "not-routed"
+    assert record is not None
+    assert record.decision == "retry"
+    assert record.call_role == "phase.effort-budget"
+    assert record.failure_kind == "phase-effort-over-budget"
+    assert "requires xhigh effort" in record.summary
+    assert reloaded.current_phase == "setup"
+    assert ready_calls == []
+    assert reloaded.phases[0].done is False
+    assert reloaded.awaiting_human_review is False
+    assert reloaded.cooldown_until is not None
+    assert reloaded.wake_up_on is not None
+
+
+def test_phase_required_effort_at_max_runs_with_escalated_effort(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    high_phase = replace(_PHASE_0, required_effort="xhigh")
+    live_dir, _, _ = _seed_manifest(
+        run_once_env,
+        name="rework-auth",
+        last_touch=_utc_now() - timedelta(hours=24),
+        phases=(high_phase, _PHASE_1),
+    )
+    captured: dict[str, str] = {}
+
+    def fake_ready(
+        phase: PhaseSpec, manifest: MigrationManifest,
+        *_args: object, **kwargs: object,
+    ) -> tuple[str, str]:
+        captured["ready_effort"] = str(kwargs["effort"])
+        return ("yes", "ready")
+
+    def fake_execute(
+        phase: PhaseSpec, manifest: MigrationManifest,
+        taste: object, repo_root: object, live_dir: Path,
+        artifacts: object, **kwargs: object,
+    ) -> ExecutePhaseOutcome:
+        captured["execute_effort"] = str(kwargs["effort"])
+        return ExecutePhaseOutcome(status="done", reason="ok")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.check_phase_ready",
+        fake_ready,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.execute_phase",
+        fake_execute,
+    )
+
+    outcome, record = _tick(
+        live_dir,
+        run_once_env,
+        effort_budget=EffortBudget(default_effort="high", max_allowed_effort="xhigh"),
+    )
+
+    assert outcome == "commit"
+    assert record is not None
+    assert captured == {"ready_effort": "xhigh", "execute_effort": "xhigh"}
+
+
+def test_deferred_phase_executes_later_when_effort_cap_is_raised(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    high_phase = replace(_PHASE_0, required_effort="xhigh")
+    live_dir, _, manifest_path = _seed_manifest(
+        run_once_env,
+        name="rework-auth",
+        last_touch=_utc_now() - timedelta(hours=24),
+        phases=(high_phase, _PHASE_1),
+    )
+    ready_calls = _patch_check_ready(monkeypatch, "yes")
+    _patch_execute_phase_trap(monkeypatch)
+
+    first_outcome, _ = _tick(
+        live_dir,
+        run_once_env,
+        effort_budget=EffortBudget(default_effort="high", max_allowed_effort="high"),
+    )
+    assert first_outcome == "not-routed"
+    assert load_manifest(manifest_path).cooldown_until is not None
+    assert ready_calls == []
+
+    exec_calls = _patch_execute_phase(monkeypatch, status="done")
+
+    second_outcome, second_record = _tick(
+        live_dir,
+        run_once_env,
+        effort_budget=EffortBudget(default_effort="high", max_allowed_effort="xhigh"),
+    )
+
+    reloaded = load_manifest(manifest_path)
+    assert second_outcome == "commit"
+    assert second_record is not None
+    assert ready_calls == ["setup"]
+    assert exec_calls == ["setup"]
+    assert reloaded.phases[0].done is True
 
 
 def test_unverifiable_phase_blocks_and_persists_human_review_fields(

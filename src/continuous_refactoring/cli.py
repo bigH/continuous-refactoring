@@ -14,6 +14,7 @@ __all__ = [
 
 from continuous_refactoring.agent import run_agent_interactive_until_settled
 from continuous_refactoring.artifacts import ContinuousRefactorError
+from continuous_refactoring.effort import EFFORT_TIERS, parse_effort_arg, resolve_effort_budget
 from continuous_refactoring.loop import (
     run_loop,
     run_migrations_focused_loop,
@@ -26,6 +27,18 @@ _GLOBAL_TASTE_WARNING = (
     "warning: global taste is out of date — "
     "run 'continuous-refactoring taste --upgrade' to update."
 )
+
+
+class _DefaultEffortAction(argparse.Action):
+    def __call__(
+        self,
+        parser: argparse.ArgumentParser,
+        namespace: argparse.Namespace,
+        values: str | None,
+        option_string: str | None = None,
+    ) -> None:
+        setattr(namespace, self.dest, values)
+        setattr(namespace, "effort", values)
 
 
 def parse_max_attempts(value: str) -> int:
@@ -57,7 +70,23 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
         help="Which agent backend to use.",
     )
     parser.add_argument("--model", required=True, help="Model name.")
-    parser.add_argument("--effort", required=True, help="Effort level.")
+    parser.add_argument(
+        "--default-effort",
+        "--effort",
+        dest="default_effort",
+        required=True,
+        type=parse_effort_arg,
+        action=_DefaultEffortAction,
+        metavar="{" + ",".join(EFFORT_TIERS) + "}",
+        help="Default effort level. --effort is a backward-compatible alias.",
+    )
+    parser.add_argument(
+        "--max-allowed-effort",
+        type=parse_effort_arg,
+        default=None,
+        metavar="{" + ",".join(EFFORT_TIERS) + "}",
+        help="Highest effort this run may use. Defaults to --default-effort.",
+    )
     parser.add_argument(
         "--validation-command",
         default="uv run pytest",
@@ -554,12 +583,27 @@ def _exit_with_loop_result(
         raise SystemExit(1) from error
 
 
+def _normalize_run_effort_args(args: argparse.Namespace) -> None:
+    default_effort = getattr(args, "default_effort", getattr(args, "effort", None))
+    max_allowed_effort = getattr(args, "max_allowed_effort", None)
+    try:
+        budget = resolve_effort_budget(default_effort, max_allowed_effort)
+    except ContinuousRefactorError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(2) from error
+    args.default_effort = budget.default_effort
+    args.effort = budget.default_effort
+    args.max_allowed_effort = budget.max_allowed_effort
+
+
 def _handle_run_once(args: argparse.Namespace) -> None:
+    _normalize_run_effort_args(args)
     _require_targeting_or_scope(args)
     _exit_with_loop_result(run_once, args)
 
 
 def _handle_run(args: argparse.Namespace) -> None:
+    _normalize_run_effort_args(args)
     if getattr(args, "focus_on_live_migrations", False):
         _exit_with_loop_result(run_migrations_focused_loop, args)
         return

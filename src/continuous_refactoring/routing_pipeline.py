@@ -27,6 +27,7 @@ from continuous_refactoring.decisions import (
     error_failure_kind,
     sanitize_text,
 )
+from continuous_refactoring.effort import EffortBudget, resolve_effort_budget
 from continuous_refactoring.git import get_head_sha
 from continuous_refactoring.migration_tick import try_migration_tick as _try_migration_tick
 from continuous_refactoring.planning import run_planning
@@ -76,6 +77,7 @@ def expand_target_for_classification(
     model: str,
     effort: str,
     timeout: int | None,
+    effort_metadata: dict[str, object] | None = None,
 ) -> tuple[Target, str]:
     scope_dir = artifacts.root / "scope-expansion"
     bypass_reason = scope_expansion_bypass_reason(target)
@@ -104,6 +106,7 @@ def expand_target_for_classification(
         agent=agent,
         model=model,
         effort=effort,
+        effort_metadata=effort_metadata,
         timeout=timeout,
     )
     write_scope_expansion_artifacts(
@@ -137,7 +140,10 @@ def route_and_run(
     attempt: int,
     finalize_commit: _FinalizeCommit,
     check_migrations: bool = True,
+    effort_budget: EffortBudget | None = None,
+    effort_metadata: dict[str, object] | None = None,
 ) -> RouteResult:
+    resolved_budget = effort_budget or resolve_effort_budget(effort, None)
     if live_dir is None:
         return RouteResult(outcome="not-routed", target=target)
 
@@ -145,6 +151,7 @@ def route_and_run(
         migration_result, migration_record = _try_migration_tick(
             live_dir, taste, repo_root, artifacts,
             agent=agent, model=model, effort=effort,
+            effort_budget=resolved_budget,
             timeout=timeout, commit_message_prefix=commit_message_prefix,
             validation_command=validation_command,
             max_attempts=max_attempts,
@@ -166,6 +173,7 @@ def route_and_run(
         agent=agent,
         model=model,
         effort=effort,
+        effort_metadata=effort_metadata,
         timeout=timeout,
     )
 
@@ -180,6 +188,7 @@ def route_and_run(
             agent=agent,
             model=model,
             effort=effort,
+            effort_metadata=effort_metadata,
             timeout=timeout,
         )
     except ContinuousRefactorError as error:
@@ -222,6 +231,8 @@ def route_and_run(
             agent=agent,
             model=model,
             effort=effort,
+            effort_budget=resolved_budget,
+            effort_metadata=effort_metadata,
             timeout=timeout,
             extra_context=planning_context,
         )

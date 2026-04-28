@@ -46,6 +46,7 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 - **Settle protocol** — `<file>.done` + sha256 handshake confirming an interactive agent is finished.
 - **Status block** — the driver's end-of-attempt summary written to artifacts.
 - **Call role** — `classifier | planner | editor | reviewer` slot filled in a prompt.
+- **Effort budget** — shared nominal tiers `low < medium < high < xhigh`; `--default-effort` is the normal call effort, `--max-allowed-effort` caps target overrides and phase escalation.
 - **Failure snapshot** — per-attempt failure record at `…/projects/<uuid>/failures/<run_id>-attempt-NNN-retry-NN-<role>.md`. One file per failed attempt; sort to find the latest.
 
 ## 6. Code conventions
@@ -62,7 +63,7 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 
 ## 7. Package uniqueness rule
 
-`src/continuous_refactoring/__init__.py` walks every submodule's `__all__` and asserts no duplicate symbols. A collision breaks package import at boot. Any rename or addition needs a project-wide check before commit.
+`src/continuous_refactoring/__init__.py` walks every public submodule's `__all__` and asserts no duplicate symbols. A collision breaks package import at boot. Any rename or addition to the package-root surface needs a project-wide check before commit. Internal modules such as `migration_manifest_codec.py`, `review_cli.py`, and `effort.py` stay out of the package-root exports.
 
 ## 8. Testing idioms
 
@@ -92,6 +93,7 @@ migration explicitly scopes structural work.
 - **Human-review gating** (`planning.py`, `migration_tick.py`, `review_cli.py`) — migrations with `awaiting_human_review=true` must be invisible to automated migration ticks/ready-checks until `review perform` clears the flag.
 - **Migration terminology split** (`migrations.py`, `planning.py`, `prompts.py`) — manifest `precondition` gates phase start; phase markdown `## Definition of Done` governs completion.
 - **Phase execution validation gate** (`phases.py`, `prompts.py`, `loop.py`) — a migration phase is complete only after host-side full validation passes. `execute_phase()` retries validation-red attempts from `head_before` up to the effective `--max-attempts` budget, and the phase prompt must include the literal configured validation command plus the phase file's Definition of Done as the completion contract.
+- **Effort budgeting** (`effort.py`, `loop.py`, `migration_tick.py`, `planning.py`) — `--effort` is only an alias for `--default-effort`; omitted `--max-allowed-effort` means a fixed-effort run. Target `effort-override` changes that target's default but is still capped. Migration `required_effort` above the cap defers the phase without failing the run.
 - **Taste injection** — every prompt includes a `## Taste` section. `tests/test_prompts.py` enforces this via `_TASTE_INJECTED_PROMPTS`. Do not drop it.
 
 ## 11. Surprising CLI semantics

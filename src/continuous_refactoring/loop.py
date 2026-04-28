@@ -44,6 +44,12 @@ from continuous_refactoring.decisions import (
     sanitize_text,
     status_summary,
 )
+from continuous_refactoring.effort import (
+    EffortBudget,
+    EffortResolution,
+    resolve_effort_budget,
+    resolve_requested_effort,
+)
 from continuous_refactoring.failure_report import effective_record, persist_decision
 from continuous_refactoring.git import (
     discard_workspace_changes,
@@ -107,6 +113,69 @@ def _retry_context(record: DecisionRecord) -> str:
     if record.next_retry_focus:
         lines.append(f"- Next retry focus: {record.next_retry_focus}")
     return "\n".join(lines)
+
+
+def _effort_budget_from_args(args: argparse.Namespace) -> EffortBudget:
+    default_effort = getattr(args, "default_effort", getattr(args, "effort", None))
+    max_allowed_effort = getattr(args, "max_allowed_effort", None)
+    return resolve_effort_budget(default_effort, max_allowed_effort)
+
+
+def _target_effort_budget(
+    budget: EffortBudget,
+    target: Target,
+) -> tuple[EffortBudget, EffortResolution]:
+    has_override = target.effort_override is not None
+    resolution = resolve_requested_effort(
+        budget,
+        target.effort_override,
+        source="target-override" if has_override else "default",
+        reason=(
+            "target effort override capped by run budget"
+            if has_override
+            else "run default effort"
+        ),
+    )
+    return (
+        EffortBudget(
+            default_effort=resolution.effective_effort,
+            max_allowed_effort=budget.max_allowed_effort,
+        ),
+        resolution,
+    )
+
+
+def _log_effort_budget(artifacts: RunArtifacts, budget: EffortBudget) -> None:
+    artifacts.log(
+        "INFO",
+        (
+            "effort budget: "
+            f"default={budget.default_effort}, max={budget.max_allowed_effort}"
+        ),
+        event="effort_budget_configured",
+        default_effort=budget.default_effort,
+        max_allowed_effort=budget.max_allowed_effort,
+    )
+
+
+def _log_effort_resolution(
+    artifacts: RunArtifacts,
+    resolution: EffortResolution,
+    *,
+    attempt: int,
+    target: str,
+) -> None:
+    artifacts.log(
+        "INFO",
+        (
+            "effort resolved: "
+            f"{resolution.requested_effort} -> {resolution.effective_effort}"
+        ),
+        event="effort_resolved",
+        attempt=attempt,
+        target=target,
+        **resolution.event_fields(),
+    )
 
 
 @dataclass(frozen=True)
@@ -176,6 +245,7 @@ def _run_refactor_attempt(
     show_command_logs: bool,
     commit_message_prefix: str,
     preserved_workspace: _PreservedWorkspaceTree | None = None,
+    effort_metadata: dict[str, object] | None = None,
 ) -> DecisionRecord:
     discard_workspace_changes(repo_root)
     if preserved_workspace is not None:
@@ -201,6 +271,7 @@ def _run_refactor_attempt(
         retry=retry,
         target=target.description,
         call_role=call_role,
+        effort=effort_metadata,
     )
     try:
         agent_result = maybe_run_agent(
@@ -224,6 +295,7 @@ def _run_refactor_attempt(
             status="failed",
             level="WARN",
             summary=str(error),
+            effort=effort_metadata,
         )
         _reset_to_source_baseline(repo_root, head_before, preserved_workspace)
         agent_status = read_status(
@@ -270,6 +342,7 @@ def _run_refactor_attempt(
             level="WARN",
             returncode=agent_result.returncode,
             summary=summary,
+            effort=effort_metadata,
         )
         _reset_to_source_baseline(repo_root, head_before, preserved_workspace)
         return DecisionRecord(
@@ -293,6 +366,7 @@ def _run_refactor_attempt(
         call_role=call_role,
         status="finished",
         returncode=agent_result.returncode,
+        effort=effort_metadata,
     )
 
     validation_role = "validation"
@@ -514,10 +588,11 @@ def _action_banner(action_index: int, action_limit: int | None) -> str:
     return f"\n── Action {action_index}/{action_limit} ──"
 
 
-def _print_migration_probe(live_dir: Path) -> None:
+def _print_migration_probe(live_dir: Path, effort_budget: EffortBudget) -> None:
     candidates = migration_tick.enumerate_eligible_manifests(
         live_dir,
         datetime.now(timezone.utc),
+        effort_budget,
     )
     if not candidates:
         print("No runnable migrations; selecting a target")
@@ -554,7 +629,9 @@ class _MigrationProbeArtifacts:
         target: str,
         call_role: str,
         phase_reached: str | None = None,
+        effort: dict[str, object] | None = None,
     ) -> None:
+        effort_fields = dict(effort or {})
         self._artifacts.log(
             "INFO",
             f"migration call start: {call_role} — {target}",
@@ -564,6 +641,7 @@ class _MigrationProbeArtifacts:
             target=target,
             call_role=call_role,
             phase_reached=phase_reached or call_role,
+            **effort_fields,
         )
 
     def log_call_finished(
@@ -578,7 +656,9 @@ class _MigrationProbeArtifacts:
         level: str = "INFO",
         returncode: int | None = None,
         summary: str | None = None,
+        effort: dict[str, object] | None = None,
     ) -> None:
+        effort_fields = dict(effort or {})
         self._artifacts.log(
             level,
             f"migration call {status}: {call_role} — {target}",
@@ -591,10 +671,14 @@ class _MigrationProbeArtifacts:
             call_status=status,
             returncode=returncode,
             summary=summary,
+            **effort_fields,
         )
 
     def record_commit(self, attempt: int, phase: str, commit_sha: str) -> None:
         self._artifacts.record_commit(attempt, phase, commit_sha)
+
+    def log(self, level: str, message: str, **fields: object) -> None:
+        self._artifacts.log(level, message, **fields)
 
 
 def _sleep_between_actions(
@@ -644,6 +728,7 @@ def _finalize_commit(
 def run_once(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
     timeout = args.timeout or 900
+    base_effort_budget = _effort_budget_from_args(args)
     max_attempts_effective = _effective_max_attempts(
         getattr(args, "max_attempts", None)
     )
@@ -658,16 +743,29 @@ def run_once(args: argparse.Namespace) -> int:
 
     base_prompt = _resolve_base_prompt(args)
     model = target.model_override or args.model
-    effort = target.effort_override or args.effort
+    target_effort_budget, effort_resolution = _target_effort_budget(
+        base_effort_budget,
+        target,
+    )
+    effort = target_effort_budget.default_effort
 
     artifacts = create_run_artifacts(
         repo_root,
         agent=args.agent,
         model=model,
         effort=effort,
+        default_effort=base_effort_budget.default_effort,
+        max_allowed_effort=base_effort_budget.max_allowed_effort,
         test_command=args.validation_command,
     )
     artifacts.log("INFO", f"run artifacts: {artifacts.root}", event="artifacts_ready")
+    _log_effort_budget(artifacts, base_effort_budget)
+    _log_effort_resolution(
+        artifacts,
+        effort_resolution,
+        attempt=1,
+        target=target.description,
+    )
 
     final_status = "running"
     error_message: str | None = None
@@ -687,6 +785,8 @@ def run_once(args: argparse.Namespace) -> int:
             agent=args.agent,
             model=model,
             effort=effort,
+            effort_budget=target_effort_budget,
+            effort_metadata=effort_resolution.event_fields(),
             timeout=timeout,
             commit_message_prefix="continuous refactor",
             validation_command=args.validation_command,
@@ -722,24 +822,65 @@ def run_once(args: argparse.Namespace) -> int:
             attempt_dir / "agent-last-message.md" if args.agent == "codex" else None
         )
 
-        agent_result = maybe_run_agent(
-            agent=args.agent,
-            model=model,
-            effort=effort,
-            prompt=prompt,
-            repo_root=repo_root,
-            stdout_path=attempt_dir / "agent.stdout.log",
-            stderr_path=attempt_dir / "agent.stderr.log",
-            last_message_path=last_message_path,
-            mirror_to_terminal=args.show_agent_logs,
-            timeout=timeout,
+        artifacts.log_call_started(
+            attempt=1,
+            retry=1,
+            target=target.description,
+            call_role="refactor",
+            effort=effort_resolution.event_fields(),
         )
+        try:
+            agent_result = maybe_run_agent(
+                agent=args.agent,
+                model=model,
+                effort=effort,
+                prompt=prompt,
+                repo_root=repo_root,
+                stdout_path=attempt_dir / "agent.stdout.log",
+                stderr_path=attempt_dir / "agent.stderr.log",
+                last_message_path=last_message_path,
+                mirror_to_terminal=args.show_agent_logs,
+                timeout=timeout,
+            )
+        except ContinuousRefactorError as error:
+            artifacts.log_call_finished(
+                attempt=1,
+                retry=1,
+                target=target.description,
+                call_role="refactor",
+                status="failed",
+                level="WARN",
+                summary=str(error),
+                effort=effort_resolution.event_fields(),
+            )
+            raise
 
         if agent_result.returncode != 0:
+            artifacts.log_call_finished(
+                attempt=1,
+                retry=1,
+                target=target.description,
+                call_role="refactor",
+                status="failed",
+                level="WARN",
+                returncode=agent_result.returncode,
+                summary=f"Agent failed with exit code {agent_result.returncode}",
+                effort=effort_resolution.event_fields(),
+            )
             final_status = "agent_failed"
             raise ContinuousRefactorError(
                 f"Agent failed with exit code {agent_result.returncode}"
             )
+
+        artifacts.log_call_finished(
+            attempt=1,
+            retry=1,
+            target=target.description,
+            call_role="refactor",
+            status="finished",
+            returncode=agent_result.returncode,
+            effort=effort_resolution.event_fields(),
+        )
 
         validation_result = run_tests(
             args.validation_command,
@@ -792,6 +933,7 @@ def run_loop(args: argparse.Namespace) -> int:
     timeout = args.timeout or 1800
     sleep_seconds = getattr(args, "sleep", 0.0)
     max_consecutive = args.max_consecutive_failures
+    base_effort_budget = _effort_budget_from_args(args)
     max_attempts_effective = _effective_max_attempts(
         getattr(args, "max_attempts", None)
     )
@@ -814,10 +956,13 @@ def run_loop(args: argparse.Namespace) -> int:
         repo_root,
         agent=args.agent,
         model=args.model,
-        effort=args.effort,
+        effort=base_effort_budget.default_effort,
+        default_effort=base_effort_budget.default_effort,
+        max_allowed_effort=base_effort_budget.max_allowed_effort,
         test_command=args.validation_command,
     )
     artifacts.log("INFO", f"run artifacts: {artifacts.root}", event="artifacts_ready")
+    _log_effort_budget(artifacts, base_effort_budget)
     if max_attempts_effective is None:
         artifacts.log(
             "WARN",
@@ -860,7 +1005,7 @@ def run_loop(args: argparse.Namespace) -> int:
             print(_action_banner(action_index, action_limit))
 
             if live_dir is not None:
-                _print_migration_probe(live_dir)
+                _print_migration_probe(live_dir, base_effort_budget)
                 migration_artifacts = _MigrationProbeArtifacts(artifacts, action_index)
                 migration_outcome, migration_record = migration_tick.try_migration_tick(
                     live_dir,
@@ -869,7 +1014,8 @@ def run_loop(args: argparse.Namespace) -> int:
                     migration_artifacts,
                     agent=args.agent,
                     model=args.model,
-                    effort=args.effort,
+                    effort=base_effort_budget.default_effort,
+                    effort_budget=base_effort_budget,
                     timeout=timeout,
                     commit_message_prefix=args.commit_message_prefix,
                     validation_command=args.validation_command,
@@ -932,7 +1078,18 @@ def run_loop(args: argparse.Namespace) -> int:
             source_index += 1
             artifacts.mark_attempt_started(action_index)
             model = target.model_override or args.model
-            effort = target.effort_override or args.effort
+            target_effort_budget, effort_resolution = _target_effort_budget(
+                base_effort_budget,
+                target,
+            )
+            effort = target_effort_budget.default_effort
+            effort_metadata = effort_resolution.event_fields()
+            _log_effort_resolution(
+                artifacts,
+                effort_resolution,
+                attempt=action_index,
+                target=target.description,
+            )
 
             print(f"Target: {target.description}")
             route_result = routing_pipeline.route_and_run(
@@ -944,6 +1101,8 @@ def run_loop(args: argparse.Namespace) -> int:
                 agent=args.agent,
                 model=model,
                 effort=effort,
+                effort_budget=target_effort_budget,
+                effort_metadata=effort_metadata,
                 timeout=timeout,
                 commit_message_prefix=args.commit_message_prefix,
                 validation_command=args.validation_command,
@@ -1029,6 +1188,7 @@ def run_loop(args: argparse.Namespace) -> int:
                     agent=args.agent,
                     model=model,
                     effort=effort,
+                    effort_metadata=effort_metadata,
                     prompt=prompt,
                     timeout=timeout,
                     validation_command=args.validation_command,
@@ -1110,10 +1270,14 @@ def run_loop(args: argparse.Namespace) -> int:
 
 
 def _focus_eligible_manifests(
-    live_dir: Path, now: datetime,
+    live_dir: Path, now: datetime, effort_budget: EffortBudget,
 ) -> list[tuple[MigrationManifest, Path]]:
     return [
-        pair for pair in migration_tick.enumerate_eligible_manifests(live_dir, now)
+        pair for pair in migration_tick.enumerate_eligible_manifests(
+            live_dir,
+            now,
+            effort_budget,
+        )
         if not pair[0].awaiting_human_review
     ]
 
@@ -1123,6 +1287,7 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
     timeout = args.timeout or 1800
     sleep_seconds = getattr(args, "sleep", 0.0)
     max_consecutive = args.max_consecutive_failures
+    base_effort_budget = _effort_budget_from_args(args)
     max_attempts_effective = _effective_max_attempts(
         getattr(args, "max_attempts", None)
     )
@@ -1139,10 +1304,13 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
         repo_root,
         agent=args.agent,
         model=args.model,
-        effort=args.effort,
+        effort=base_effort_budget.default_effort,
+        default_effort=base_effort_budget.default_effort,
+        max_allowed_effort=base_effort_budget.max_allowed_effort,
         test_command=args.validation_command,
     )
     artifacts.log("INFO", f"run artifacts: {artifacts.root}", event="artifacts_ready")
+    _log_effort_budget(artifacts, base_effort_budget)
     artifacts.log(
         "INFO",
         f"focus-on-live-migrations: {live_dir}",
@@ -1177,7 +1345,7 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
 
         while True:
             now = datetime.now(timezone.utc)
-            eligible = _focus_eligible_manifests(live_dir, now)
+            eligible = _focus_eligible_manifests(live_dir, now, base_effort_budget)
             if not eligible:
                 print(
                     "Focused migrations loop: nothing eligible — "
@@ -1203,7 +1371,8 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
                 artifacts,
                 agent=args.agent,
                 model=args.model,
-                effort=args.effort,
+                effort=base_effort_budget.default_effort,
+                effort_budget=base_effort_budget,
                 timeout=timeout,
                 commit_message_prefix=args.commit_message_prefix,
                 validation_command=args.validation_command,
@@ -1212,7 +1381,7 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
                 finalize_commit=_finalize_commit,
             )
 
-            if record is not None:
+            if record is not None and outcome != "not-routed":
                 persist_decision(
                     repo_root,
                     artifacts,

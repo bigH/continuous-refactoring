@@ -98,6 +98,7 @@ def select_scope_candidate(
     model: str,
     effort: str,
     timeout: int | None,
+    effort_metadata: dict[str, object] | None = None,
 ) -> ScopeSelection:
     selection_dir = artifacts.root / "scope-expansion"
     selection_dir.mkdir(parents=True, exist_ok=True)

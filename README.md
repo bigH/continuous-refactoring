@@ -99,7 +99,7 @@ Target resolution is first-match-wins:
 
 These flags are not mutually exclusive, but only the highest-priority populated source is used.
 
-- `--targets path/to/targets.jsonl` — explicit list; one JSON object per line with `description`, `files`, optional `scoping`, `model-override`, `effort-override`.
+- `--targets path/to/targets.jsonl` — explicit list; one JSON object per line with `description`, `files`, optional `scoping`, `model-override`, `effort-override`. Effort overrides use `low`, `medium`, `high`, or `xhigh`.
 - `--globs 'src/**/*.py:tests/**/*.py'` — colon-separated globs; each matched file becomes its own target.
 - `--extensions .py,.ts` — shorthand that expands to `**/*.py`, `**/*.ts`; each matched file becomes its own target.
 - `--paths a.py:b.py` — literal paths, all treated as one target.
@@ -116,7 +116,9 @@ If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`, the
 
 ### Shared `run` / `run-once` flags
 
-- `--with`, `--model`, `--effort` — required agent backend/model/effort selection.
+- `--with`, `--model`, `--default-effort` — required agent backend/model/default effort selection. Valid effort labels are `low`, `medium`, `high`, `xhigh`.
+- `--effort` — backward-compatible alias for `--default-effort`.
+- `--max-allowed-effort` — cap for any escalation in this run. If omitted, it equals `--default-effort`, so legacy `--effort high` behaves as fixed high.
 - `--repo-root PATH` — repository root; defaults to the current directory.
 - `--validation-command` — defaults to `uv run pytest`. Swap it for whatever keeps your repo honest.
 - `--timeout` — per-agent-call timeout in seconds.
@@ -148,6 +150,8 @@ Each run writes to `$TMPDIR/continuous-refactoring/<run-id>/`:
 - `events.jsonl` — structured event log
 - `run.log` — human-readable log
 - `attempt-NNN/[retry-NN/]refactor/` — per-attempt agent + test stdout/stderr
+
+Mixed-effort runs are auditable: summaries and call events record the default effort, max allowed effort, requested effort, effective effort, source, and whether the request was capped.
 
 The path prints at startup. Grep it when something goes sideways.
 
@@ -221,6 +225,7 @@ Each migration moves through phases sequentially.
 
 - The manifest stores each phase's **precondition** — what must already be true before execution may start.
 - Each phase markdown file stores its **Definition of Done** under `## Definition of Done` — what must be true for that phase to count as completed.
+- A phase may declare optional `required_effort` and `effort_reason` in the manifest. The driver escalates up to `--max-allowed-effort`; if a phase needs more, the phase is deferred without failing the run and can be picked up by a later higher-budget run.
 
 Before executing a phase, a ready-check agent verifies that the current phase precondition is met. Possible outcomes:
 

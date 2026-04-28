@@ -5,11 +5,11 @@ from __future__ import annotations
 import json
 import os
 import tempfile
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from continuous_refactoring.config import register_project
+from continuous_refactoring.config import failure_snapshots_dir
 from continuous_refactoring.decisions import DecisionRecord
 
 if TYPE_CHECKING:
@@ -20,6 +20,51 @@ __all__ = [
     "persist_decision",
     "write",
 ]
+
+
+@dataclass(frozen=True)
+class SnapshotArtifactPaths:
+    agent_last_message: str
+    agent_stdout: str
+    agent_stderr: str
+    tests_stdout: str
+    tests_stderr: str
+
+    @classmethod
+    def from_record(
+        cls,
+        record: DecisionRecord,
+        artifact_root: Path,
+    ) -> SnapshotArtifactPaths:
+        return cls(
+            agent_last_message=_relative_path(
+                record.agent_last_message_path,
+                artifact_root,
+            ),
+            agent_stdout=_relative_path(record.agent_stdout_path, artifact_root),
+            agent_stderr=_relative_path(record.agent_stderr_path, artifact_root),
+            tests_stdout=_relative_path(record.tests_stdout_path, artifact_root),
+            tests_stderr=_relative_path(record.tests_stderr_path, artifact_root),
+        )
+
+    def front_matter_fields(self) -> dict[str, str]:
+        return {
+            "agent_last_message": self.agent_last_message,
+            "agent_stdout": self.agent_stdout,
+            "agent_stderr": self.agent_stderr,
+            "tests_stdout": self.tests_stdout,
+            "tests_stderr": self.tests_stderr,
+        }
+
+    def evidence_lines(self) -> list[str]:
+        return [
+            "- Latest agent message: "
+            f"{self.agent_last_message or '(not available)'}",
+            f"- Agent stdout: {self.agent_stdout or '(not available)'}",
+            f"- Agent stderr: {self.agent_stderr or '(not available)'}",
+            f"- Tests stdout: {self.tests_stdout or '(not available)'}",
+            f"- Tests stderr: {self.tests_stderr or '(not available)'}",
+        ]
 
 
 def _relative_path(path: Path | None, root: Path) -> str:
@@ -50,22 +95,6 @@ def _snapshot_name(
 ) -> str:
     safe_call_role = call_role.replace(".", "-")
     return f"{run_id}-attempt-{attempt:03d}-retry-{retry:02d}-{safe_call_role}.md"
-
-
-def _artifact_path_fields(
-    record: DecisionRecord,
-    artifact_root: Path,
-) -> dict[str, str]:
-    return {
-        "agent_last_message": _relative_path(
-            record.agent_last_message_path,
-            artifact_root,
-        ),
-        "agent_stdout": _relative_path(record.agent_stdout_path, artifact_root),
-        "agent_stderr": _relative_path(record.agent_stderr_path, artifact_root),
-        "tests_stdout": _relative_path(record.tests_stdout_path, artifact_root),
-        "tests_stderr": _relative_path(record.tests_stderr_path, artifact_root),
-    }
 
 
 def _yaml_lines(fields: dict[str, object]) -> list[str]:
@@ -102,7 +131,7 @@ def _front_matter_lines(
     retry: int,
     validation_command: str,
     record: DecisionRecord,
-    artifact_paths: dict[str, str],
+    artifact_paths: SnapshotArtifactPaths,
 ) -> list[str]:
     fields: dict[str, object] = {
         "schema_version": 1,
@@ -121,14 +150,14 @@ def _front_matter_lines(
         "validation_command": validation_command,
         "artifact_root": str(artifacts.root),
     }
-    fields.update(artifact_paths)
+    fields.update(artifact_paths.front_matter_fields())
     return _yaml_lines(fields)
 
 
 def _snapshot_body_lines(
     record: DecisionRecord,
     artifacts: RunArtifacts,
-    artifact_paths: dict[str, str],
+    artifact_paths: SnapshotArtifactPaths,
 ) -> list[str]:
     return [
         "# Reason for Failure",
@@ -148,40 +177,27 @@ def _snapshot_body_lines(
         "",
         "## Evidence",
         f"- Run artifacts: {artifacts.root}",
-        "- Latest agent message: "
-        f"{artifact_paths['agent_last_message'] or '(not available)'}",
-        f"- Agent stdout: {artifact_paths['agent_stdout'] or '(not available)'}",
-        f"- Agent stderr: {artifact_paths['agent_stderr'] or '(not available)'}",
-        f"- Tests stdout: {artifact_paths['tests_stdout'] or '(not available)'}",
-        f"- Tests stderr: {artifact_paths['tests_stderr'] or '(not available)'}",
+        *artifact_paths.evidence_lines(),
         "",
     ]
 
 
-def write(
+def _snapshot_content(
+    *,
+    project_uuid: str,
     repo_root: Path,
     artifacts: RunArtifacts,
-    *,
     target: str,
     attempt: int,
     retry: int,
     validation_command: str,
     record: DecisionRecord,
-) -> Path:
-    project = register_project(repo_root)
-    snapshot_dir = project.project_dir / "failures"
-    snapshot_dir.mkdir(parents=True, exist_ok=True)
-    snapshot_path = snapshot_dir / _snapshot_name(
-        artifacts.run_id,
-        attempt=attempt,
-        retry=retry,
-        call_role=record.call_role,
-    )
-    artifact_paths = _artifact_path_fields(record, artifacts.root)
-    content = "\n".join([
+    artifact_paths: SnapshotArtifactPaths,
+) -> str:
+    return "\n".join([
         "---",
         *_front_matter_lines(
-            project_uuid=project.entry.uuid,
+            project_uuid=project_uuid,
             repo_root=repo_root,
             artifacts=artifacts,
             target=target,
@@ -195,6 +211,38 @@ def write(
         "",
         *_snapshot_body_lines(record, artifacts, artifact_paths),
     ])
+
+
+def write(
+    repo_root: Path,
+    artifacts: RunArtifacts,
+    *,
+    target: str,
+    attempt: int,
+    retry: int,
+    validation_command: str,
+    record: DecisionRecord,
+) -> Path:
+    snapshot_dir = failure_snapshots_dir(repo_root)
+    snapshot_path = snapshot_dir / _snapshot_name(
+        artifacts.run_id,
+        attempt=attempt,
+        retry=retry,
+        call_role=record.call_role,
+    )
+    project_uuid = snapshot_dir.parent.name
+    artifact_paths = SnapshotArtifactPaths.from_record(record, artifacts.root)
+    content = _snapshot_content(
+        project_uuid=project_uuid,
+        repo_root=repo_root,
+        artifacts=artifacts,
+        target=target,
+        attempt=attempt,
+        retry=retry,
+        validation_command=validation_command,
+        record=record,
+        artifact_paths=artifact_paths,
+    )
     _write_text_atomic(snapshot_path, content)
     return snapshot_path
 

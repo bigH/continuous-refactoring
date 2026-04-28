@@ -49,13 +49,21 @@ def _record(**overrides: object) -> DecisionRecord:
 
 
 def test_effective_record_abandons_after_max_attempts() -> None:
-    record = _record(summary="Still red")
+    record = _record(
+        summary="Still red",
+        next_retry_focus="Preserve this focus",
+        retry_used=7,
+        agent_stdout_path=Path("/tmp/agent.stdout.log"),
+    )
 
     updated = effective_record(record, retry=3, max_attempts=3)
 
     assert updated.decision == "abandon"
     assert updated.retry_recommendation == "new-target"
     assert updated.summary == "Exhausted 3 attempts. Last failure: Still red"
+    assert updated.next_retry_focus == "Preserve this focus"
+    assert updated.retry_used == 7
+    assert updated.agent_stdout_path == Path("/tmp/agent.stdout.log")
 
 
 def test_effective_record_keeps_retry_before_max_attempts() -> None:
@@ -198,17 +206,34 @@ def test_persist_decision_records_commit_without_failure_snapshot(tmp_path: Path
         failure_kind="none",
         summary="Ready to commit.",
     )
+    failure_snapshot_calls = 0
 
-    result = persist_decision(
-        repo_root,
-        artifacts,
-        attempt=1,
-        retry=2,
-        validation_command="uv run pytest",
-        record=record,
+    def fail_if_snapshot_dir_requested(_repo_root: Path) -> Path:
+        nonlocal failure_snapshot_calls
+        failure_snapshot_calls += 1
+        raise AssertionError("commit path should not request failure snapshot storage")
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        failure_report,
+        "failure_snapshots_dir",
+        fail_if_snapshot_dir_requested,
     )
 
+    try:
+        result = persist_decision(
+            repo_root,
+            artifacts,
+            attempt=1,
+            retry=2,
+            validation_command="uv run pytest",
+            record=record,
+        )
+    finally:
+        monkeypatch.undo()
+
     assert result is None
+    assert failure_snapshot_calls == 0
     stats = artifacts.attempts[1]
     assert stats.decision == "commit"
     assert stats.retry == 2

@@ -132,6 +132,16 @@ def _init_review_project(
     return repo, live_dir
 
 
+def _init_unconfigured_review_repo(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> Path:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    monkeypatch.chdir(repo)
+    return repo
+
+
 def _make_manifest(
     name: str,
     *,
@@ -235,122 +245,81 @@ def test_review_list_filters_flagged_migrations(
     ]
 
 
-def test_review_list_exits_1_when_project_not_initialized(
+@pytest.mark.parametrize(
+    ("handler", "error_code", "setup", "expected_message"),
+    [
+        (
+            handle_review_list,
+            1,
+            lambda tmp_path, monkeypatch: _init_unconfigured_review_repo(
+                tmp_path, monkeypatch,
+            ),
+            "project not initialized",
+        ),
+        (
+            lambda: handle_review_perform(_make_perform_args("my-mig")),
+            2,
+            lambda tmp_path, monkeypatch: _init_unconfigured_review_repo(
+                tmp_path, monkeypatch,
+            ),
+            "project not initialized",
+        ),
+        (
+            handle_review_list,
+            1,
+            lambda tmp_path, monkeypatch: register_project(
+                _init_unconfigured_review_repo(tmp_path, monkeypatch),
+            ),
+            "live-migrations-dir",
+        ),
+        (
+            lambda: handle_review_perform(_make_perform_args("my-mig")),
+            2,
+            lambda tmp_path, monkeypatch: register_project(
+                _init_unconfigured_review_repo(tmp_path, monkeypatch),
+            ),
+            "live-migrations-dir",
+        ),
+        (
+            handle_review_list,
+            1,
+            lambda tmp_path, monkeypatch: _configure_escaped_live_dir(
+                _init_unconfigured_review_repo(tmp_path, monkeypatch),
+            ),
+            "escapes repo",
+        ),
+        (
+            lambda: handle_review_perform(_make_perform_args("my-mig")),
+            2,
+            lambda tmp_path, monkeypatch: _configure_escaped_live_dir(
+                _init_unconfigured_review_repo(tmp_path, monkeypatch),
+            ),
+            "escapes repo",
+        ),
+    ],
+)
+def test_review_commands_surface_shared_context_errors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    handler: object,
+    error_code: int,
+    setup: object,
+    expected_message: str,
 ) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    monkeypatch.chdir(repo)
+    setup(tmp_path, monkeypatch)
 
     with pytest.raises(SystemExit) as exc_info:
-        handle_review_list()
+        handler()
 
-    assert exc_info.value.code == 1
+    assert exc_info.value.code == error_code
     err = capsys.readouterr().err
-    assert "project not initialized" in err
+    assert expected_message in err
 
 
-def test_review_list_exits_1_when_no_live_migrations_dir(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    monkeypatch.chdir(repo)
-
-    register_project(repo)
-
-    with pytest.raises(SystemExit) as exc_info:
-        handle_review_list()
-
-    assert exc_info.value.code == 1
-    err = capsys.readouterr().err
-    assert "live-migrations-dir" in err
-
-
-def test_review_list_exits_1_when_live_migrations_dir_escapes_repo(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    monkeypatch.chdir(repo)
-
+def _configure_escaped_live_dir(repo: Path) -> None:
     project = register_project(repo)
     set_live_migrations_dir(project.entry.uuid, "../elsewhere")
-
-    with pytest.raises(SystemExit) as exc_info:
-        handle_review_list()
-
-    assert exc_info.value.code == 1
-    err = capsys.readouterr().err
-    assert "escapes repo" in err
-
-
-def test_review_perform_exits_2_when_project_not_initialized(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    monkeypatch.chdir(repo)
-
-    with pytest.raises(SystemExit) as exc_info:
-        handle_review_perform(_make_perform_args("my-mig"))
-
-    assert exc_info.value.code == 2
-    err = capsys.readouterr().err
-    assert "project not initialized" in err
-
-
-def test_review_perform_exits_2_when_no_live_migrations_dir(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    monkeypatch.chdir(repo)
-
-    register_project(repo)
-
-    with pytest.raises(SystemExit) as exc_info:
-        handle_review_perform(_make_perform_args("my-mig"))
-
-    assert exc_info.value.code == 2
-    err = capsys.readouterr().err
-    assert "live-migrations-dir" in err
-
-
-def test_review_perform_exits_2_when_live_migrations_dir_escapes_repo(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / "project"
-    _init_repo(repo)
-    monkeypatch.chdir(repo)
-
-    project = register_project(repo)
-    set_live_migrations_dir(project.entry.uuid, "../elsewhere")
-
-    with pytest.raises(SystemExit) as exc_info:
-        handle_review_perform(_make_perform_args("my-mig"))
-
-    assert exc_info.value.code == 2
-    err = capsys.readouterr().err
-    assert "escapes repo" in err
 
 
 def _setup_review_project(
@@ -358,6 +327,7 @@ def _setup_review_project(
     monkeypatch: pytest.MonkeyPatch,
     *,
     awaiting: bool = True,
+    current_phase: str = "review-target",
     human_review_reason: str | None = None,
 ) -> tuple[Path, Path]:
     repo, live_dir = _init_review_project(tmp_path, monkeypatch)
@@ -366,6 +336,7 @@ def _setup_review_project(
             "my-mig",
             awaiting_human_review=awaiting,
             status="ready",
+            current_phase=current_phase,
             human_review_reason=human_review_reason,
         ),
         live_dir / "my-mig" / "manifest.json",
@@ -376,9 +347,8 @@ def _setup_review_project(
 def test_review_perform_happy_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo, live_dir = _setup_review_project(
+    _, live_dir = _setup_review_project(
         tmp_path, monkeypatch,
         awaiting=True,
         human_review_reason="needs security audit",
@@ -411,6 +381,40 @@ def test_review_perform_happy_path(
     reloaded = load_migration_manifest(manifest_path)
     assert reloaded.awaiting_human_review is False
     assert reloaded.human_review_reason is None
+
+
+def test_review_perform_happy_path_without_current_phase(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _, live_dir = _setup_review_project(
+        tmp_path, monkeypatch,
+        awaiting=True,
+        current_phase="",
+        human_review_reason="phase cursor cleared",
+    )
+    manifest_path = live_dir / "my-mig" / "manifest.json"
+    captured_prompt: dict[str, str] = {}
+
+    def fake_interactive(
+        agent: str, model: str, effort: str, prompt: str, repo_root: Path,
+    ) -> int:
+        captured_prompt["prompt"] = prompt
+        manifest = load_migration_manifest(manifest_path)
+        from dataclasses import replace
+        updated = replace(manifest, awaiting_human_review=False)
+        save_migration(updated, manifest_path)
+        return 0
+
+    monkeypatch.setattr(
+        "continuous_refactoring.review_cli.run_agent_interactive", fake_interactive,
+    )
+
+    handle_review_perform(_make_perform_args("my-mig"))
+
+    assert "phase cursor cleared" in captured_prompt["prompt"]
+    assert "Current phase file: (none)" in captured_prompt["prompt"]
+    assert "Current phase name: (none)" in captured_prompt["prompt"]
 
 
 def test_review_perform_exits_1_when_flag_not_cleared(

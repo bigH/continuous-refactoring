@@ -103,7 +103,6 @@ def test_write_emits_snapshot_header_and_body(
     snapshot_path = write(
         repo_root,
         artifacts,
-        target=record.target,
         attempt=2,
         retry=4,
         validation_command="uv run pytest",
@@ -143,7 +142,6 @@ def test_write_replaces_dots_in_call_role_snapshot_name(
     snapshot_path = write(
         repo_root,
         artifacts,
-        target=record.target,
         attempt=1,
         retry=1,
         validation_command="uv run pytest",
@@ -168,7 +166,6 @@ def test_write_preserves_existing_snapshot_on_replace_failure(
     snapshot_path = write(
         repo_root,
         artifacts,
-        target=record.target,
         attempt=1,
         retry=1,
         validation_command="uv run pytest",
@@ -185,7 +182,6 @@ def test_write_preserves_existing_snapshot_on_replace_failure(
         write(
             repo_root,
             artifacts,
-            target=record.target,
             attempt=1,
             retry=1,
             validation_command="uv run pytest",

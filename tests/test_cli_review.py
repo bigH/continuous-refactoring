@@ -273,6 +273,27 @@ def test_review_list_exits_1_when_no_live_migrations_dir(
     assert "live-migrations-dir" in err
 
 
+def test_review_list_exits_1_when_live_migrations_dir_escapes_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    monkeypatch.chdir(repo)
+
+    project = register_project(repo)
+    set_live_migrations_dir(project.entry.uuid, "../elsewhere")
+
+    with pytest.raises(SystemExit) as exc_info:
+        handle_review_list()
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "escapes repo" in err
+
+
 def test_review_perform_exits_2_when_project_not_initialized(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -309,6 +330,27 @@ def test_review_perform_exits_2_when_no_live_migrations_dir(
     assert exc_info.value.code == 2
     err = capsys.readouterr().err
     assert "live-migrations-dir" in err
+
+
+def test_review_perform_exits_2_when_live_migrations_dir_escapes_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "project"
+    _init_repo(repo)
+    monkeypatch.chdir(repo)
+
+    project = register_project(repo)
+    set_live_migrations_dir(project.entry.uuid, "../elsewhere")
+
+    with pytest.raises(SystemExit) as exc_info:
+        handle_review_perform(_make_perform_args("my-mig"))
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "escapes repo" in err
 
 
 def _setup_review_project(

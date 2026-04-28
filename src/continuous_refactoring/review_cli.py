@@ -34,8 +34,11 @@ def _resolve_review_context(*, error_code: int) -> Path:
             file=sys.stderr,
         )
         raise SystemExit(error_code)
-
-    live_dir = resolve_live_migrations_dir(project)
+    try:
+        live_dir = resolve_live_migrations_dir(project)
+    except ContinuousRefactorError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(error_code)
     if live_dir is None:
         print(
             "Error: no live-migrations-dir configured for this project.",

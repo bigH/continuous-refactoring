@@ -182,3 +182,49 @@ def test_warning_skips_unreadable_taste(
 
     err = capsys.readouterr().err
     assert cli._TASTE_WARNING not in err
+
+
+def test_upgrade_exits_cleanly_on_malformed_manifest(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    xdg_root: Path,
+) -> None:
+    manifest = xdg_root / "continuous-refactoring" / "manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text("{", encoding="utf-8")
+    monkeypatch.setattr(sys, "argv", ["cr", "upgrade"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.cli_main()
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "Manifest file is malformed" in err
+
+
+def test_upgrade_exits_cleanly_on_unreadable_global_taste(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    xdg_root: Path,
+) -> None:
+    _write_current_taste(xdg_root)
+    manifest = xdg_root / "continuous-refactoring" / "manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text('{"version": 1, "projects": {}}', encoding="utf-8")
+    taste_path = xdg_root / "continuous-refactoring" / "global" / "taste.md"
+    original_read_text = Path.read_text
+
+    def broken_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        if self == taste_path:
+            raise OSError("mock read error")
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", broken_read_text)
+    monkeypatch.setattr(sys, "argv", ["cr", "upgrade"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.cli_main()
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "mock read error" in err

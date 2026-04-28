@@ -161,6 +161,24 @@ def test_init_live_migrations_dir_rejects_outside_repo(
     assert "must be inside the repo" in err
 
 
+def test_init_exits_cleanly_on_malformed_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
+    manifest = app_data_dir() / "manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text("{", encoding="utf-8")
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_init(argparse.Namespace(path=repo))
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "Manifest file is malformed" in err
+
+
 # ---------------------------------------------------------------------------
 # taste subcommand
 # ---------------------------------------------------------------------------
@@ -241,3 +259,30 @@ def test_taste_errors_without_init(
     assert exc_info.value.code == 1
     err = capsys.readouterr().err
     assert "not initialized" in err
+
+
+def test_taste_exits_cleanly_on_manifest_read_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
+    monkeypatch.chdir(repo)
+    register_project(repo)
+    manifest = app_data_dir() / "manifest.json"
+
+    original_read_text = Path.read_text
+
+    def patched_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        if self == manifest:
+            raise OSError("mock read error")
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", patched_read_text)
+
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_taste(argparse.Namespace(global_=False))
+
+    assert exc_info.value.code == 1
+    err = capsys.readouterr().err
+    assert "Manifest file could not be read" in err

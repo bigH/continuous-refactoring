@@ -2,15 +2,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import TYPE_CHECKING
 
-if TYPE_CHECKING:
-    import pytest
+import pytest
 
 import continuous_refactoring
 import continuous_refactoring.loop
 import continuous_refactoring.refactor_attempts
-from continuous_refactoring.artifacts import CommandCapture
+from continuous_refactoring.artifacts import CommandCapture, ContinuousRefactorError
 from continuous_refactoring.config import default_taste_text, load_taste
 from continuous_refactoring.prompts import DEFAULT_REFACTORING_PROMPT, compose_full_prompt
 from continuous_refactoring.targeting import parse_paths_arg, resolve_targets
@@ -82,6 +80,48 @@ def test_load_taste_safe_falls_back_when_global_taste_unreadable(
     monkeypatch.setattr(Path, "read_text", broken_read_text)
 
     assert continuous_refactoring.loop._load_taste_safe(repo) == default_taste_text()
+
+
+def test_load_taste_safe_falls_back_when_manifest_is_malformed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text("{", encoding="utf-8")
+
+    assert continuous_refactoring.loop._load_taste_safe(repo) == default_taste_text()
+
+
+def test_run_once_surfaces_artifact_log_boundary_error(
+    run_once_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_create = continuous_refactoring.loop.create_run_artifacts
+
+    def broken_create_run_artifacts(*args: object, **kwargs: object) -> object:
+        artifacts = original_create(*args, **kwargs)
+        io_error = OSError("events append failed")
+
+        def broken_log(*_args: object, **_kwargs: object) -> None:
+            raise ContinuousRefactorError(
+                f"Could not append artifact event to {artifacts.events_path}"
+            ) from io_error
+
+        monkeypatch.setattr(artifacts, "log", broken_log)
+        return artifacts
+
+    monkeypatch.setattr(
+        continuous_refactoring.loop,
+        "create_run_artifacts",
+        broken_create_run_artifacts,
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="Could not append artifact event"):
+        continuous_refactoring.run_once(make_run_once_args(run_once_env))
 
 
 def test_run_once_paths_arg_trims_whitespace(

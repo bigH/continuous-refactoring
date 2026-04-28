@@ -277,22 +277,26 @@ def _handle_init(args: argparse.Namespace) -> None:
     )
 
     path = (args.path or Path.cwd()).resolve()
-    project = register_project(path)
-    taste_path = project.project_dir / "taste.md"
-    ensure_taste_file(taste_path)
+    try:
+        project = register_project(path)
+        taste_path = project.project_dir / "taste.md"
+        ensure_taste_file(taste_path)
 
-    live_dir_arg: Path | None = getattr(args, "live_migrations_dir", None)
-    if live_dir_arg is not None:
-        resolved_live = (path / live_dir_arg).resolve()
-        if not resolved_live.is_relative_to(path):
-            print(
-                f"Error: --live-migrations-dir must be inside the repo: {live_dir_arg}",
-                file=sys.stderr,
-            )
-            raise SystemExit(2)
-        relative = str(resolved_live.relative_to(path))
-        resolved_live.mkdir(parents=True, exist_ok=True)
-        set_live_migrations_dir(project.entry.uuid, relative)
+        live_dir_arg: Path | None = getattr(args, "live_migrations_dir", None)
+        if live_dir_arg is not None:
+            resolved_live = (path / live_dir_arg).resolve()
+            if not resolved_live.is_relative_to(path):
+                print(
+                    f"Error: --live-migrations-dir must be inside the repo: {live_dir_arg}",
+                    file=sys.stderr,
+                )
+                raise SystemExit(2)
+            relative = str(resolved_live.relative_to(path))
+            resolved_live.mkdir(parents=True, exist_ok=True)
+            set_live_migrations_dir(project.entry.uuid, relative)
+    except ContinuousRefactorError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
 
     print(f"Project registered: {project.entry.uuid}")
     print(f"Data directory: {project.project_dir}")
@@ -311,12 +315,14 @@ def _resolve_taste_path(global_: bool) -> Path:
 
     try:
         project = resolve_project(Path.cwd().resolve())
-    except ContinuousRefactorError:
+    except ContinuousRefactorError as error:
+        if not str(error).startswith("Project not registered:"):
+            raise
         print(
             "Error: project not initialized. Run 'continuous-refactoring init' first.",
             file=sys.stderr,
         )
-        raise SystemExit(1)
+        raise SystemExit(1) from error
     return project.project_dir / "taste.md"
 
 
@@ -402,8 +408,12 @@ def _run_taste_agent(
 def _handle_plain_taste(args: argparse.Namespace) -> None:
     from continuous_refactoring.config import ensure_taste_file
 
-    path = _resolve_taste_path(args.global_)
-    ensure_taste_file(path)
+    try:
+        path = _resolve_taste_path(args.global_)
+        ensure_taste_file(path)
+    except ContinuousRefactorError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
     print(str(path))
 
 
@@ -413,10 +423,14 @@ def _handle_current_taste_upgrade_if_noop(args: argparse.Namespace) -> bool:
         parse_taste_version,
     )
 
-    path = _resolve_taste_path(args.global_)
-    stored_version = None
-    if path.exists():
-        stored_version = parse_taste_version(path.read_text(encoding="utf-8"))
+    try:
+        path = _resolve_taste_path(args.global_)
+        stored_version = None
+        if path.exists():
+            stored_version = parse_taste_version(path.read_text(encoding="utf-8"))
+    except (ContinuousRefactorError, OSError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
     if stored_version != TASTE_CURRENT_VERSION:
         return False
     print("taste already current; use `taste --refine` to re-interview or refine it.")
@@ -454,32 +468,36 @@ def _handle_taste_interview(args: argparse.Namespace) -> None:
     from continuous_refactoring.config import default_taste_text
     from continuous_refactoring.prompts import compose_interview_prompt
 
-    path = _resolve_taste_path(args.global_)
-    default_text = default_taste_text()
-    existing: str | None = None
-    file_exists = path.exists()
-    if file_exists:
-        current = path.read_text(encoding="utf-8")
-        if current != default_text:
-            if not args.force:
-                print(
-                    "Error: taste file already has custom content; "
-                    "pass --force to overwrite (backup at taste.md.bak).",
-                    file=sys.stderr,
-                )
-                raise SystemExit(1)
-            backup = path.with_name(path.name + ".bak")
-            backup.write_text(current, encoding="utf-8")
-            existing = current
+    try:
+        path = _resolve_taste_path(args.global_)
+        default_text = default_taste_text()
+        existing: str | None = None
+        file_exists = path.exists()
+        if file_exists:
+            current = path.read_text(encoding="utf-8")
+            if current != default_text:
+                if not args.force:
+                    print(
+                        "Error: taste file already has custom content; "
+                        "pass --force to overwrite (backup at taste.md.bak).",
+                        file=sys.stderr,
+                    )
+                    raise SystemExit(1)
+                backup = path.with_name(path.name + ".bak")
+                backup.write_text(current, encoding="utf-8")
+                existing = current
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    prompt = compose_interview_prompt(path, _taste_settle_path(path), existing)
-    _run_taste_agent(
-        action="interview",
-        args=args,
-        prompt=prompt,
-        path=path,
-    )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        prompt = compose_interview_prompt(path, _taste_settle_path(path), existing)
+        _run_taste_agent(
+            action="interview",
+            args=args,
+            prompt=prompt,
+            path=path,
+        )
+    except ContinuousRefactorError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
     print(str(path))
 
 
@@ -487,23 +505,27 @@ def _handle_taste_refine(args: argparse.Namespace) -> None:
     from continuous_refactoring.config import default_taste_text
     from continuous_refactoring.prompts import compose_taste_refine_prompt
 
-    path = _resolve_taste_path(args.global_)
-    starting_taste = (
-        path.read_text(encoding="utf-8") if path.exists() else default_taste_text()
-    )
+    try:
+        path = _resolve_taste_path(args.global_)
+        starting_taste = (
+            path.read_text(encoding="utf-8") if path.exists() else default_taste_text()
+        )
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    prompt = compose_taste_refine_prompt(
-        path,
-        _taste_settle_path(path),
-        starting_taste,
-    )
-    _run_taste_agent(
-        action="refine",
-        args=args,
-        prompt=prompt,
-        path=path,
-    )
+        path.parent.mkdir(parents=True, exist_ok=True)
+        prompt = compose_taste_refine_prompt(
+            path,
+            _taste_settle_path(path),
+            starting_taste,
+        )
+        _run_taste_agent(
+            action="refine",
+            args=args,
+            prompt=prompt,
+            path=path,
+        )
+    except ContinuousRefactorError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
     print(str(path))
 
 
@@ -514,27 +536,31 @@ def _handle_taste_upgrade(args: argparse.Namespace) -> None:
     )
     from continuous_refactoring.prompts import compose_taste_upgrade_prompt
 
-    path = _resolve_taste_path(args.global_)
+    try:
+        path = _resolve_taste_path(args.global_)
 
-    existing: str | None = None
-    stored_version: int | None = None
-    if path.exists():
-        existing = path.read_text(encoding="utf-8")
-        stored_version = parse_taste_version(existing)
+        existing: str | None = None
+        stored_version: int | None = None
+        if path.exists():
+            existing = path.read_text(encoding="utf-8")
+            stored_version = parse_taste_version(existing)
 
-    prompt = compose_taste_upgrade_prompt(
-        path,
-        _taste_settle_path(path),
-        existing,
-        stored_version,
-        TASTE_CURRENT_VERSION,
-    )
-    _run_taste_agent(
-        action="upgrade",
-        args=args,
-        prompt=prompt,
-        path=path,
-    )
+        prompt = compose_taste_upgrade_prompt(
+            path,
+            _taste_settle_path(path),
+            existing,
+            stored_version,
+            TASTE_CURRENT_VERSION,
+        )
+        _run_taste_agent(
+            action="upgrade",
+            args=args,
+            prompt=prompt,
+            path=path,
+        )
+    except ContinuousRefactorError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
     print(str(path))
 
 
@@ -547,21 +573,25 @@ def _handle_upgrade(args: argparse.Namespace) -> None:
         taste_is_stale,
     )
 
-    if not config_is_current():
-        print(
-            "Error: config version is absent or out of date.",
-            file=sys.stderr,
-        )
-        raise SystemExit(1)
+    try:
+        if not config_is_current():
+            print(
+                "Error: config version is absent or out of date.",
+                file=sys.stderr,
+            )
+            raise SystemExit(1)
 
-    manifest = load_manifest()
-    save_manifest(manifest)
+        manifest = load_manifest()
+        save_manifest(manifest)
 
-    global_taste_path = global_dir() / "taste.md"
-    if global_taste_path.exists():
-        taste_text = global_taste_path.read_text(encoding="utf-8")
-        if taste_is_stale(taste_text):
-            print(_GLOBAL_TASTE_WARNING, file=sys.stderr)
+        global_taste_path = global_dir() / "taste.md"
+        if global_taste_path.exists():
+            taste_text = global_taste_path.read_text(encoding="utf-8")
+            if taste_is_stale(taste_text):
+                print(_GLOBAL_TASTE_WARNING, file=sys.stderr)
+    except (ContinuousRefactorError, OSError) as error:
+        print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(1) from error
 
 
 def _require_targeting_or_scope(args: argparse.Namespace) -> None:

@@ -4,38 +4,48 @@
   "created_at": "2026-04-27T21:59:42.893-07:00",
   "current_phase": "artifacts-boundary-contract",
   "human_review_reason": null,
-  "last_touch": "2026-04-28T05:05:46.989+00:00",
+  "last_touch": "2026-04-28T19:44:55.459+00:00",
   "name": "src-continuous-refactoring-artifacts-py-20260427T215942",
   "phases": [
     {
       "done": true,
+      "effort_reason": null,
       "file": "phase-1-artifact-boundary-baseline.md",
       "name": "artifact-boundary-baseline",
-      "precondition": "- No production files in the migration scope have been modified yet. - The target migration scope is unchanged in production modules."
+      "precondition": "- No production files in the migration scope have been modified yet. - The target migration scope is unchanged in production modules.",
+      "required_effort": null
     },
     {
       "done": false,
+      "effort_reason": null,
       "file": "phase-2-artifacts-boundary-contract.md",
       "name": "artifacts-boundary-contract",
-      "precondition": "- Phase 1 is marked complete in the migration manifest. - `src/continuous_refactoring/artifacts.py` has not been edited yet in this migration."
+      "precondition": "- Phase 1 is marked complete in the migration manifest. - `src/continuous_refactoring/artifacts.py` has not been edited yet in this migration.",
+      "required_effort": null
     },
     {
       "done": false,
+      "effort_reason": null,
       "file": "phase-3-boundary-wrappers-at-callsites.md",
       "name": "boundary-wrappers-at-callsites",
-      "precondition": "- Phase 2 is marked complete in the migration manifest. - Phase-2 boundary contracts are present in `artifacts.py` and their tests. - No edits are made in `config.py`, `loop.py`, or `cli.py` during this phase."
+      "precondition": "- Phase 2 is marked complete in the migration manifest. - Phase-2 boundary contracts are present in `artifacts.py` and their tests. - No edits are made in `config.py`, `loop.py`, or `cli.py` during this phase.",
+      "required_effort": null
     },
     {
       "done": false,
+      "effort_reason": null,
       "file": "phase-4-loop-and-cli-boundary-resilience.md",
       "name": "loop-and-cli-boundary-resilience",
-      "precondition": "- Phase 3 is marked complete in the migration manifest. - Boundary wrappers from phase 3 are present at the intended module seams. - No edits in `__init__.py` in this phase yet."
+      "precondition": "- Phase 3 is marked complete in the migration manifest. - Boundary wrappers from phase 3 are present at the intended module seams. - No edits in `__init__.py` in this phase yet.",
+      "required_effort": null
     },
     {
       "done": false,
+      "effort_reason": null,
       "file": "phase-5-shippable-regression-and-contract-lock.md",
       "name": "shippable-regression-and-contract-lock",
-      "precondition": "- Phase 4 is marked complete in the migration manifest. - All intended phase edits are present in working tree. - All phase documents in this migration directory match their intended scope (especially phase names referenced in `manifest.json`)."
+      "precondition": "- Phase 4 is marked complete in the migration manifest. - All intended phase edits are present in working tree. - All phase documents in this migration directory match their intended scope (especially phase names referenced in `manifest.json`).",
+      "required_effort": null
     }
   ],
   "status": "ready",

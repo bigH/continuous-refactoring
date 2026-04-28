@@ -109,6 +109,16 @@ def _migration_record(
     )
 
 
+def _status_block(*lines: str) -> str:
+    return "\n".join(
+        (
+            "BEGIN_CONTINUOUS_REFACTORING_STATUS",
+            *lines,
+            "END_CONTINUOUS_REFACTORING_STATUS",
+        )
+    )
+
+
 def _failing_agent(**kwargs: object) -> CommandCapture:
     stdout_path = kwargs.get("stdout_path")
     stderr_path = kwargs.get("stderr_path")
@@ -739,6 +749,113 @@ def test_run_undo_commit_on_validation_failure(
         ["git", "log", "--oneline"], cwd=repo_root,
     )
     assert "agent commit" not in log.stdout
+
+
+def test_run_agent_nonzero_exit_restores_source_baseline_before_retry(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    base_sha = continuous_refactoring.run_command(
+        ["git", "rev-parse", "HEAD"], cwd=repo_root,
+    ).stdout.strip()
+
+    agent_calls = 0
+    retry_state: list[tuple[bool, str]] = []
+
+    def fail_then_pass(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        rr = Path(str(kwargs.get("repo_root", "")))
+        if agent_calls == 1:
+            (rr / "bad_change.txt").write_text("bad\n", encoding="utf-8")
+            return _failing_agent(**kwargs)
+        retry_state.append(
+            (
+                not (rr / "bad_change.txt").exists(),
+                continuous_refactoring.run_command(
+                    ["git", "rev-parse", "HEAD"], cwd=rr,
+                ).stdout.strip(),
+            )
+        )
+        (rr / "good_change.txt").write_text("good\n", encoding="utf-8")
+        return noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", fail_then_pass)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+
+    exit_code = continuous_refactoring.run_loop(
+        make_run_loop_args(repo_root, max_refactors=1, max_attempts=2)
+    )
+
+    assert exit_code == 0
+    assert agent_calls == 2
+    assert retry_state == [(True, base_sha)]
+    assert not (repo_root / "bad_change.txt").exists()
+
+
+def test_run_validation_failure_restores_source_baseline_before_retry(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    base_sha = continuous_refactoring.run_command(
+        ["git", "rev-parse", "HEAD"], cwd=repo_root,
+    ).stdout.strip()
+
+    agent_calls = 0
+    retry_state: list[tuple[bool, str]] = []
+
+    def touch_then_pass(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        rr = Path(str(kwargs.get("repo_root", "")))
+        if agent_calls == 2:
+            retry_state.append(
+                (
+                    not (rr / "bad_change.txt").exists(),
+                    continuous_refactoring.run_command(
+                        ["git", "rev-parse", "HEAD"], cwd=rr,
+                    ).stdout.strip(),
+                )
+            )
+            (rr / "good_change.txt").write_text("good\n", encoding="utf-8")
+            return noop_agent(**kwargs)
+        (rr / "bad_change.txt").write_text("bad\n", encoding="utf-8")
+        return noop_agent(**kwargs)
+
+    validation_calls = 0
+
+    def fail_then_pass_validation(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        nonlocal validation_calls
+        if not _count_validation_calls(stdout_path):
+            return noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        validation_calls += 1
+        if validation_calls == 1:
+            return failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return noop_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touch_then_pass)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop.run_tests",
+        fail_then_pass_validation,
+    )
+
+    exit_code = continuous_refactoring.run_loop(
+        make_run_loop_args(repo_root, max_refactors=1, max_attempts=2)
+    )
+
+    assert exit_code == 0
+    assert agent_calls == 2
+    assert retry_state == [(True, base_sha)]
+    assert validation_calls == 2
+    assert not (repo_root / "bad_change.txt").exists()
 
 
 def _repo_with_py_files(repo_root: Path) -> list[str]:
@@ -1461,6 +1578,132 @@ def test_run_records_retry_and_abandon_transitions_with_failure_docs(
     assert 'call_role: "validation"' in reason_doc
 
 
+@pytest.mark.parametrize(
+    ("decision", "retry_recommendation"),
+    [
+        ("abandon", "new-target"),
+        ("blocked", "human-review"),
+    ],
+)
+def test_run_agent_requested_terminal_decisions_preserve_existing_semantics(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    decision: Literal["abandon", "blocked"],
+    retry_recommendation: str,
+) -> None:
+    repo_root = run_loop_env
+
+    def status_agent(**kwargs: object) -> CommandCapture:
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / "discarded.txt").write_text("discarded\n", encoding="utf-8")
+        last_message_path = Path(str(kwargs["last_message_path"]))
+        last_message_path.parent.mkdir(parents=True, exist_ok=True)
+        last_message_path.write_text(
+            _status_block(
+                "phase_reached: refactor",
+                f"decision: {decision}",
+                "failure_kind: agent-requested-transition",
+                f"summary: agent requested {decision}",
+                "next_retry_focus: none",
+                "tests_run: none",
+                "evidence:",
+                "  - refactor/agent-last-message.md",
+            ),
+            encoding="utf-8",
+        )
+        return noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", status_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+
+    exit_code = continuous_refactoring.run_loop(
+        make_run_loop_args(
+            repo_root,
+            max_refactors=1,
+            max_consecutive_failures=2,
+        )
+    )
+
+    assert exit_code == 0
+    assert not (repo_root / "discarded.txt").exists()
+
+    summary = _read_single_run_summary(repo_root)
+    attempt = summary["attempts"][0]
+    assert attempt["decision"] == decision
+    assert attempt["retry_recommendation"] == retry_recommendation
+    assert attempt["call_role"] == "refactor"
+    assert attempt["phase_reached"] == "refactor"
+    assert attempt["failure_kind"] == "agent-requested-transition"
+
+
+def test_run_agent_requested_retry_preserves_existing_semantics(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+
+    agent_calls = 0
+    captured_prompts: list[str] = []
+
+    def retry_then_commit(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        captured_prompts.append(str(kwargs.get("prompt", "")))
+        rr = Path(str(kwargs.get("repo_root", "")))
+        if agent_calls == 1:
+            (rr / "discarded.txt").write_text("discarded\n", encoding="utf-8")
+            last_message_path = Path(str(kwargs["last_message_path"]))
+            last_message_path.parent.mkdir(parents=True, exist_ok=True)
+            last_message_path.write_text(
+                _status_block(
+                    "phase_reached: refactor",
+                    "decision: retry",
+                    "failure_kind: agent-requested-transition",
+                    "summary: agent requested retry",
+                    "next_retry_focus: tighten the patch",
+                    "tests_run: none",
+                    "evidence:",
+                    "  - refactor/agent-last-message.md",
+                ),
+                encoding="utf-8",
+            )
+            return noop_agent(**kwargs)
+        assert not (rr / "discarded.txt").exists()
+        (rr / "good_change.txt").write_text("good\n", encoding="utf-8")
+        return noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", retry_then_commit)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+
+    exit_code = continuous_refactoring.run_loop(
+        make_run_loop_args(repo_root, max_refactors=1, max_attempts=2)
+    )
+
+    assert exit_code == 0
+    assert agent_calls == 2
+    assert len(captured_prompts) == 2
+    assert "## Retry Context" not in captured_prompts[0]
+    assert "## Retry Context" in captured_prompts[1]
+    assert "agent requested retry" in captured_prompts[1]
+
+    events = _read_single_run_events(repo_root)
+    transitions = [
+        (event.get("decision"), event.get("retry_recommendation"))
+        for event in events
+        if event.get("event") == "target_transition"
+    ]
+    assert ("retry", "same-target") in transitions
+
+    snapshots = sorted(
+        continuous_refactoring.config.failure_snapshots_dir(repo_root).glob("*.md")
+    )
+    assert len(snapshots) == 1
+    reason_doc = snapshots[0].read_text(encoding="utf-8")
+    assert 'decision: "retry"' in reason_doc
+    assert 'retry_recommendation: "same-target"' in reason_doc
+    assert 'call_role: "refactor"' in reason_doc
+
+
 def test_run_successful_retry_clears_reason_doc_from_summary(
     run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1699,6 +1942,8 @@ def test_run_preserves_non_runnable_migration_state_across_source_retry(
     live_dir.mkdir()
     manifest_path = live_dir / "queued-migration" / "manifest.json"
     _write_live_manifest(live_dir)
+    preserved_note = live_dir / "queued-migration" / "notes.txt"
+    preserved_note.write_text("keep me\n", encoding="utf-8")
     continuous_refactoring.run_command(["git", "add", "migrations"], cwd=repo_root)
     continuous_refactoring.run_command(
         ["git", "commit", "-m", "add live migration"],
@@ -1740,15 +1985,20 @@ def test_run_preserves_non_runnable_migration_state_across_source_retry(
     monkeypatch.setattr("continuous_refactoring.phases.maybe_run_agent", not_ready)
 
     agent_calls = 0
-    retry_saw_cooldown: list[bool] = []
+    retry_checks: list[bool] = []
 
     def touching_agent(**kwargs: object) -> CommandCapture:
         nonlocal agent_calls
         agent_calls += 1
         if agent_calls == 2:
-            retry_saw_cooldown.append(load_manifest(manifest_path).cooldown_until is not None)
+            retry_checks.append(load_manifest(manifest_path).cooldown_until is not None)
+            retry_checks.append(
+                preserved_note.read_text(encoding="utf-8") == "keep me\n"
+            )
         rr = Path(str(kwargs.get("repo_root", "")))
         (rr / f"source-{agent_calls}.txt").write_text("x\n", encoding="utf-8")
+        if agent_calls == 1:
+            preserved_note.write_text("overwritten\n", encoding="utf-8")
         return noop_agent(**kwargs)
 
     validation_calls = 0
@@ -1786,8 +2036,9 @@ def test_run_preserves_non_runnable_migration_state_across_source_retry(
     assert exit_code == 0
     assert ready_calls == 1
     assert agent_calls == 3
-    assert retry_saw_cooldown == [True]
+    assert retry_checks == [True, True]
     assert load_manifest(manifest_path).cooldown_until is not None
+    assert preserved_note.read_text(encoding="utf-8") == "keep me\n"
 
 
 def test_run_runnable_migration_counts_as_one_action(

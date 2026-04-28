@@ -249,6 +249,36 @@ def test_run_once_prints_and_records_commit(
     assert attempts[0]["commit_phase"] == "run_once"
 
 
+def test_run_once_replaces_agent_commit_with_driver_commit(
+    run_once_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def committing_agent(**kwargs: object) -> CommandCapture:
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / "agent_change.txt").write_text("x\n", encoding="utf-8")
+        continuous_refactoring.run_command(["git", "add", "-A"], cwd=rr)
+        continuous_refactoring.run_command(
+            ["git", "commit", "-m", "agent commit"], cwd=rr,
+        )
+        return noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", committing_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+
+    exit_code = continuous_refactoring.run_once(make_run_once_args(run_once_env))
+
+    assert exit_code == 0
+    log = continuous_refactoring.run_command(
+        ["git", "log", "--oneline"], cwd=run_once_env,
+    ).stdout
+    assert "continuous refactor: run-once" in log
+    assert "agent commit" not in log
+
+    summary = read_single_run_summary(run_once_env)
+    attempt = summary["attempts"][0]
+    assert attempt["commit_phase"] == "run_once"
+
+
 def test_run_once_timeout(
     run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,

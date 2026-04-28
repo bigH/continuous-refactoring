@@ -2,13 +2,13 @@
   "awaiting_human_review": false,
   "cooldown_until": null,
   "created_at": "2026-04-28T03:21:18.209-07:00",
-  "current_phase": "attempt-contract-baseline",
+  "current_phase": "extract-workspace-reset-primitives",
   "human_review_reason": null,
-  "last_touch": "2026-04-28T03:33:12.904-07:00",
+  "last_touch": "2026-04-28T03:39:50.650-07:00",
   "name": "src-continuous-refactoring-loop-py-20260428T032118",
   "phases": [
     {
-      "done": false,
+      "done": true,
       "effort_reason": "The seam mixes retries, rollback, git history, and preserved migration state, so locking the behavior contract needs careful integration-style coverage.",
       "file": "phase-1-attempt-contract-baseline.md",
       "name": "attempt-contract-baseline",

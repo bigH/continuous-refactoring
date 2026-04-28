@@ -299,7 +299,7 @@ def _taste_settle_path(path: Path) -> Path:
 
 
 def _active_taste_mode(args: argparse.Namespace) -> str | None:
-    for mode in ("upgrade", "refine", "interview"):
+    for mode in _TASTE_MODE_HANDLERS:
         if getattr(args, mode, False):
             return mode
     return None
@@ -381,17 +381,6 @@ def _handle_plain_taste(args: argparse.Namespace) -> None:
     print(str(path))
 
 
-def _dispatch_taste_mode(mode: str, args: argparse.Namespace) -> None:
-    if mode != "upgrade":
-        _require_taste_action_flags(
-            action=mode,
-            agent=getattr(args, "agent", None),
-            model=getattr(args, "model", None),
-            effort=getattr(args, "effort", None),
-        )
-    _TASTE_MODE_HANDLERS[mode](args)
-
-
 def _handle_taste(args: argparse.Namespace) -> None:
     mode = _active_taste_mode(args)
 
@@ -408,7 +397,14 @@ def _handle_taste(args: argparse.Namespace) -> None:
             raise SystemExit(2)
         return _handle_plain_taste(args)
 
-    return _dispatch_taste_mode(mode, args)
+    if mode != "upgrade":
+        _require_taste_action_flags(
+            action=mode,
+            agent=getattr(args, "agent", None),
+            model=getattr(args, "model", None),
+            effort=getattr(args, "effort", None),
+        )
+    return _TASTE_MODE_HANDLERS[mode](args)
 
 
 def _handle_taste_interview(args: argparse.Namespace) -> None:

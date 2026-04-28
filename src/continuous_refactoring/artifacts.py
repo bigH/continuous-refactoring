@@ -166,6 +166,7 @@ class RunArtifacts:
         attempt: int,
         retry: int,
         target: str,
+        display_target: str | None = None,
         call_role: str,
         phase_reached: str | None = None,
         effort: Mapping[str, object] | None = None,
@@ -179,9 +180,10 @@ class RunArtifacts:
             effort=effort,
         )
         effort_fields = dict(effort or {})
+        human_target = display_target or target
         self.log(
             "INFO",
-            f"call start: {call_role} — {target}",
+            f"call start: {call_role} — {human_target}{_effort_log_suffix(effort)}",
             event="call_started",
             attempt=attempt,
             retry=retry,
@@ -198,6 +200,7 @@ class RunArtifacts:
         retry: int,
         target: str,
         call_role: str,
+        display_target: str | None = None,
         phase_reached: str | None = None,
         status: str,
         level: str = "INFO",
@@ -215,9 +218,11 @@ class RunArtifacts:
             effort=effort,
         )
         effort_fields = dict(effort or {})
+        human_target = display_target or target
         self.log(
             level,
-            f"call {status}: {call_role} — {target}",
+            f"call {status}: {call_role} — {human_target}"
+            f"{_effort_log_suffix(effort)}",
             event="call_finished",
             attempt=attempt,
             retry=retry,
@@ -403,3 +408,24 @@ def _apply_effort_fields(
             continue
         value = effort[field_name]
         setattr(stats, field_name, value if value is not None else None)
+
+
+def _effort_log_suffix(effort: Mapping[str, object] | None) -> str:
+    if not effort:
+        return ""
+    effective = _string_field(effort.get("effective_effort"))
+    requested = _string_field(effort.get("requested_effort"))
+    selected = effective or requested
+    if selected is None:
+        return ""
+    parts = [f"effort={selected}"]
+    if effective is not None and requested is not None and requested != effective:
+        parts.append(f"requested={requested}")
+    return f" ({' '.join(parts)})"
+
+
+def _string_field(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None

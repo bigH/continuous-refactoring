@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import subprocess
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -66,6 +67,13 @@ def _make_artifacts(tmp_path: Path) -> RunArtifacts:
         effort="low",
         test_command="true",
     )
+
+
+def _events(artifacts: RunArtifacts) -> list[dict[str, object]]:
+    return [
+        json.loads(line)
+        for line in artifacts.events_path.read_text(encoding="utf-8").splitlines()
+    ]
 
 
 def _fake_capture(
@@ -353,6 +361,41 @@ def test_check_ready_prompt_includes_taste(
     assert f"## Taste\n{_TASTE}" in prompts[0]
 
 
+def test_phase_ready_check_call_message_uses_phase_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_agent(monkeypatch, "ready: yes\n", tmp_path)
+    artifacts = _make_artifacts(tmp_path)
+
+    check_phase_ready(
+        _PHASE_0,
+        _make_manifest(),
+        tmp_path,
+        artifacts,
+        taste=_TASTE,
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+    )
+
+    call_events = [
+        event for event in _events(artifacts)
+        if event.get("call_role") == "phase.ready-check"
+    ]
+    assert [event["message"] for event in call_events] == [
+        "call start: phase.ready-check — setup",
+        "call finished: phase.ready-check — setup",
+    ]
+    assert {event["target"] for event in call_events} == {
+        "rework-auth phase-0-setup.md (setup)",
+    }
+    log_text = artifacts.log_path.read_text(encoding="utf-8")
+    assert "phase.ready-check — setup" in log_text
+    assert "rework-auth phase-0-setup.md" not in log_text
+
+
 # ---------------------------------------------------------------------------
 # ready=yes path with green tests flips phase.done
 # ---------------------------------------------------------------------------
@@ -392,6 +435,52 @@ def test_ready_yes_green_tests_flips_phase_done(
     assert reloaded.phases[0].done is True
     assert reloaded.phases[1].done is False
     assert reloaded.current_phase == "migrate"
+
+
+def test_execute_phase_call_messages_use_phase_name(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = tmp_path / "live"
+    manifest = _make_manifest()
+    _save_manifest_to_disk(manifest, live_dir)
+    artifacts = _make_artifacts(tmp_path)
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.get_head_sha", lambda _: "abc123",
+    )
+    _patch_agent(monkeypatch, "executed phase work\n", tmp_path)
+    monkeypatch.setattr("continuous_refactoring.phases.run_tests", _passing_tests)
+
+    outcome = execute_phase(
+        _PHASE_0,
+        manifest,
+        _TASTE,
+        tmp_path,
+        live_dir,
+        artifacts,
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        validation_command="true",
+        max_attempts=1,
+    )
+
+    assert outcome.status == "done"
+    call_messages = [
+        str(event["message"]) for event in _events(artifacts)
+        if event.get("call_role") in {"phase.execute", "phase.validation"}
+    ]
+    assert call_messages == [
+        "call start: phase.execute — setup",
+        "call finished: phase.execute — setup",
+        "call start: phase.validation — setup",
+        "call finished: phase.validation — setup",
+    ]
+    assert "rework-auth phase-0-setup.md" not in artifacts.log_path.read_text(
+        encoding="utf-8",
+    )
 
 
 def test_final_phase_completion_marks_migration_done(

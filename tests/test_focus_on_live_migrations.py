@@ -332,6 +332,54 @@ def test_focused_loop_ticks_each_eligible_migration_until_done(
     assert tick_calls == ["alpha", "beta"]
 
 
+def test_focused_loop_tick_header_lists_repo_relative_phase_files(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    live_dir = run_loop_env / "migrations"
+    live_dir.mkdir()
+    alpha_path = _seed_manifest(live_dir, "alpha")
+    beta_path = _seed_manifest(live_dir, "beta")
+    continuous_refactoring.run_command(["git", "add", "migrations"], cwd=run_loop_env)
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "seed migrations"],
+        cwd=run_loop_env,
+    )
+
+    _install_focused_loop_env(run_loop_env, monkeypatch, live_dir)
+
+    remaining = {"alpha": alpha_path, "beta": beta_path}
+
+    def fake_tick(
+        live_dir: Path, taste: str, repo_root: Path, artifacts: object,
+        **_kwargs: object,
+    ) -> tuple[RouteOutcome, DecisionRecord | None]:
+        name, path = next(iter(remaining.items()))
+        remaining.pop(name)
+        _mark_done(path)
+        return ("commit", _commit_ok(f"migration/{name}"))
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_migration_tick",
+        fake_tick,
+    )
+
+    args = make_run_loop_args(
+        run_loop_env,
+        focus_on_live_migrations=True,
+    )
+    assert continuous_refactoring.run_migrations_focused_loop(args) == 0
+
+    captured = capsys.readouterr()
+    assert (
+        "── Migration tick 1 (eligible: "
+        "migrations/alpha/phase-0-setup.md, "
+        "migrations/beta/phase-0-setup.md) ──"
+    ) in captured.out
+    assert "eligible: alpha, beta" not in captured.out
+
+
 def test_focused_loop_advances_multiple_ready_phases_until_deferred(
     run_loop_env: Path,
     tmp_path: Path,

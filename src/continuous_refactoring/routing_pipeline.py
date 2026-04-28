@@ -78,6 +78,7 @@ def expand_target_for_classification(
     model: str,
     effort: str,
     timeout: int | None,
+    attempt: int = 1,
     effort_metadata: dict[str, object] | None = None,
 ) -> tuple[Target, str]:
     scope_dir = artifacts.root / "scope-expansion"
@@ -107,6 +108,7 @@ def expand_target_for_classification(
         agent=agent,
         model=model,
         effort=effort,
+        attempt=attempt,
         effort_metadata=effort_metadata,
         timeout=timeout,
     )
@@ -174,6 +176,7 @@ def route_and_run(
         agent=agent,
         model=model,
         effort=effort,
+        attempt=attempt,
         effort_metadata=effort_metadata,
         timeout=timeout,
     )

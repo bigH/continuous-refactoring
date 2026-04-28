@@ -97,6 +97,8 @@ def select_scope_candidate(
     model: str,
     effort: str,
     timeout: int | None,
+    attempt: int = 1,
+    retry: int = 1,
     effort_metadata: dict[str, object] | None = None,
 ) -> ScopeSelection:
     selection_dir = artifacts.root / "scope-expansion"
@@ -112,24 +114,83 @@ def select_scope_candidate(
         _write_selection_logs(selection_dir, selection)
         return selection
 
-    result = maybe_run_agent(
-        agent=agent,
-        model=model,
-        effort=effort,
-        prompt=compose_scope_selection_prompt(target, candidates, taste),
-        repo_root=repo_root,
-        stdout_path=selection_stdout_path,
-        stderr_path=selection_dir / "selection.stderr.log",
-        last_message_path=selection_last_message_path if agent == "codex" else None,
-        mirror_to_terminal=False,
-        timeout=timeout,
+    call_role = "scope-expansion"
+    artifacts.log_call_started(
+        attempt=attempt,
+        retry=retry,
+        target=target.description,
+        call_role=call_role,
+        effort=effort_metadata,
     )
+
+    try:
+        result = maybe_run_agent(
+            agent=agent,
+            model=model,
+            effort=effort,
+            prompt=compose_scope_selection_prompt(target, candidates, taste),
+            repo_root=repo_root,
+            stdout_path=selection_stdout_path,
+            stderr_path=selection_dir / "selection.stderr.log",
+            last_message_path=selection_last_message_path if agent == "codex" else None,
+            mirror_to_terminal=False,
+            timeout=timeout,
+        )
+    except ContinuousRefactorError as error:
+        artifacts.log_call_finished(
+            attempt=attempt,
+            retry=retry,
+            target=target.description,
+            call_role=call_role,
+            status="failed",
+            level="WARN",
+            summary=str(error),
+            effort=effort_metadata,
+        )
+        raise
+
     if result.returncode != 0:
+        artifacts.log_call_finished(
+            attempt=attempt,
+            retry=retry,
+            target=target.description,
+            call_role=call_role,
+            status="failed",
+            level="WARN",
+            returncode=result.returncode,
+            summary=f"{agent} exited with code {result.returncode}",
+            effort=effort_metadata,
+        )
         raise ContinuousRefactorError(
             f"Scope selection agent failed with exit code {result.returncode}"
         )
     candidate_kinds = tuple(candidate.kind for candidate in candidates)
-    return parse_scope_selection(result.stdout, candidate_kinds)
+    try:
+        selection = parse_scope_selection(result.stdout, candidate_kinds)
+    except ContinuousRefactorError as error:
+        artifacts.log_call_finished(
+            attempt=attempt,
+            retry=retry,
+            target=target.description,
+            call_role=call_role,
+            status="failed",
+            level="WARN",
+            returncode=result.returncode,
+            summary=str(error),
+            effort=effort_metadata,
+        )
+        raise
+
+    artifacts.log_call_finished(
+        attempt=attempt,
+        retry=retry,
+        target=target.description,
+        call_role=call_role,
+        status="finished",
+        returncode=result.returncode,
+        effort=effort_metadata,
+    )
+    return selection
 
 
 def write_scope_expansion_artifacts(

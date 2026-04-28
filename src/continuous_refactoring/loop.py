@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import random
 import sys
 import time
@@ -22,6 +23,7 @@ __all__ = [
 
 from continuous_refactoring.artifacts import (
     ContinuousRefactorError,
+    _effort_log_suffix,
     create_run_artifacts,
 )
 from continuous_refactoring.agent import (
@@ -57,6 +59,10 @@ from continuous_refactoring.git import (
     require_clean_worktree,
     revert_to,
     run_command,
+)
+from continuous_refactoring.migrations import (
+    phase_file_reference,
+    resolve_current_phase,
 )
 from continuous_refactoring.prompts import (
     DEFAULT_FIX_AMENDMENT,
@@ -280,14 +286,17 @@ class _MigrationProbeArtifacts:
         attempt: int,
         retry: int,
         target: str,
+        display_target: str | None = None,
         call_role: str,
         phase_reached: str | None = None,
         effort: dict[str, object] | None = None,
     ) -> None:
         effort_fields = dict(effort or {})
+        human_target = display_target or target
         self._artifacts.log(
             "INFO",
-            f"migration call start: {call_role} — {target}",
+            f"migration call start: {call_role} — {human_target}"
+            f"{_effort_log_suffix(effort)}",
             event="migration_call_started",
             migration_attempt=attempt,
             retry=retry,
@@ -304,6 +313,7 @@ class _MigrationProbeArtifacts:
         retry: int,
         target: str,
         call_role: str,
+        display_target: str | None = None,
         phase_reached: str | None = None,
         status: str,
         level: str = "INFO",
@@ -312,9 +322,11 @@ class _MigrationProbeArtifacts:
         effort: dict[str, object] | None = None,
     ) -> None:
         effort_fields = dict(effort or {})
+        human_target = display_target or target
         self._artifacts.log(
             level,
-            f"migration call {status}: {call_role} — {target}",
+            f"migration call {status}: {call_role} — {human_target}"
+            f"{_effort_log_suffix(effort)}",
             event="migration_call_finished",
             migration_attempt=attempt,
             retry=retry,
@@ -939,6 +951,29 @@ def _focus_eligible_manifests(
     ]
 
 
+def _eligible_phase_path_labels(
+    repo_root: Path,
+    candidates: list[tuple[MigrationManifest, Path]],
+) -> tuple[str, ...]:
+    return tuple(
+        _repo_relative_path(
+            repo_root,
+            manifest_path.parent
+            / phase_file_reference(resolve_current_phase(manifest)),
+        )
+        for manifest, manifest_path in candidates
+    )
+
+
+def _repo_relative_path(repo_root: Path, path: Path) -> str:
+    resolved_root = repo_root.resolve()
+    resolved_path = path.resolve()
+    try:
+        return resolved_path.relative_to(resolved_root).as_posix()
+    except ValueError:
+        return os.path.relpath(resolved_path, resolved_root).replace(os.sep, "/")
+
+
 def run_migrations_focused_loop(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
     timeout = args.timeout or 1800
@@ -1018,7 +1053,7 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
 
             iteration += 1
             artifacts.mark_attempt_started(iteration)
-            names = ", ".join(m.name for m, _ in eligible)
+            names = ", ".join(_eligible_phase_path_labels(repo_root, eligible))
             print(f"\n── Migration tick {iteration} (eligible: {names}) ──")
 
             outcome, record = migration_tick.try_migration_tick(

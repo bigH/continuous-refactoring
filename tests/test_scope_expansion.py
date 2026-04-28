@@ -7,7 +7,12 @@ from types import SimpleNamespace
 import pytest
 
 import continuous_refactoring.scope_expansion as scope_expansion
-from continuous_refactoring.artifacts import ContinuousRefactorError
+from continuous_refactoring.artifacts import (
+    CommandCapture,
+    ContinuousRefactorError,
+    RunArtifacts,
+    create_run_artifacts,
+)
 from continuous_refactoring.scope_candidates import ScopeCandidate, ScopeCandidateKind
 from continuous_refactoring.scope_expansion import (
     ScopeSelection,
@@ -27,6 +32,37 @@ def _candidate(kind: ScopeCandidateKind) -> ScopeCandidate:
         evidence_lines=("seed target",),
         validation_surfaces=("README.md",),
     )
+
+
+def _make_artifacts(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> RunArtifacts:
+    tmpdir = tmp_path / "tmpdir"
+    tmpdir.mkdir(exist_ok=True)
+    monkeypatch.setenv("TMPDIR", str(tmpdir))
+    return create_run_artifacts(
+        repo_root=tmp_path,
+        agent="codex",
+        model="fake",
+        effort="low",
+        test_command="true",
+    )
+
+
+def _fake_capture(stdout: str, tmp_path: Path, *, returncode: int = 0) -> CommandCapture:
+    return CommandCapture(
+        command=("fake",),
+        returncode=returncode,
+        stdout=stdout,
+        stderr="",
+        stdout_path=tmp_path / "stdout.log",
+        stderr_path=tmp_path / "stderr.log",
+    )
+
+
+def _events(artifacts: RunArtifacts) -> list[dict[str, object]]:
+    return [
+        json.loads(line)
+        for line in artifacts.events_path.read_text(encoding="utf-8").splitlines()
+    ]
 
 
 def test_explicit_multi_file_targets_bypass_expansion() -> None:
@@ -124,10 +160,10 @@ def test_select_scope_candidate_surfaces_parser_boundary_errors(
 ) -> None:
     target = Target(description="clean up", files=("README.md",), provenance="globs")
     candidates = (_candidate("seed"), _candidate("local-cluster"))
-    artifacts = SimpleNamespace(root=tmp_path)
+    artifacts = _make_artifacts(tmp_path, monkeypatch)
 
-    def fake_run_agent(**_: object) -> SimpleNamespace:
-        return SimpleNamespace(returncode=0, stdout="pick local cluster\n")
+    def fake_run_agent(**_: object) -> CommandCapture:
+        return _fake_capture("pick local cluster\n", tmp_path)
 
     monkeypatch.setattr(scope_expansion, "maybe_run_agent", fake_run_agent)
 
@@ -143,3 +179,74 @@ def test_select_scope_candidate_surfaces_parser_boundary_errors(
             effort="low",
             timeout=None,
         )
+
+    failed = [
+        event for event in _events(artifacts)
+        if event.get("event") == "call_finished"
+    ][-1]
+    assert failed["call_role"] == "scope-expansion"
+    assert failed["call_status"] == "failed"
+
+
+def test_select_scope_candidate_multi_candidate_logs_call_events_with_effort(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target = Target(description="clean up", files=("README.md",), provenance="globs")
+    candidates = (_candidate("seed"), _candidate("local-cluster"))
+    artifacts = _make_artifacts(tmp_path, monkeypatch)
+    effort_metadata = {
+        "effort_source": "target-override",
+        "requested_effort": "xhigh",
+        "effective_effort": "medium",
+        "max_allowed_effort": "medium",
+        "effort_capped": True,
+        "effort_reason": "test cap",
+    }
+
+    def fake_run_agent(**kwargs: object) -> CommandCapture:
+        for key in ("stdout_path", "stderr_path"):
+            path = Path(str(kwargs[key]))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+        return _fake_capture(
+            "selected-candidate: local-cluster — clustered evidence\n",
+            tmp_path,
+        )
+
+    monkeypatch.setattr(scope_expansion, "maybe_run_agent", fake_run_agent)
+
+    selection = select_scope_candidate(
+        target,
+        candidates,
+        "taste",
+        tmp_path,
+        artifacts,
+        agent="codex",
+        model="gpt-5.5",
+        effort="medium",
+        timeout=None,
+        effort_metadata=effort_metadata,
+    )
+
+    assert selection == ScopeSelection(
+        kind="local-cluster",
+        reason="clustered evidence",
+    )
+    call_events = [
+        event for event in _events(artifacts)
+        if event.get("call_role") == "scope-expansion"
+    ]
+    assert [event["event"] for event in call_events] == [
+        "call_started",
+        "call_finished",
+    ]
+    assert [event["target"] for event in call_events] == ["clean up", "clean up"]
+    assert call_events[1]["call_status"] == "finished"
+    assert call_events[1]["returncode"] == 0
+    for event in call_events:
+        assert event["requested_effort"] == "xhigh"
+        assert event["effective_effort"] == "medium"
+        assert event["max_allowed_effort"] == "medium"
+        assert event["effort_source"] == "target-override"
+        assert event["effort_capped"] is True

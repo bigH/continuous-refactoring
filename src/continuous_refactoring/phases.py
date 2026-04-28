@@ -89,6 +89,10 @@ def _phase_target_label(manifest: MigrationManifest, phase: PhaseSpec) -> str:
     return f"{manifest.name} {phase_file_reference(phase)} ({phase.name})"
 
 
+def _phase_display_label(phase: PhaseSpec) -> str:
+    return phase.name
+
+
 def _require_phase_in_manifest(
     manifest: MigrationManifest, phase_name: str,
 ) -> None:
@@ -134,12 +138,14 @@ def check_phase_ready(
     check_dir = artifacts.root / "phase-ready-check"
     check_dir.mkdir(parents=True, exist_ok=True)
     target_label = _phase_target_label(manifest, phase)
+    display_label = _phase_display_label(phase)
     call_role = "phase.ready-check"
 
     artifacts.log_call_started(
         attempt=attempt,
         retry=retry,
         target=target_label,
+        display_target=display_label,
         call_role=call_role,
         effort=effort_metadata,
     )
@@ -164,6 +170,7 @@ def check_phase_ready(
             attempt=attempt,
             retry=retry,
             target=target_label,
+            display_target=display_label,
             call_role=call_role,
             status="failed",
             level="WARN",
@@ -177,6 +184,7 @@ def check_phase_ready(
             attempt=attempt,
             retry=retry,
             target=target_label,
+            display_target=display_label,
             call_role=call_role,
             status="failed",
             level="WARN",
@@ -198,6 +206,7 @@ def check_phase_ready(
         attempt=attempt,
         retry=retry,
         target=target_label,
+        display_target=display_label,
         call_role=call_role,
         status="finished",
         returncode=result.returncode,
@@ -212,6 +221,7 @@ def _terminal_phase_failure(
     attempt: int,
     retry: int,
     target_label: str,
+    display_target_label: str,
     call_role: str,
     phase_reached: str | None,
     repo_root: Path,
@@ -226,6 +236,7 @@ def _terminal_phase_failure(
         attempt=attempt,
         retry=retry,
         target=target_label,
+        display_target=display_target_label,
         call_role=call_role,
         phase_reached=phase_reached,
         status="failed",
@@ -304,6 +315,7 @@ def _run_phase_agent(
     *,
     attempt: int,
     target_label: str,
+    display_target_label: str,
     repo_root: Path,
     head_before: str,
     agent: str,
@@ -316,6 +328,7 @@ def _run_phase_agent(
         attempt=attempt,
         retry=phase_attempt.retry,
         target=target_label,
+        display_target=display_target_label,
         call_role=_PHASE_EXECUTE_ROLE,
         effort=effort_metadata,
     )
@@ -343,6 +356,7 @@ def _run_phase_agent(
                 attempt=attempt,
                 retry=phase_attempt.retry,
                 target_label=target_label,
+                display_target_label=display_target_label,
                 call_role=_PHASE_EXECUTE_ROLE,
                 phase_reached=None,
                 repo_root=repo_root,
@@ -375,6 +389,7 @@ def _run_phase_agent(
                 attempt=attempt,
                 retry=phase_attempt.retry,
                 target_label=target_label,
+                display_target_label=display_target_label,
                 call_role=_PHASE_EXECUTE_ROLE,
                 phase_reached=phase_reached,
                 repo_root=repo_root,
@@ -391,6 +406,7 @@ def _run_phase_agent(
         attempt=attempt,
         retry=phase_attempt.retry,
         target=target_label,
+        display_target=display_target_label,
         call_role=_PHASE_EXECUTE_ROLE,
         status="finished",
         returncode=result.returncode,
@@ -409,6 +425,7 @@ def _run_phase_validation(
     *,
     attempt: int,
     target_label: str,
+    display_target_label: str,
     repo_root: Path,
     validation_command: str,
 ) -> _PhaseValidationResult:
@@ -416,6 +433,7 @@ def _run_phase_validation(
         attempt=attempt,
         retry=phase_attempt.retry,
         target=target_label,
+        display_target=display_target_label,
         call_role=_PHASE_VALIDATION_ROLE,
         phase_reached=agent_run.phase_reached,
     )
@@ -458,6 +476,7 @@ def _run_phase_validation(
         attempt=attempt,
         retry=phase_attempt.retry,
         target=target_label,
+        display_target=display_target_label,
         call_role=_PHASE_VALIDATION_ROLE,
         phase_reached=agent_run.phase_reached,
         status="finished",
@@ -480,6 +499,7 @@ def _record_retryable_validation_failure(
     attempt: int,
     retry: int,
     target_label: str,
+    display_target_label: str,
     phase_reached: str,
     repo_root: Path,
     head_before: str,
@@ -489,6 +509,7 @@ def _record_retryable_validation_failure(
         attempt=attempt,
         retry=retry,
         target=target_label,
+        display_target=display_target_label,
         call_role=_PHASE_VALIDATION_ROLE,
         phase_reached=phase_reached,
         status="failed",
@@ -512,6 +533,7 @@ def _fail_phase_validation(
     attempt: int,
     retry: int,
     target_label: str,
+    display_target_label: str,
     phase_reached: str,
     repo_root: Path,
     head_before: str,
@@ -521,6 +543,7 @@ def _fail_phase_validation(
         attempt=attempt,
         retry=retry,
         target_label=target_label,
+        display_target_label=display_target_label,
         call_role=_PHASE_VALIDATION_ROLE,
         phase_reached=phase_reached,
         repo_root=repo_root,
@@ -583,6 +606,7 @@ def execute_phase(
     _require_phase_in_manifest(manifest, phase.name)
     head_before = get_head_sha(repo_root)
     target_label = _phase_target_label(manifest, phase)
+    display_target_label = _phase_display_label(phase)
     retry_context: str | None = None
     retry_number = retry
 
@@ -606,6 +630,7 @@ def execute_phase(
             artifacts,
             attempt=attempt,
             target_label=target_label,
+            display_target_label=display_target_label,
             repo_root=repo_root,
             head_before=head_before,
             agent=agent,
@@ -623,6 +648,7 @@ def execute_phase(
             artifacts,
             attempt=attempt,
             target_label=target_label,
+            display_target_label=display_target_label,
             repo_root=repo_root,
             validation_command=validation_command,
         )
@@ -644,6 +670,7 @@ def execute_phase(
                 attempt=attempt,
                 retry=retry_number,
                 target_label=target_label,
+                display_target_label=display_target_label,
                 phase_reached=agent_run.phase_reached,
                 repo_root=repo_root,
                 head_before=head_before,
@@ -655,6 +682,7 @@ def execute_phase(
             attempt=attempt,
             retry=retry_number,
             target_label=target_label,
+            display_target_label=display_target_label,
             phase_reached=agent_run.phase_reached,
             repo_root=repo_root,
             head_before=head_before,

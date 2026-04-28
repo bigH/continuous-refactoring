@@ -957,6 +957,74 @@ def test_default_artifacts_root_ignores_blank_tmpdir(
     assert artifacts.default_artifacts_root() == tmp_path
 
 
+def test_call_log_lines_include_effective_effort(
+    tmp_path: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    run = artifacts.RunArtifacts(
+        root=tmp_path,
+        run_id="run-1",
+        repo_root=tmp_path,
+        agent="codex",
+        model="fake-model",
+        effort="medium",
+        default_effort="low",
+        max_allowed_effort="medium",
+        test_command="true",
+        events_path=tmp_path / "events.jsonl",
+        summary_path=tmp_path / "summary.json",
+        log_path=tmp_path / "run.log",
+        started_at="2026-04-15T12:34:56.123+00:00",
+    )
+    effort = {
+        "requested_effort": "xhigh",
+        "effective_effort": "medium",
+        "max_allowed_effort": "medium",
+        "effort_source": "target-override",
+        "effort_capped": True,
+        "effort_reason": "test cap",
+    }
+
+    run.log_call_started(
+        attempt=1,
+        retry=1,
+        target="target-a",
+        call_role="refactor",
+        effort=effort,
+    )
+    run.log_call_finished(
+        attempt=1,
+        retry=1,
+        target="target-a",
+        call_role="refactor",
+        status="finished",
+        returncode=0,
+        effort=effort,
+    )
+
+    stdout = capsys.readouterr().out
+    expected_start = (
+        "call start: refactor — target-a (effort=medium requested=xhigh)"
+    )
+    expected_finish = (
+        "call finished: refactor — target-a (effort=medium requested=xhigh)"
+    )
+    assert expected_start in stdout
+    assert expected_finish in stdout
+    log_text = run.log_path.read_text(encoding="utf-8")
+    assert expected_start in log_text
+    assert expected_finish in log_text
+
+    events = [
+        json.loads(line)
+        for line in run.events_path.read_text(encoding="utf-8").splitlines()
+    ]
+    assert events[0]["requested_effort"] == "xhigh"
+    assert events[0]["effective_effort"] == "medium"
+    assert events[1]["requested_effort"] == "xhigh"
+    assert events[1]["effective_effort"] == "medium"
+
+
 def test_run_summary_write_preserves_previous_content_on_replace_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

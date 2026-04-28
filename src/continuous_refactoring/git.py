@@ -36,14 +36,20 @@ def run_command(
     check: bool = True,
     capture_output: bool = True,
 ) -> subprocess.CompletedProcess[str]:
-    proc = subprocess.run(
-        command,
-        cwd=cwd,
-        text=True,
-        shell=False,
-        check=False,
-        capture_output=capture_output,
-    )
+    try:
+        proc = subprocess.run(
+            command,
+            cwd=cwd,
+            text=True,
+            shell=False,
+            check=False,
+            capture_output=capture_output,
+        )
+    except FileNotFoundError as exc:
+        raise GitCommandError(
+            f"command could not be started: {command!r}\n"
+            f"cwd: {cwd}"
+        ) from exc
     if check and proc.returncode != 0:
         try:
             proc.check_returncode()

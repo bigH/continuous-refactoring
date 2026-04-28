@@ -82,6 +82,21 @@ def test_run_command_checked_failure_includes_cause_and_payload(tmp_path: Path) 
     assert "stderr:\nerr\n" in str(error)
 
 
+def test_run_command_missing_command_raises_git_command_error(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    def _raise(*_args: object, **_kwargs: object) -> subprocess.CompletedProcess[str]:
+        raise FileNotFoundError("command not found")
+
+    monkeypatch.setattr(subprocess, "run", _raise)
+
+    with pytest.raises(continuous_refactoring.GitCommandError) as exc:
+        continuous_refactoring.run_command(["nonexistent-command"], cwd=tmp_path)
+
+    assert isinstance(exc.value.__cause__, FileNotFoundError)
+
+
 def test_run_command_unchecked_returns_completed_process(tmp_path: Path) -> None:
     command = [
         "python",

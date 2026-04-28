@@ -407,6 +407,22 @@ def _handle_plain_taste(args: argparse.Namespace) -> None:
     print(str(path))
 
 
+def _handle_current_taste_upgrade_if_noop(args: argparse.Namespace) -> bool:
+    from continuous_refactoring.config import (
+        TASTE_CURRENT_VERSION,
+        parse_taste_version,
+    )
+
+    path = _resolve_taste_path(args.global_)
+    stored_version = None
+    if path.exists():
+        stored_version = parse_taste_version(path.read_text(encoding="utf-8"))
+    if stored_version != TASTE_CURRENT_VERSION:
+        return False
+    print("taste already current; use `taste --refine` to re-interview or refine it.")
+    return True
+
+
 def _handle_taste(args: argparse.Namespace) -> None:
     mode = _active_taste_mode(args)
 
@@ -423,13 +439,14 @@ def _handle_taste(args: argparse.Namespace) -> None:
             raise SystemExit(2)
         return _handle_plain_taste(args)
 
-    if mode != "upgrade":
-        _require_taste_action_flags(
-            action=mode,
-            agent=getattr(args, "agent", None),
-            model=getattr(args, "model", None),
-            effort=getattr(args, "effort", None),
-        )
+    if mode == "upgrade" and _handle_current_taste_upgrade_if_noop(args):
+        return
+    _require_taste_action_flags(
+        action=mode,
+        agent=getattr(args, "agent", None),
+        model=getattr(args, "model", None),
+        effort=getattr(args, "effort", None),
+    )
     return _TASTE_MODE_HANDLERS[mode](args)
 
 
@@ -504,17 +521,6 @@ def _handle_taste_upgrade(args: argparse.Namespace) -> None:
     if path.exists():
         existing = path.read_text(encoding="utf-8")
         stored_version = parse_taste_version(existing)
-
-    if stored_version == TASTE_CURRENT_VERSION:
-        print("taste already current; use `taste --refine` to re-interview or refine it.")
-        return
-
-    _require_taste_action_flags(
-        action="upgrade",
-        agent=getattr(args, "agent", None),
-        model=getattr(args, "model", None),
-        effort=getattr(args, "effort", None),
-    )
 
     prompt = compose_taste_upgrade_prompt(
         path,

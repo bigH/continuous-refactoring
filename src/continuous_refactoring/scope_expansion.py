@@ -45,6 +45,16 @@ class ScopeSelection:
     reason: str
 
 
+def _scope_selection_line(selection: ScopeSelection) -> str:
+    return f"selected-candidate: {selection.kind} — {selection.reason}\n"
+
+
+def _write_selection_logs(selection_dir: Path, selection: ScopeSelection) -> None:
+    line = _scope_selection_line(selection)
+    (selection_dir / "selection.stdout.log").write_text(line, encoding="utf-8")
+    (selection_dir / "selection-last-message.md").write_text(line, encoding="utf-8")
+
+
 def scope_expansion_bypass_reason(target: Target) -> str | None:
     if len(target.files) == 0:
         return "scope expansion requires a seed file"
@@ -110,9 +120,7 @@ def select_scope_candidate(
             kind=candidates[0].kind,
             reason="only viable candidate",
         )
-        line = f"selected-candidate: {selection.kind} — {selection.reason}\n"
-        selection_stdout_path.write_text(line, encoding="utf-8")
-        selection_last_message_path.write_text(line, encoding="utf-8")
+        _write_selection_logs(selection_dir, selection)
         return selection
 
     result = maybe_run_agent(

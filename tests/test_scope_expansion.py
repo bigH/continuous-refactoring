@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 from continuous_refactoring.scope_candidates import ScopeCandidate, ScopeCandidateKind
 from continuous_refactoring.scope_expansion import (
     ScopeSelection,
     describe_scope_candidate,
+    select_scope_candidate,
     scope_candidate_to_target,
     scope_expansion_bypass_reason,
     write_scope_expansion_artifacts,
@@ -61,6 +63,34 @@ def test_describe_scope_candidate_returns_readable_block() -> None:
     assert formatted.startswith("Selected scope candidate: local-cluster")
     assert "- README.md" in formatted
     assert "- src/expanded.py" in formatted
+
+
+def test_select_scope_candidate_single_candidate_writes_selection_logs(
+    tmp_path: Path,
+) -> None:
+    target = Target(description="clean up", files=("README.md",), provenance="globs")
+    candidate = _candidate("seed")
+    artifacts = SimpleNamespace(root=tmp_path)
+
+    selection = select_scope_candidate(
+        target,
+        (candidate,),
+        "taste",
+        tmp_path,
+        artifacts,
+        agent="codex",
+        model="gpt-5.5",
+        effort="low",
+        timeout=None,
+    )
+
+    selection_dir = tmp_path / "scope-expansion"
+    expected = "selected-candidate: seed — only viable candidate\n"
+    assert selection == ScopeSelection(kind="seed", reason="only viable candidate")
+    assert (selection_dir / "selection.stdout.log").read_text(encoding="utf-8") == expected
+    assert (
+        selection_dir / "selection-last-message.md"
+    ).read_text(encoding="utf-8") == expected
 
 
 def test_write_scope_expansion_artifacts_records_payload(tmp_path: Path) -> None:

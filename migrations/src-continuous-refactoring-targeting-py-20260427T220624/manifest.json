@@ -1,10 +1,10 @@
 {
   "awaiting_human_review": false,
-  "cooldown_until": null,
+  "cooldown_until": "2026-04-28T11:09:48.422+00:00",
   "created_at": "2026-04-27T22:06:24.348-07:00",
   "current_phase": "targeting-parse-foundation",
   "human_review_reason": null,
-  "last_touch": "2026-04-27T22:09:48.319-07:00",
+  "last_touch": "2026-04-28T05:09:48.422+00:00",
   "name": "src-continuous-refactoring-targeting-py-20260427T220624",
   "phases": [
     {
@@ -33,5 +33,5 @@
     }
   ],
   "status": "ready",
-  "wake_up_on": null
+  "wake_up_on": "2026-05-05T05:09:48.422+00:00"
 }

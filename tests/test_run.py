@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
+from typing import Literal
 
 import pytest
 
@@ -10,7 +11,13 @@ import continuous_refactoring
 import continuous_refactoring.loop
 from continuous_refactoring.cli import build_parser
 from continuous_refactoring.artifacts import CommandCapture, ContinuousRefactorError
-from continuous_refactoring.migrations import MigrationManifest, PhaseSpec, save_manifest
+from continuous_refactoring.decisions import DecisionRecord
+from continuous_refactoring.migrations import (
+    MigrationManifest,
+    PhaseSpec,
+    load_manifest,
+    save_manifest,
+)
 
 from conftest import (
     failing_tests,
@@ -65,6 +72,41 @@ def _write_live_manifest(
     migration_dir = live_dir / name
     migration_dir.mkdir(parents=True, exist_ok=True)
     save_manifest(manifest, migration_dir / "manifest.json")
+
+
+def _write_targets_file(tmp_path: Path, count: int) -> Path:
+    targets_file = tmp_path / "targets.jsonl"
+    targets_file.write_text(
+        "\n".join(
+            json.dumps({"description": f"target-{index}", "files": [f"file{index}.py"]})
+            for index in range(count)
+        ),
+        encoding="utf-8",
+    )
+    return targets_file
+
+
+def _migration_record(
+    decision: Literal["commit", "abandon", "blocked"],
+    *,
+    summary: str = "migration result",
+    target: str = "queued-migration phase-0-cleanup.md (cleanup)",
+) -> DecisionRecord:
+    retry_recommendation = {
+        "commit": "none",
+        "abandon": "new-target",
+        "blocked": "human-review",
+    }[decision]
+    failure_kind = "none" if decision == "commit" else "phase-ready-unverifiable"
+    return DecisionRecord(
+        decision=decision,
+        retry_recommendation=retry_recommendation,
+        target=target,
+        call_role="phase.execute" if decision == "commit" else "phase.ready-check",
+        phase_reached="phase.execute" if decision == "commit" else "phase.ready-check",
+        failure_kind=failure_kind,
+        summary=summary,
+    )
 
 
 def _failing_agent(**kwargs: object) -> CommandCapture:
@@ -1345,6 +1387,290 @@ def test_run_planning_failure_writes_reason_doc_and_logs_stage(
     reason_doc = snapshots[-1].read_text(encoding="utf-8")
     assert 'call_role: "planning.approaches"' in reason_doc
     assert 'decision: "abandon"' in reason_doc
+
+
+def test_run_migration_work_does_not_print_target_banner_first(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo_root = run_loop_env
+    live_dir = tmp_path / "live-migrations"
+    live_dir.mkdir()
+    _write_live_manifest(live_dir)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_migration_tick",
+        lambda *_args, **_kwargs: ("commit", _migration_record("commit")),
+    )
+
+    def old_path_commit(*_args: object, **_kwargs: object) -> object:
+        target = _args[0] if _args else _kwargs["target"]
+        return continuous_refactoring.routing_pipeline.RouteResult(
+            outcome="commit",
+            target=target,
+            decision_record=_migration_record("commit"),
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.route_and_run",
+        old_path_commit,
+    )
+
+    args = make_run_loop_args(repo_root, max_refactors=1)
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    captured = capsys.readouterr()
+    assert "── Action 1/1 ──" in captured.out
+    assert "Examining migration: migration/queued-migration" in captured.out
+    assert "── Target 1/" not in captured.out
+
+
+@pytest.mark.parametrize(
+    "ready_stdout",
+    [
+        "ready: no — wait\n",
+        "ready: unverifiable — needs human\n",
+    ],
+)
+def test_run_non_runnable_migration_does_not_consume_max_refactors(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    ready_stdout: str,
+) -> None:
+    repo_root = run_loop_env
+    live_dir = repo_root / "migrations"
+    live_dir.mkdir()
+    _write_live_manifest(live_dir)
+    continuous_refactoring.run_command(["git", "add", "migrations"], cwd=repo_root)
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "add live migration"],
+        cwd=repo_root,
+    )
+    targets_file = _write_targets_file(tmp_path, 2)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.expand_target_for_classification",
+        lambda target, *_args, **_kwargs: (target, ""),
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        lambda *_args, **_kwargs: "cohesive-cleanup",
+    )
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+
+    ready_calls = 0
+
+    def blocked_ready_check(**kwargs: object) -> CommandCapture:
+        nonlocal ready_calls
+        ready_calls += 1
+        stdout_path = Path(str(kwargs["stdout_path"]))
+        stderr_path = Path(str(kwargs["stderr_path"]))
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text(ready_stdout, encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return CommandCapture(
+            command=("fake",),
+            returncode=0,
+            stdout=ready_stdout,
+            stderr="",
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.maybe_run_agent",
+        blocked_ready_check,
+    )
+
+    agent_calls = 0
+
+    def touching_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / f"source-{agent_calls}.txt").write_text("x\n", encoding="utf-8")
+        return noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
+
+    args = make_run_loop_args(
+        repo_root,
+        targets=targets_file,
+        max_refactors=2,
+        scope_instruction=None,
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert ready_calls == 1
+    assert agent_calls == 2
+    reloaded = load_manifest(live_dir / "queued-migration" / "manifest.json")
+    if "unverifiable" in ready_stdout:
+        assert reloaded.awaiting_human_review is True
+    else:
+        assert reloaded.cooldown_until is not None
+    summary = _read_single_run_summary(repo_root)
+    assert sorted(attempt["target"] for attempt in summary["attempts"]) == [
+        "target-0",
+        "target-1",
+    ]
+    events = _read_single_run_events(repo_root)
+    assert not any(event.get("event") == "failure_doc_written" for event in events)
+    snapshots = list(
+        continuous_refactoring.config.failure_snapshots_dir(repo_root).glob("*.md")
+    )
+    assert snapshots == []
+
+
+def test_run_preserves_non_runnable_migration_state_across_source_retry(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    live_dir = repo_root / "migrations"
+    live_dir.mkdir()
+    manifest_path = live_dir / "queued-migration" / "manifest.json"
+    _write_live_manifest(live_dir)
+    continuous_refactoring.run_command(["git", "add", "migrations"], cwd=repo_root)
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "add live migration"],
+        cwd=repo_root,
+    )
+    targets_file = _write_targets_file(tmp_path, 2)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.expand_target_for_classification",
+        lambda target, *_args, **_kwargs: (target, ""),
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        lambda *_args, **_kwargs: "cohesive-cleanup",
+    )
+
+    ready_calls = 0
+
+    def not_ready(**kwargs: object) -> CommandCapture:
+        nonlocal ready_calls
+        ready_calls += 1
+        stdout_path = Path(str(kwargs["stdout_path"]))
+        stderr_path = Path(str(kwargs["stderr_path"]))
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text("ready: no — wait\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return CommandCapture(
+            command=("fake",),
+            returncode=0,
+            stdout="ready: no — wait\n",
+            stderr="",
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+
+    monkeypatch.setattr("continuous_refactoring.phases.maybe_run_agent", not_ready)
+
+    agent_calls = 0
+    retry_saw_cooldown: list[bool] = []
+
+    def touching_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        if agent_calls == 2:
+            retry_saw_cooldown.append(load_manifest(manifest_path).cooldown_until is not None)
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / f"source-{agent_calls}.txt").write_text("x\n", encoding="utf-8")
+        return noop_agent(**kwargs)
+
+    validation_calls = 0
+
+    def fail_first_source_validation(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        nonlocal validation_calls
+        if not _count_validation_calls(stdout_path):
+            return noop_tests(test_command, repo_root, stdout_path, stderr_path)
+        validation_calls += 1
+        if validation_calls == 1:
+            return failing_tests(test_command, repo_root, stdout_path, stderr_path)
+        return noop_tests(test_command, repo_root, stdout_path, stderr_path)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop.run_tests",
+        fail_first_source_validation,
+    )
+
+    args = make_run_loop_args(
+        repo_root,
+        targets=targets_file,
+        max_refactors=2,
+        max_attempts=2,
+        scope_instruction=None,
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert ready_calls == 1
+    assert agent_calls == 3
+    assert retry_saw_cooldown == [True]
+    assert load_manifest(manifest_path).cooldown_until is not None
+
+
+def test_run_runnable_migration_counts_as_one_action(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    live_dir = tmp_path / "live-migrations"
+    live_dir.mkdir()
+    _write_live_manifest(live_dir)
+    targets_file = _write_targets_file(tmp_path, 1)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_migration_tick",
+        lambda *_args, **_kwargs: ("commit", _migration_record("commit")),
+    )
+
+    def trap_source_agent(**_kwargs: object) -> CommandCapture:
+        raise AssertionError("source refactor must not run after migration action")
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", trap_source_agent)
+
+    args = make_run_loop_args(
+        repo_root,
+        targets=targets_file,
+        max_refactors=1,
+        scope_instruction=None,
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    summary = _read_single_run_summary(repo_root)
+    assert exit_code == 0
+    assert summary["counts"]["attempts_started"] == 1
+    assert summary["attempts"][0]["target"] == "queued-migration phase-0-cleanup.md (cleanup)"
 
 
 def test_run_phase_ready_check_failure_logs_phase_ready_role(

@@ -3,6 +3,7 @@ from __future__ import annotations
 import random
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -108,6 +109,56 @@ def _retry_context(record: DecisionRecord) -> str:
     return "\n".join(lines)
 
 
+@dataclass(frozen=True)
+class _PreservedFile:
+    relative_path: Path
+    content: bytes
+
+
+@dataclass(frozen=True)
+class _PreservedWorkspaceTree:
+    files: tuple[_PreservedFile, ...]
+
+    def restore(self, repo_root: Path) -> None:
+        for preserved in self.files:
+            path = repo_root / preserved.relative_path
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(preserved.content)
+
+
+def _preserve_workspace_tree(
+    repo_root: Path,
+    root: Path | None,
+) -> _PreservedWorkspaceTree | None:
+    if root is None:
+        return None
+    try:
+        root.relative_to(repo_root)
+    except ValueError:
+        return None
+    if not root.exists():
+        return None
+
+    files = tuple(
+        _PreservedFile(path.relative_to(repo_root), path.read_bytes())
+        for path in sorted(root.rglob("*"))
+        if path.is_file()
+    )
+    if not files:
+        return None
+    return _PreservedWorkspaceTree(files)
+
+
+def _reset_to_source_baseline(
+    repo_root: Path,
+    revision: str,
+    preserved_workspace: _PreservedWorkspaceTree | None,
+) -> None:
+    revert_to(repo_root, revision)
+    if preserved_workspace is not None:
+        preserved_workspace.restore(repo_root)
+
+
 def _run_refactor_attempt(
     *,
     repo_root: Path,
@@ -124,8 +175,11 @@ def _run_refactor_attempt(
     show_agent_logs: bool,
     show_command_logs: bool,
     commit_message_prefix: str,
+    preserved_workspace: _PreservedWorkspaceTree | None = None,
 ) -> DecisionRecord:
     discard_workspace_changes(repo_root)
+    if preserved_workspace is not None:
+        preserved_workspace.restore(repo_root)
     head_before = get_head_sha(repo_root)
 
     if retry > 1:
@@ -171,7 +225,7 @@ def _run_refactor_attempt(
             level="WARN",
             summary=str(error),
         )
-        revert_to(repo_root, head_before)
+        _reset_to_source_baseline(repo_root, head_before, preserved_workspace)
         agent_status = read_status(
             agent,
             last_message_path=last_message_path,
@@ -217,7 +271,7 @@ def _run_refactor_attempt(
             returncode=agent_result.returncode,
             summary=summary,
         )
-        revert_to(repo_root, head_before)
+        _reset_to_source_baseline(repo_root, head_before, preserved_workspace)
         return DecisionRecord(
             decision="retry",
             retry_recommendation="same-target",
@@ -268,7 +322,7 @@ def _run_refactor_attempt(
             level="WARN",
             summary=str(error),
         )
-        revert_to(repo_root, head_before)
+        _reset_to_source_baseline(repo_root, head_before, preserved_workspace)
         summary, focus = status_summary(
             agent_status,
             fallback=sanitize_text(str(error), repo_root) or str(error),
@@ -307,7 +361,7 @@ def _run_refactor_attempt(
             returncode=validation_result.returncode,
             summary=summary,
         )
-        revert_to(repo_root, head_before)
+        _reset_to_source_baseline(repo_root, head_before, preserved_workspace)
         return DecisionRecord(
             decision="retry",
             retry_recommendation="same-target",
@@ -335,7 +389,7 @@ def _run_refactor_attempt(
     )
 
     if agent_status and agent_status.decision in {"retry", "abandon", "blocked"}:
-        revert_to(repo_root, head_before)
+        _reset_to_source_baseline(repo_root, head_before, preserved_workspace)
         summary, focus = status_summary(
             agent_status,
             fallback=f"agent requested {agent_status.decision}",
@@ -439,23 +493,127 @@ def _resolve_targets_from_args(
     )
 
 
-def _sleep_between_targets(
+def _action_limit(
+    args: argparse.Namespace,
+    targets: list[Target],
+) -> int | None:
+    if args.max_refactors is None and args.targets:
+        return len(targets)
+    if args.max_refactors == 0:
+        return None
+    return args.max_refactors
+
+
+def _has_action_budget(actions_completed: int, action_limit: int | None) -> bool:
+    return action_limit is None or actions_completed < action_limit
+
+
+def _action_banner(action_index: int, action_limit: int | None) -> str:
+    if action_limit is None:
+        return f"\n── Action {action_index} ──"
+    return f"\n── Action {action_index}/{action_limit} ──"
+
+
+def _print_migration_probe(live_dir: Path) -> None:
+    candidates = migration_tick.enumerate_eligible_manifests(
+        live_dir,
+        datetime.now(timezone.utc),
+    )
+    if not candidates:
+        print("No runnable migrations; selecting a target")
+        return
+
+    if len(candidates) > 1:
+        print(f"Examining live migrations: {len(candidates)} eligible")
+        return
+
+    manifest, _manifest_path = candidates[0]
+    print(f"Examining migration: migration/{manifest.name}")
+
+
+class _MigrationProbeArtifacts:
+    def __init__(self, artifacts: RunArtifacts, action_index: int) -> None:
+        self._artifacts = artifacts
+        self.root = artifacts.root / "migration-probes" / f"action-{action_index:03d}"
+
+    def attempt_dir(self, attempt: int, retry: int = 1) -> Path:
+        if attempt < 1:
+            raise ValueError(f"attempt must be >= 1, got {attempt}")
+        if retry < 1:
+            raise ValueError(f"retry must be >= 1, got {retry}")
+        base = self.root / f"attempt-{attempt:03d}"
+        path = base if retry == 1 else base / f"retry-{retry:02d}"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def log_call_started(
+        self,
+        *,
+        attempt: int,
+        retry: int,
+        target: str,
+        call_role: str,
+        phase_reached: str | None = None,
+    ) -> None:
+        self._artifacts.log(
+            "INFO",
+            f"migration call start: {call_role} — {target}",
+            event="migration_call_started",
+            migration_attempt=attempt,
+            retry=retry,
+            target=target,
+            call_role=call_role,
+            phase_reached=phase_reached or call_role,
+        )
+
+    def log_call_finished(
+        self,
+        *,
+        attempt: int,
+        retry: int,
+        target: str,
+        call_role: str,
+        phase_reached: str | None = None,
+        status: str,
+        level: str = "INFO",
+        returncode: int | None = None,
+        summary: str | None = None,
+    ) -> None:
+        self._artifacts.log(
+            level,
+            f"migration call {status}: {call_role} — {target}",
+            event="migration_call_finished",
+            migration_attempt=attempt,
+            retry=retry,
+            target=target,
+            call_role=call_role,
+            phase_reached=phase_reached or call_role,
+            call_status=status,
+            returncode=returncode,
+            summary=summary,
+        )
+
+    def record_commit(self, attempt: int, phase: str, commit_sha: str) -> None:
+        self._artifacts.record_commit(attempt, phase, commit_sha)
+
+
+def _sleep_between_actions(
     sleep_seconds: float,
     *,
     artifacts: RunArtifacts,
-    target_index: int,
-    total_targets: int,
+    action_index: int,
+    has_more_actions: bool,
 ) -> None:
-    if sleep_seconds <= 0 or target_index >= total_targets:
+    if sleep_seconds <= 0 or not has_more_actions:
         return
     artifacts.log(
         "INFO",
-        f"Sleeping {sleep_seconds:g}s before next target",
-        event="sleep_between_targets",
-        attempt=target_index,
+        f"Sleeping {sleep_seconds:g}s before next action",
+        event="sleep_between_actions",
+        attempt=action_index,
         sleep_seconds=sleep_seconds,
     )
-    print(f"Sleeping {sleep_seconds:g}s before next target")
+    print(f"Sleeping {sleep_seconds:g}s before next action")
     time.sleep(sleep_seconds)
 
 
@@ -642,16 +800,12 @@ def run_loop(args: argparse.Namespace) -> int:
     targets = _resolve_targets_from_args(args, repo_root)
     random.shuffle(targets)
 
-    max_refactors = args.max_refactors
-    if max_refactors is None and args.targets:
-        max_refactors = len(targets)
-    if max_refactors and len(targets) > max_refactors:
-        targets = targets[:max_refactors]
-
     fell_back_to_scope = False
     if not targets:
         targets = [_build_target_fallback(args.scope_instruction)]
         fell_back_to_scope = bool(args.extensions or args.globs or args.paths)
+    action_limit = _action_limit(args, targets)
+    live_dir = _resolve_live_migrations_dir(repo_root)
 
     base_prompt = _resolve_base_prompt(args)
     fix_amendment_text = _resolve_fix_amendment_text(args)
@@ -680,7 +834,8 @@ def run_loop(args: argparse.Namespace) -> int:
     final_status = "running"
     error_message: str | None = None
     consecutive_failures = 0
-    total_targets = len(targets)
+    source_index = 0
+    actions_completed = 0
 
     try:
         require_clean_worktree(repo_root)
@@ -697,21 +852,95 @@ def run_loop(args: argparse.Namespace) -> int:
                 f"Baseline validation failed\n{baseline_context}"
             )
 
-        for target_index, target in enumerate(targets, start=1):
-            artifacts.mark_attempt_started(target_index)
+        while (
+            source_index < len(targets)
+            and _has_action_budget(actions_completed, action_limit)
+        ):
+            action_index = actions_completed + 1
+            print(_action_banner(action_index, action_limit))
 
+            if live_dir is not None:
+                _print_migration_probe(live_dir)
+                migration_artifacts = _MigrationProbeArtifacts(artifacts, action_index)
+                migration_outcome, migration_record = migration_tick.try_migration_tick(
+                    live_dir,
+                    taste,
+                    repo_root,
+                    migration_artifacts,
+                    agent=args.agent,
+                    model=args.model,
+                    effort=args.effort,
+                    timeout=timeout,
+                    commit_message_prefix=args.commit_message_prefix,
+                    validation_command=args.validation_command,
+                    max_attempts=max_attempts_effective,
+                    attempt=action_index,
+                    finalize_commit=_finalize_commit,
+                )
+
+                if migration_outcome in {"commit", "abandon"}:
+                    artifacts.mark_attempt_started(action_index)
+                    if migration_record is not None:
+                        persist_decision(
+                            repo_root,
+                            artifacts,
+                            attempt=action_index,
+                            retry=migration_record.retry_used,
+                            validation_command=args.validation_command,
+                            record=migration_record,
+                        )
+                    actions_completed += 1
+                    if migration_outcome == "commit":
+                        consecutive_failures = 0
+                    else:
+                        if migration_record is not None:
+                            print(
+                                "Migration failed: "
+                                f"{migration_record.target} — {migration_record.summary}"
+                            )
+                        consecutive_failures += 1
+                        if consecutive_failures >= max_consecutive:
+                            final_status = "max_consecutive_failures"
+                            raise ContinuousRefactorError(
+                                f"Stopping: {max_consecutive} consecutive failures"
+                            )
+                    _sleep_between_actions(
+                        sleep_seconds,
+                        artifacts=artifacts,
+                        action_index=action_index,
+                        has_more_actions=(
+                            source_index < len(targets)
+                            and _has_action_budget(actions_completed, action_limit)
+                        ),
+                    )
+                    continue
+
+                if migration_outcome == "blocked":
+                    if migration_record is not None:
+                        print(
+                            "Migration blocked for human review: "
+                            f"{migration_record.target} — {migration_record.summary}"
+                        )
+                    print("Selecting a target")
+                elif migration_record is not None:
+                    print(
+                        "No runnable migrations; selecting a target — "
+                        f"{migration_record.summary}"
+                    )
+
+            target = targets[source_index]
+            source_index += 1
+            artifacts.mark_attempt_started(action_index)
             model = target.model_override or args.model
             effort = target.effort_override or args.effort
 
-            print(
-                f"\n── Target {target_index}/{total_targets}: {target.description} ──"
-            )
+            print(f"Target: {target.description}")
             route_result = routing_pipeline.route_and_run(
                 target,
                 taste,
                 repo_root,
                 artifacts,
-                live_dir=_resolve_live_migrations_dir(repo_root),
+                live_dir=live_dir,
                 agent=args.agent,
                 model=model,
                 effort=effort,
@@ -719,8 +948,9 @@ def run_loop(args: argparse.Namespace) -> int:
                 commit_message_prefix=args.commit_message_prefix,
                 validation_command=args.validation_command,
                 max_attempts=max_attempts_effective,
-                attempt=target_index,
+                attempt=action_index,
                 finalize_commit=_finalize_commit,
+                check_migrations=False,
             )
             target = route_result.target
             if route_result.outcome == "commit":
@@ -728,17 +958,21 @@ def run_loop(args: argparse.Namespace) -> int:
                     persist_decision(
                         repo_root,
                         artifacts,
-                        attempt=target_index,
+                        attempt=action_index,
                         retry=route_result.decision_record.retry_used,
                         validation_command=args.validation_command,
                         record=route_result.decision_record,
                     )
                 consecutive_failures = 0
-                _sleep_between_targets(
+                actions_completed += 1
+                _sleep_between_actions(
                     sleep_seconds,
                     artifacts=artifacts,
-                    target_index=target_index,
-                    total_targets=total_targets,
+                    action_index=action_index,
+                    has_more_actions=(
+                        source_index < len(targets)
+                        and _has_action_budget(actions_completed, action_limit)
+                    ),
                 )
                 continue
             if route_result.outcome in {"abandon", "blocked"}:
@@ -746,28 +980,33 @@ def run_loop(args: argparse.Namespace) -> int:
                     persist_decision(
                         repo_root,
                         artifacts,
-                        attempt=target_index,
+                        attempt=action_index,
                         retry=route_result.decision_record.retry_used,
                         validation_command=args.validation_command,
                         record=route_result.decision_record,
                     )
+                actions_completed += 1
                 consecutive_failures += 1
                 if consecutive_failures >= max_consecutive:
                     final_status = "max_consecutive_failures"
                     raise ContinuousRefactorError(
                         f"Stopping: {max_consecutive} consecutive failures"
                     )
-                _sleep_between_targets(
+                _sleep_between_actions(
                     sleep_seconds,
                     artifacts=artifacts,
-                    target_index=target_index,
-                    total_targets=total_targets,
+                    action_index=action_index,
+                    has_more_actions=(
+                        source_index < len(targets)
+                        and _has_action_budget(actions_completed, action_limit)
+                    ),
                 )
                 continue
 
             retry_context: str | None = None
             outcome_record: DecisionRecord | None = None
             retry = 0
+            preserved_workspace = _preserve_workspace_tree(repo_root, live_dir)
 
             while True:
                 retry += 1
@@ -785,7 +1024,7 @@ def run_loop(args: argparse.Namespace) -> int:
                     repo_root=repo_root,
                     artifacts=artifacts,
                     target=target,
-                    attempt=target_index,
+                    attempt=action_index,
                     retry=retry,
                     agent=args.agent,
                     model=model,
@@ -796,6 +1035,7 @@ def run_loop(args: argparse.Namespace) -> int:
                     show_agent_logs=args.show_agent_logs,
                     show_command_logs=args.show_command_logs,
                     commit_message_prefix=args.commit_message_prefix,
+                    preserved_workspace=preserved_workspace,
                 )
                 record_to_persist = effective_record(
                     record,
@@ -811,7 +1051,7 @@ def run_loop(args: argparse.Namespace) -> int:
                         "WARN",
                         f"Exhausted {max_attempts_effective} attempts: {target.description}",
                         event="max_attempts_exhausted",
-                        attempt=target_index,
+                        attempt=action_index,
                         retry=retry,
                         target=target.description,
                         call_role=record.call_role,
@@ -819,7 +1059,7 @@ def run_loop(args: argparse.Namespace) -> int:
                 persist_decision(
                     repo_root,
                     artifacts,
-                    attempt=target_index,
+                    attempt=action_index,
                     retry=retry,
                     validation_command=args.validation_command,
                     record=record_to_persist,
@@ -840,11 +1080,15 @@ def run_loop(args: argparse.Namespace) -> int:
                         f"Stopping: {max_consecutive} consecutive failures"
                     )
 
-            _sleep_between_targets(
+            actions_completed += 1
+            _sleep_between_actions(
                 sleep_seconds,
                 artifacts=artifacts,
-                target_index=target_index,
-                total_targets=total_targets,
+                action_index=action_index,
+                has_more_actions=(
+                    source_index < len(targets)
+                    and _has_action_budget(actions_completed, action_limit)
+                ),
             )
 
         final_status = "completed"

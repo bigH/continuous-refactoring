@@ -136,25 +136,27 @@ def route_and_run(
     max_attempts: int | None,
     attempt: int,
     finalize_commit: _FinalizeCommit,
+    check_migrations: bool = True,
 ) -> RouteResult:
     if live_dir is None:
         return RouteResult(outcome="not-routed", target=target)
 
-    migration_result, migration_record = _try_migration_tick(
-        live_dir, taste, repo_root, artifacts,
-        agent=agent, model=model, effort=effort,
-        timeout=timeout, commit_message_prefix=commit_message_prefix,
-        validation_command=validation_command,
-        max_attempts=max_attempts,
-        attempt=attempt,
-        finalize_commit=finalize_commit,
-    )
-    if migration_result != "not-routed":
-        return RouteResult(
-            outcome=migration_result,
-            target=target,
-            decision_record=migration_record,
+    if check_migrations:
+        migration_result, migration_record = _try_migration_tick(
+            live_dir, taste, repo_root, artifacts,
+            agent=agent, model=model, effort=effort,
+            timeout=timeout, commit_message_prefix=commit_message_prefix,
+            validation_command=validation_command,
+            max_attempts=max_attempts,
+            attempt=attempt,
+            finalize_commit=finalize_commit,
         )
+        if migration_result != "not-routed":
+            return RouteResult(
+                outcome=migration_result,
+                target=target,
+                decision_record=migration_record,
+            )
 
     target, planning_context = expand_target_for_classification(
         target,

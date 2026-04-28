@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal
+from typing import TYPE_CHECKING, Callable, Literal
 
 if TYPE_CHECKING:
     from continuous_refactoring.artifacts import RunArtifacts
@@ -45,6 +45,22 @@ _EFFORT_REASON_LINE_RE = re.compile(
 class PlanningOutcome:
     status: PlanningStatus
     reason: str
+
+
+@dataclass(frozen=True)
+class _PlanningStageSpec:
+    prompt_stage: PlanningStage
+    stage_label: str
+    context_builder: Callable[["_PlanningStageState"], str]
+    rediscover_phases: bool = False
+
+
+@dataclass
+class _PlanningStageState:
+    extra_context: str
+    approach_listing: str = ""
+    pick_stdout: str = ""
+    review_stdout: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -318,6 +334,45 @@ def _approach_listing(live_dir: Path, migration_name: str) -> str:
     )
 
 
+def _run_planning_pipeline_stage(
+    spec: _PlanningStageSpec,
+    state: _PlanningStageState,
+    manifest: MigrationManifest,
+    manifest_path: Path,
+    *,
+    migration_name: str,
+    target: str,
+    taste: str,
+    repo_root: Path,
+    artifacts: RunArtifacts,
+    mig_root: Path,
+    live_dir: Path,
+    attempt: int,
+    retry: int,
+    agent_kw: dict[str, object],
+) -> tuple[MigrationManifest, str]:
+    stdout = _run_stage(
+        spec.prompt_stage,
+        migration_name,
+        target,
+        taste,
+        spec.context_builder(state),
+        repo_root,
+        artifacts,
+        attempt=attempt,
+        retry=retry,
+        **agent_kw,
+    )
+    if spec.stage_label == "approaches":
+        state.approach_listing = _approach_listing(live_dir, migration_name)
+    elif spec.stage_label == "pick-best":
+        state.pick_stdout = stdout
+    elif spec.stage_label == "review":
+        state.review_stdout = stdout
+    touch_kw = {"mig_root": mig_root} if spec.rediscover_phases else {}
+    return _touch_manifest(manifest, manifest_path, **touch_kw), stdout
+
+
 def _touch_manifest(
     manifest: MigrationManifest,
     manifest_path: Path,
@@ -389,52 +444,69 @@ def run_planning(
         effort_metadata=effort_metadata,
         effort_budget=effort_budget,
     )
-
-    # Stage 1: approaches
-    _run_stage(
-        "approaches", migration_name, target, taste,
-        _build_context(target, mig_relative, extra_context),
-        repo_root, artifacts, attempt=attempt, retry=retry, **agent_kw,
-    )
-    manifest = _touch_manifest(manifest, manifest_path)
-
-    # Stage 2: pick-best
-    approach_listing = _approach_listing(live_dir, migration_name)
-    pick_stdout = _run_stage(
-        "pick-best", migration_name, target, taste,
-        _build_context(
-            target,
-            mig_relative,
-            _join_nonempty(extra_context, f"Approaches:\n{approach_listing}"),
-        ),
-        repo_root, artifacts, attempt=attempt, retry=retry, **agent_kw,
-    )
-    manifest = _touch_manifest(manifest, manifest_path)
-
-    # Stage 3: expand
-    _run_stage(
-        "expand", migration_name, target, taste,
-        _build_context(
-            target,
-            mig_relative,
-            _join_nonempty(extra_context, f"Chosen approach:\n{pick_stdout}"),
-        ),
-        repo_root, artifacts, attempt=attempt, retry=retry, **agent_kw,
-    )
-    manifest = _touch_manifest(manifest, manifest_path, mig_root=mig_root)
-
-    # Stage 4: review
     plan_path = mig_root / "plan.md"
-    review_stdout = _run_stage(
-        "review", migration_name, target, taste,
-        _build_context(
-            target,
-            mig_relative,
-            _join_nonempty(extra_context, f"Plan:\n{_plan_text(plan_path)}"),
+    state = _PlanningStageState(extra_context=extra_context)
+    always_run_stages = (
+        _PlanningStageSpec(
+            prompt_stage="approaches",
+            stage_label="approaches",
+            context_builder=lambda current: _build_context(
+                target, mig_relative, current.extra_context
+            ),
         ),
-        repo_root, artifacts, attempt=attempt, retry=retry, **agent_kw,
+        _PlanningStageSpec(
+            prompt_stage="pick-best",
+            stage_label="pick-best",
+            context_builder=lambda current: _build_context(
+                target,
+                mig_relative,
+                _join_nonempty(
+                    current.extra_context,
+                    f"Approaches:\n{current.approach_listing}",
+                ),
+            ),
+        ),
+        _PlanningStageSpec(
+            prompt_stage="expand",
+            stage_label="expand",
+            context_builder=lambda current: _build_context(
+                target,
+                mig_relative,
+                _join_nonempty(
+                    current.extra_context,
+                    f"Chosen approach:\n{current.pick_stdout}",
+                ),
+            ),
+            rediscover_phases=True,
+        ),
+        _PlanningStageSpec(
+            prompt_stage="review",
+            stage_label="review",
+            context_builder=lambda current: _build_context(
+                target,
+                mig_relative,
+                _join_nonempty(current.extra_context, f"Plan:\n{_plan_text(plan_path)}"),
+            ),
+        ),
     )
-    manifest = _touch_manifest(manifest, manifest_path)
+    for spec in always_run_stages:
+        manifest, _ = _run_planning_pipeline_stage(
+            spec,
+            state,
+            manifest,
+            manifest_path,
+            migration_name=migration_name,
+            target=target,
+            taste=taste,
+            repo_root=repo_root,
+            artifacts=artifacts,
+            mig_root=mig_root,
+            live_dir=live_dir,
+            attempt=attempt,
+            retry=retry,
+            agent_kw=agent_kw,
+        )
+    review_stdout = state.review_stdout
 
     # Stage 5: revise + review again (only if first review had findings)
     if _review_has_findings(review_stdout):

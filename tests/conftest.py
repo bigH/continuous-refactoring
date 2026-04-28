@@ -107,6 +107,15 @@ def init_repo(path: Path) -> None:
     continuous_refactoring.run_command(["git", "commit", "-m", "init"], cwd=path)
 
 
+def init_repo_with_temp_home(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, repo_name: str = "project"
+) -> Path:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / repo_name
+    init_repo(repo)
+    return repo
+
+
 def init_taste_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     repo = tmp_path / "project"
@@ -250,6 +259,41 @@ def _default_validation_command(repo_root: Path) -> str:
     return f"{sys.executable} {test_script}"
 
 
+def _build_run_args(
+    repo_root: Path,
+    *,
+    agent: str,
+    model: str,
+    effort: str,
+    validation_command: str | None,
+    scope_instruction: str | None,
+    timeout: int | None,
+    refactoring_prompt: Path | None,
+    extensions: str | None,
+    globs: str | None,
+    targets: Path | None,
+    paths: str | None,
+) -> dict[str, object]:
+    if validation_command is None:
+        validation_command = _default_validation_command(repo_root)
+    return {
+        "agent": agent,
+        "model": model,
+        "effort": effort,
+        "validation_command": validation_command,
+        "extensions": extensions,
+        "globs": globs,
+        "targets": targets,
+        "paths": paths,
+        "scope_instruction": scope_instruction,
+        "timeout": timeout,
+        "refactoring_prompt": refactoring_prompt,
+        "show_agent_logs": False,
+        "show_command_logs": False,
+        "repo_root": repo_root,
+    }
+
+
 def make_run_once_args(
     repo_root: Path,
     *,
@@ -265,24 +309,22 @@ def make_run_once_args(
     targets: Path | None = None,
     paths: str | None = None,
 ) -> argparse.Namespace:
-    if validation_command is None:
-        validation_command = _default_validation_command(repo_root)
     return argparse.Namespace(
-        agent=agent,
-        model=model,
-        effort=effort,
-        validation_command=validation_command,
-        extensions=extensions,
-        globs=globs,
-        targets=targets,
-        paths=paths,
-        scope_instruction=scope_instruction,
-        timeout=timeout,
-        refactoring_prompt=refactoring_prompt,
+        **_build_run_args(
+            repo_root=repo_root,
+            agent=agent,
+            model=model,
+            effort=effort,
+            validation_command=validation_command,
+            scope_instruction=scope_instruction,
+            timeout=timeout,
+            refactoring_prompt=refactoring_prompt,
+            extensions=extensions,
+            globs=globs,
+            targets=targets,
+            paths=paths,
+        ),
         fix_prompt=None,
-        show_agent_logs=False,
-        show_command_logs=False,
-        repo_root=repo_root,
     )
 
 
@@ -310,32 +352,34 @@ def make_run_loop_args(
     show_command_logs: bool = False,
     focus_on_live_migrations: bool = False,
 ) -> argparse.Namespace:
-    if validation_command is None:
-        validation_command = _default_validation_command(repo_root)
-
-    return argparse.Namespace(
+    args = _build_run_args(
+        repo_root=repo_root,
         agent=agent,
         model=model,
         effort=effort,
         validation_command=validation_command,
+        scope_instruction=scope_instruction,
+        timeout=timeout,
+        refactoring_prompt=refactoring_prompt,
         extensions=extensions,
         globs=globs,
         targets=targets,
         paths=paths,
-        scope_instruction=scope_instruction,
-        timeout=timeout,
-        refactoring_prompt=refactoring_prompt,
-        fix_prompt=fix_prompt,
-        show_agent_logs=show_agent_logs,
-        show_command_logs=show_command_logs,
-        repo_root=repo_root,
-        max_attempts=max_attempts,
-        max_refactors=max_refactors,
-        commit_message_prefix=commit_message_prefix,
-        max_consecutive_failures=max_consecutive_failures,
-        sleep=sleep,
-        focus_on_live_migrations=focus_on_live_migrations,
     )
+    args.update(
+        {
+            "fix_prompt": fix_prompt,
+            "show_agent_logs": show_agent_logs,
+            "show_command_logs": show_command_logs,
+            "max_attempts": max_attempts,
+            "max_refactors": max_refactors,
+            "commit_message_prefix": commit_message_prefix,
+            "max_consecutive_failures": max_consecutive_failures,
+            "sleep": sleep,
+            "focus_on_live_migrations": focus_on_live_migrations,
+        }
+    )
+    return argparse.Namespace(**args)
 
 
 # ---------------------------------------------------------------------------

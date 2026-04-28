@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from conftest import init_repo as _init_repo
+from conftest import init_repo, init_repo_with_temp_home
 
 from continuous_refactoring.cli import _handle_init, _handle_taste
 from continuous_refactoring.config import (
@@ -15,18 +15,6 @@ from continuous_refactoring.config import (
     load_manifest,
     register_project,
 )
-
-
-def _init_repo_with_temp_home(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    repo_name: str = "project",
-) -> Path:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    repo = tmp_path / repo_name
-    _init_repo(repo)
-    return repo
-
 
 def _xdg_home(tmp_path: Path) -> Path:
     return tmp_path / "xdg"
@@ -54,7 +42,7 @@ def _single_manifest_entry() -> ProjectEntry:
 def test_init_creates_manifest_entry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo = _init_repo_with_temp_home(tmp_path, monkeypatch)
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
 
     args = argparse.Namespace(path=repo)
     _handle_init(args)
@@ -67,7 +55,7 @@ def test_init_creates_manifest_entry(
 def test_init_creates_project_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo = _init_repo_with_temp_home(tmp_path, monkeypatch)
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
 
     args = argparse.Namespace(path=repo)
     _handle_init(args)
@@ -80,7 +68,7 @@ def test_init_creates_project_dir(
 def test_init_creates_taste_template(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo = _init_repo_with_temp_home(tmp_path, monkeypatch)
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
 
     args = argparse.Namespace(path=repo)
     _handle_init(args)
@@ -94,7 +82,7 @@ def test_init_creates_taste_template(
 def test_init_idempotent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo = _init_repo_with_temp_home(tmp_path, monkeypatch)
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
     args = argparse.Namespace(path=repo)
 
     _handle_init(args)
@@ -114,7 +102,7 @@ def test_init_with_explicit_path(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo = _init_repo_with_temp_home(
+    repo = init_repo_with_temp_home(
         tmp_path,
         monkeypatch,
         repo_name="explicit-project",
@@ -135,7 +123,7 @@ def test_init_with_explicit_path(
 def test_init_detects_git_remote(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    repo = _init_repo_with_temp_home(tmp_path, monkeypatch, repo_name="with-remote")
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch, repo_name="with-remote")
     remote_url = "https://example.com/org/repo.git"
     subprocess.run(
         ["git", "remote", "add", "origin", remote_url],
@@ -155,7 +143,7 @@ def test_init_live_migrations_dir_creates_and_stores(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo = _init_repo_with_temp_home(tmp_path, monkeypatch)
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
 
     args = argparse.Namespace(path=repo, live_migrations_dir=Path(".migrations"))
     _handle_init(args)
@@ -183,7 +171,7 @@ def test_init_live_migrations_dir_rejects_outside_repo(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo = _init_repo_with_temp_home(tmp_path, monkeypatch)
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
 
     args = argparse.Namespace(path=repo, live_migrations_dir=Path("../outside"))
     with pytest.raises(SystemExit) as exc_info:
@@ -204,7 +192,7 @@ def test_taste_prints_project_path(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo = _init_repo_with_temp_home(tmp_path, monkeypatch)
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
     monkeypatch.chdir(repo)
 
     register_project(repo)
@@ -222,7 +210,7 @@ def test_taste_creates_file_if_missing(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    repo = _init_repo_with_temp_home(tmp_path, monkeypatch)
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
     monkeypatch.chdir(repo)
 
     project = register_project(repo)
@@ -245,7 +233,7 @@ def test_taste_global_flag(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    _init_repo_with_temp_home(tmp_path, monkeypatch, repo_name="project")
+    init_repo_with_temp_home(tmp_path, monkeypatch, repo_name="project")
 
     args = argparse.Namespace(global_=True)
     _handle_taste(args)
@@ -264,7 +252,7 @@ def test_taste_errors_without_init(
 ) -> None:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     repo = tmp_path / "unregistered"
-    _init_repo(repo)
+    init_repo(repo)
     monkeypatch.chdir(repo)
 
     args = argparse.Namespace(global_=False)

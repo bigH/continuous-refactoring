@@ -16,6 +16,7 @@ from continuous_refactoring.config import default_taste_text, register_project
 
 from conftest import (
     assert_single_prompt,
+    assert_single_run_final_status,
     make_run_loop_args,
     make_run_once_args,
     noop_agent,
@@ -27,15 +28,6 @@ from conftest import (
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
-
-
-def _assert_final_status(tmp_path: Path, expected_status: str) -> None:
-    run_root = tmp_path / "tmpdir" / "continuous-refactoring"
-    run_dirs = list(run_root.iterdir())
-    assert len(run_dirs) == 1
-    summary = json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
-    assert summary["final_status"] == expected_status
-
 
 def test_e2e_init_then_run_once(
     run_once_env: Path,
@@ -66,7 +58,7 @@ def test_e2e_init_then_run_once(
     ).stdout
     assert "continuous refactor" in log_output
 
-    _assert_final_status(tmp_path, "completed")
+    assert_single_run_final_status(run_once_env, "completed")
 
 
 def test_e2e_init_then_run_with_failures(
@@ -209,7 +201,7 @@ def test_e2e_ctrl_c_cleanup(
     captured = capsys.readouterr()
     assert "Artifact logs:" in captured.err
 
-    _assert_final_status(tmp_path, "interrupted")
+    assert_single_run_final_status(run_once_env, "interrupted")
 
 
 def test_e2e_without_init_uses_default_taste(

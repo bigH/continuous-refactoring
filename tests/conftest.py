@@ -86,6 +86,11 @@ def read_single_run_events(repo_root: Path) -> list[dict[str, object]]:
     ]
 
 
+def assert_single_run_final_status(repo_root: Path, expected_status: str) -> None:
+    summary = read_single_run_summary(repo_root)
+    assert summary["final_status"] == expected_status
+
+
 def make_taste_agent_writer(
     *,
     content: str | None = None,

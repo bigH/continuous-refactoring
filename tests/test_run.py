@@ -26,25 +26,9 @@ from conftest import (
     make_run_loop_args,
     noop_agent,
     noop_tests,
+    read_single_run_events as _read_single_run_events,
+    read_single_run_summary as _read_single_run_summary,
 )
-
-
-def _read_single_run_summary(repo_root: Path) -> dict[str, object]:
-    run_root = repo_root.parent / "tmpdir" / "continuous-refactoring"
-    run_dirs = list(run_root.iterdir())
-    assert len(run_dirs) == 1
-    return json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
-
-
-def _read_single_run_events(repo_root: Path) -> list[dict[str, object]]:
-    run_root = repo_root.parent / "tmpdir" / "continuous-refactoring"
-    run_dirs = list(run_root.iterdir())
-    assert len(run_dirs) == 1
-    return [
-        json.loads(line)
-        for line in (run_dirs[0] / "events.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
 
 
 def _write_live_manifest(

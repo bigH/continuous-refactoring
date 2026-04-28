@@ -1,0 +1,37 @@
+{
+  "awaiting_human_review": false,
+  "cooldown_until": null,
+  "created_at": "2026-04-28T04:55:20.623-07:00",
+  "current_phase": "stage-flow-characterization",
+  "human_review_reason": null,
+  "last_touch": "2026-04-28T05:06:33.409-07:00",
+  "name": "src-continuous-refactoring-planning-py-20260428T045520",
+  "phases": [
+    {
+      "done": false,
+      "effort_reason": null,
+      "file": "phase-1-stage-flow-characterization.md",
+      "name": "stage-flow-characterization",
+      "precondition": "- `migrations/src-continuous-refactoring-planning-py-20260428T045520/plan.md` exists and names `approaches/stage-pipeline-tightening.md` as the chosen approach. - `src/continuous_refactoring/planning.py` still contains the live planning orchestration for approaches, selection, expansion, review, final review, and the revise/review-2 branch. - No phase in this migration is marked done in `manifest.json`.",
+      "required_effort": null
+    },
+    {
+      "done": false,
+      "effort_reason": "This phase changes the main planning control flow, where a subtle stage-order or stale-context regression would break migration generation without obvious local failures.",
+      "file": "phase-2-explicit-stage-pipeline.md",
+      "name": "explicit-stage-pipeline",
+      "precondition": "- Phase 1 is complete and its characterization tests are present. - `tests/test_planning.py` currently protects stage order, revise-path behavior, context reload timing, and manifest refresh timing. - `src/continuous_refactoring/planning.py` still uses the pre-refactor orchestration flow targeted by this migration.",
+      "required_effort": "medium"
+    },
+    {
+      "done": false,
+      "effort_reason": null,
+      "file": "phase-3-helper-tightening-and-deletion.md",
+      "name": "helper-tightening-and-deletion",
+      "precondition": "- Phase 2 is complete and `run_planning()` already uses the explicit stage pipeline introduced there. - The repository is green on full `uv run pytest` after the Phase 2 refactor. - The only remaining planned work is semantics-preserving cleanup inside the existing `planning.py` pipeline shape, not another control-flow rewrite or contract change.",
+      "required_effort": null
+    }
+  ],
+  "status": "ready",
+  "wake_up_on": null
+}

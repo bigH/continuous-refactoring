@@ -2,9 +2,9 @@
   "awaiting_human_review": false,
   "cooldown_until": null,
   "created_at": "2026-04-27T21:45:08.114-07:00",
-  "current_phase": "manifest-io-contract",
+  "current_phase": "project-resolution-hygiene",
   "human_review_reason": null,
-  "last_touch": "2026-04-27T21:50:57.949-07:00",
+  "last_touch": "2026-04-27T21:54:50.664-07:00",
   "name": "src-continuous-refactoring-config-py-20260427T214508",
   "phases": [
     {
@@ -14,7 +14,7 @@
       "precondition": "- `tests/test_config.py` currently passes. - `src/continuous_refactoring/config.py` has no uncommitted edits in this branch. - `tests/test_config.py` is the only file modified before this phase begins."
     },
     {
-      "done": false,
+      "done": true,
       "file": "phase-2-manifest-io-contract.md",
       "name": "manifest-io-contract",
       "precondition": "- Phase 1 is marked complete in the migration manifest. - `uv run pytest tests/test_config.py` is green before edits. - `src/continuous_refactoring/config.py` contains only production edits introduced in this phase. - The public config API surface before this phase includes these names in `__all__`: `find_project`, `load_config_version`, `load_manifest`, `load_taste`, `register_project`, `resolve_live_migrations_dir`, `resolve_project`."

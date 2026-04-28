@@ -107,7 +107,26 @@ def _load_manifest_payload() -> dict[str, object]:
     path = manifest_path()
     if not path.exists():
         return {}
-    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw_text = _read_manifest_text()
+    return _parse_manifest_payload(raw_text)
+
+
+def _read_manifest_text() -> str:
+    try:
+        return manifest_path().read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ContinuousRefactorError(
+            "Manifest file could not be read."
+        ) from exc
+
+
+def _parse_manifest_payload(text: str) -> dict[str, object]:
+    try:
+        raw = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise ContinuousRefactorError(
+            "Manifest file is malformed: invalid JSON."
+        ) from exc
     if not isinstance(raw, dict):
         raise ContinuousRefactorError(
             "Manifest file is malformed: expected a JSON object."

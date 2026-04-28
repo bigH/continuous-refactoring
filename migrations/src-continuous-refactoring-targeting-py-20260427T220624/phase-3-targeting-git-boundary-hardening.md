@@ -9,7 +9,7 @@ Standardize failure handling for tracked-file enumeration so git subprocess fail
 - `tests/test_targeting.py`
 
 ## Instructions
-1. In `targeting.py`, replace direct subprocess-based tracked-file reads inside `list_tracked_files()` with the repository git boundary in `git.run_command(...)`.
+1. In `targeting.py`, replace direct subprocess-based tracked-file reads inside `list_tracked_files()` with the repository git boundary (`continuous_refactoring.git.run_command`, imported or module-qualified).
 2. Add module-local context when git enumeration fails and preserve the original exception via `from` (`ContinuousRefactorError` nesting).
 3. Keep non-fatal semantics for missing matches:
    - no patterns -> empty tuple
@@ -19,8 +19,9 @@ Standardize failure handling for tracked-file enumeration so git subprocess fail
 
 ## Precondition
 - Phase 2 is marked complete in the migration manifest.
-- `rg -n \"parse_paths_arg\\(\" src/continuous_refactoring/loop.py` reports only callsite usage, confirming runtime targets now flow through the boundary for all callers.
-- `rg -n \"list_tracked_files\\(\" src/continuous_refactoring/targeting.py` resolves to exactly one implementation path.
+- `rg -n \"def _parse_paths_arg\\(\" src/continuous_refactoring/loop.py` returns no matches, confirming Phase 2 removed loop-local path parsing.
+- `rg -n \"parse_paths_arg\\(\" src/continuous_refactoring/loop.py` reports only delegated usage from the shared target resolver.
+- `rg -n \"def list_tracked_files\\(\" src/continuous_refactoring/targeting.py` finds the tracked-file enumeration implementation that this phase hardens.
 
 ## Definition of Done
 - `list_tracked_files()` uses the git command boundary and wraps failures with nested context at the targeting boundary.
@@ -33,5 +34,5 @@ Standardize failure handling for tracked-file enumeration so git subprocess fail
 
 ## Validation steps
 - Run: `uv run pytest tests/test_targeting.py`
-- Confirm that a failing git enumeration path raises `ContinuousRefactorError` with the original cause (`GitCommandError` from `git.run_command`) where applicable.
-- Confirm by inspection that tracked-file reads now flow through `git.run_command` and no duplicate subprocess paths exist in `targeting.py`.
+- Confirm that a failing git enumeration path raises `ContinuousRefactorError` with the original cause (`GitCommandError` from the git command boundary) where applicable.
+- Confirm by inspection that tracked-file reads now flow through the repository git command boundary and no duplicate subprocess paths exist in `targeting.py`.

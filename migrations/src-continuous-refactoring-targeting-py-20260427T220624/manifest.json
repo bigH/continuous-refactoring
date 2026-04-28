@@ -20,7 +20,7 @@
       "effort_reason": null,
       "file": "phase-2-loop-delegates-targeting-parse.md",
       "name": "loop-delegates-targeting-parse",
-      "precondition": "- `phase-1-targeting-parse-foundation.md` is marked complete in the migration manifest. - `rg -n \\\"def parse_paths_arg\\\\(\\\" src/continuous_refactoring/targeting.py` finds the parser in `targeting.py`. - `rg -n \\\"def _parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` finds the local parser that this phase removes. - `rg -n \\\"_resolve_targets_from_args\\\\(\\\" src/continuous_refactoring/loop.py` matches one call path for argument resolution.",
+      "precondition": "- `phase-1-targeting-parse-foundation.md` is marked complete in the migration manifest. - `rg -n \\\"def parse_paths_arg\\\\(\\\" src/continuous_refactoring/targeting.py` finds the parser in `targeting.py`. - `rg -n \\\"def _parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` finds the local parser that this phase removes. - `rg -n \\\"_resolve_targets_from_args\\\\(\\\" src/continuous_refactoring/loop.py` finds the shared helper definition plus the existing `run_once()` and `run_loop()` callsites, confirming both entrypoints already route through one resolver before this phase delegates path parsing.",
       "required_effort": null
     },
     {
@@ -28,7 +28,7 @@
       "effort_reason": null,
       "file": "phase-3-targeting-git-boundary-hardening.md",
       "name": "targeting-git-boundary-hardening",
-      "precondition": "- Phase 2 is marked complete in the migration manifest. - `rg -n \\\"parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` reports only callsite usage, confirming runtime targets now flow through the boundary for all callers. - `rg -n \\\"list_tracked_files\\\\(\\\" src/continuous_refactoring/targeting.py` resolves to exactly one implementation path.",
+      "precondition": "- Phase 2 is marked complete in the migration manifest. - `rg -n \\\"def _parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` returns no matches, confirming Phase 2 removed loop-local path parsing. - `rg -n \\\"parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` reports only delegated usage from the shared target resolver. - `rg -n \\\"def list_tracked_files\\\\(\\\" src/continuous_refactoring/targeting.py` finds the tracked-file enumeration implementation that this phase hardens.",
       "required_effort": null
     },
     {
@@ -36,7 +36,7 @@
       "effort_reason": null,
       "file": "phase-4-targeting-surface-regression-lock.md",
       "name": "targeting-surface-regression-lock",
-      "precondition": "- Phases 1, 2, and 3 are marked complete in the migration manifest. - `rg -n \\\"parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` shows only callsite usage from `targeting`. - `rg -n \\\"_parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` returns no matches.",
+      "precondition": "- Phases 1, 2, and 3 are marked complete in the migration manifest. - `rg -n \\\"parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` shows only callsite usage from `targeting`. - `rg -n \\\"_parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` returns no matches. - `rg -n \\\"run_command\\\\(\\\" src/continuous_refactoring/targeting.py` finds tracked-file enumeration flowing through the repository git boundary. - `rg -n \\\"subprocess\\\\.run\\\\(\\\" src/continuous_refactoring/targeting.py` returns no matches.",
       "required_effort": null
     }
   ],

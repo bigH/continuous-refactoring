@@ -27,6 +27,8 @@ Lock in regression coverage across CLI, loop, and planning surfaces after in-pla
 - Phases 1, 2, and 3 are marked complete in the migration manifest.
 - `rg -n \"parse_paths_arg\\(\" src/continuous_refactoring/loop.py` shows only callsite usage from `targeting`.
 - `rg -n \"_parse_paths_arg\\(\" src/continuous_refactoring/loop.py` returns no matches.
+- `rg -n \"run_command\\(\" src/continuous_refactoring/targeting.py` finds tracked-file enumeration flowing through the repository git boundary.
+- `rg -n \"subprocess\\.run\\(\" src/continuous_refactoring/targeting.py` returns no matches.
 
 ## Definition of Done
 - Focused cross-surface targeting regression suite for this phase passes.

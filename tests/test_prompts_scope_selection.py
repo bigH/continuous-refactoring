@@ -134,6 +134,17 @@ def test_prompt_preserves_taste_section() -> None:
     assert f"## Taste\n{_TASTE}" in prompt
 
 
+def test_prompt_renders_candidate_detail_sections() -> None:
+    prompt = compose_scope_selection_prompt(_target(), _candidates(("local-cluster",)), _TASTE)
+
+    assert "## Candidates" in prompt
+    assert "### local-cluster" in prompt
+    assert "Files:" in prompt
+    assert "Cluster labels:" in prompt
+    assert "Evidence:" in prompt
+    assert "Likely validation surfaces:" in prompt
+
+
 def test_describe_scope_candidate_returns_readable_block() -> None:
     formatted = describe_scope_candidate(_candidate("local-cluster"))
 

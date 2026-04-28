@@ -73,7 +73,9 @@ def parse_scope_selection(
             raise ContinuousRefactorError(
                 f"Selection chose unavailable candidate: {kind!r}"
             )
-        reason = match.group(2).strip() if match.group(2) else kind
+        reason = match.group(2).strip() if match.group(2) else ""
+        if not reason:
+            reason = kind
         return ScopeSelection(kind=kind, reason=reason)
     raise ContinuousRefactorError(
         f"Scope selection produced unrecognised output: {non_blank[-1]!r}"

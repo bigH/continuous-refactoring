@@ -253,8 +253,7 @@ def test_collect_package_exports_reports_symbol_and_module_provenance() -> None:
     ):
         continuous_refactoring.collect_package_exports((module_a, module_b))
 
-    assert hasattr(continuous_refactoring, "dupe")
-    del continuous_refactoring.dupe
+    assert not hasattr(continuous_refactoring, "dupe")
 
 
 def test_collect_package_exports_non_duplicate_path_remains_unchanged() -> None:

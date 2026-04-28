@@ -4,7 +4,10 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
-from continuous_refactoring.prompts import describe_scope_candidate
+import pytest
+
+import continuous_refactoring.scope_expansion as scope_expansion
+from continuous_refactoring.artifacts import ContinuousRefactorError
 from continuous_refactoring.scope_candidates import ScopeCandidate, ScopeCandidateKind
 from continuous_refactoring.scope_expansion import (
     ScopeSelection,
@@ -53,16 +56,6 @@ def test_scope_candidate_to_target_replaces_target_files() -> None:
         files=("README.md", "src/expanded.py"),
         provenance="globs",
     )
-
-
-def test_describe_scope_candidate_returns_readable_block() -> None:
-    candidate = _candidate("local-cluster")
-
-    formatted = describe_scope_candidate(candidate)
-
-    assert formatted.startswith("Selected scope candidate: local-cluster")
-    assert "- README.md" in formatted
-    assert "- src/expanded.py" in formatted
 
 
 def test_select_scope_candidate_single_candidate_writes_selection_logs(
@@ -115,4 +108,38 @@ def test_write_scope_expansion_artifacts_records_payload(tmp_path: Path) -> None
     }
     assert payload["bypass_reason"] is None
     assert len(payload["candidates"]) == 2
+    assert payload["candidates"][0] == {
+        "kind": "seed",
+        "files": ["README.md", "src/expanded.py"],
+        "cluster_labels": ["README.md", "src"],
+        "evidence_lines": ["seed target"],
+        "validation_surfaces": ["README.md"],
+    }
     assert payload["selection"] == {"kind": "local-cluster", "reason": "clustered evidence"}
+
+
+def test_select_scope_candidate_surfaces_parser_boundary_errors(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target = Target(description="clean up", files=("README.md",), provenance="globs")
+    candidates = (_candidate("seed"), _candidate("local-cluster"))
+    artifacts = SimpleNamespace(root=tmp_path)
+
+    def fake_run_agent(**_: object) -> SimpleNamespace:
+        return SimpleNamespace(returncode=0, stdout="pick local cluster\n")
+
+    monkeypatch.setattr(scope_expansion, "maybe_run_agent", fake_run_agent)
+
+    with pytest.raises(ContinuousRefactorError, match="unrecognised output"):
+        select_scope_candidate(
+            target,
+            candidates,
+            "taste",
+            tmp_path,
+            artifacts,
+            agent="codex",
+            model="gpt-5.5",
+            effort="low",
+            timeout=None,
+        )

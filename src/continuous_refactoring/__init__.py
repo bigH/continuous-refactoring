@@ -43,6 +43,7 @@ _SUBMODULES: tuple[ModuleType, ...] = _PACKAGE_EXPORT_MODULES
 def collect_package_exports(modules: tuple[ModuleType, ...]) -> tuple[str, ...]:
     exports: list[str] = []
     exporters: dict[str, str] = {}
+    resolved_exports: dict[str, object] = {}
     for module in modules:
         module_name = module.__name__
         for name in module.__all__:
@@ -53,8 +54,9 @@ def collect_package_exports(modules: tuple[ModuleType, ...]) -> tuple[str, ...]:
                     f"conflicting module: {module_name})"
                 )
             exporters[name] = module_name
-            globals()[name] = getattr(module, name)
+            resolved_exports[name] = getattr(module, name)
             exports.append(name)
+    globals().update(resolved_exports)
     return tuple(exports)
 
 

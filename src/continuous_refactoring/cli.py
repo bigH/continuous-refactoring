@@ -14,7 +14,13 @@ __all__ = [
 
 from continuous_refactoring.agent import run_agent_interactive_until_settled
 from continuous_refactoring.artifacts import ContinuousRefactorError
-from continuous_refactoring.effort import EFFORT_TIERS, parse_effort_arg, resolve_effort_budget
+from continuous_refactoring.effort import (
+    DEFAULT_EFFORT,
+    DEFAULT_MAX_ALLOWED_EFFORT,
+    EFFORT_TIERS,
+    parse_effort_arg,
+    resolve_effort_budget,
+)
 from continuous_refactoring.loop import (
     run_loop,
     run_migrations_focused_loop,
@@ -27,18 +33,6 @@ _GLOBAL_TASTE_WARNING = (
     "warning: global taste is out of date — "
     "run 'continuous-refactoring taste --upgrade' to update."
 )
-
-
-class _DefaultEffortAction(argparse.Action):
-    def __call__(
-        self,
-        parser: argparse.ArgumentParser,
-        namespace: argparse.Namespace,
-        values: str | None,
-        option_string: str | None = None,
-    ) -> None:
-        setattr(namespace, self.dest, values)
-        setattr(namespace, "effort", values)
 
 
 def parse_max_attempts(value: str) -> int:
@@ -72,20 +66,17 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--model", required=True, help="Model name.")
     parser.add_argument(
         "--default-effort",
-        "--effort",
-        dest="default_effort",
-        required=True,
+        default=DEFAULT_EFFORT,
         type=parse_effort_arg,
-        action=_DefaultEffortAction,
         metavar="{" + ",".join(EFFORT_TIERS) + "}",
-        help="Default effort level. --effort is a backward-compatible alias.",
+        help=f"Default effort level. Defaults to {DEFAULT_EFFORT}.",
     )
     parser.add_argument(
         "--max-allowed-effort",
         type=parse_effort_arg,
-        default=None,
+        default=DEFAULT_MAX_ALLOWED_EFFORT,
         metavar="{" + ",".join(EFFORT_TIERS) + "}",
-        help="Highest effort this run may use. Defaults to --default-effort.",
+        help=f"Highest effort this run may use. Defaults to {DEFAULT_MAX_ALLOWED_EFFORT}.",
     )
     parser.add_argument(
         "--validation-command",

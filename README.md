@@ -11,7 +11,7 @@ Once installed:
 ```bash
 continuous-refactoring init
 continuous-refactoring run-once \
-  --with codex --model gpt-5 --effort high \
+  --with codex --model gpt-5 \
   --extensions .py
 ```
 
@@ -21,7 +21,7 @@ That gives you one pass on the current branch. If validation passes, it leaves y
 
 ```bash
 continuous-refactoring run \
-  --with codex --model gpt-5 --effort high \
+  --with codex --model gpt-5 --default-effort high \
   --extensions .py \
   --max-refactors 10 \
   --max-attempts 2
@@ -66,12 +66,12 @@ continuous-refactoring taste --refine --with codex --model gpt-5 --effort high
 
 # 3. Do one pass
 continuous-refactoring run-once \
-  --with codex --model gpt-5 --effort high \
+  --with codex --model gpt-5 \
   --extensions .py
 
 # 4. Or run the loop over a batch of targets
 continuous-refactoring run \
-  --with claude --model claude-opus-4-6 --effort high \
+  --with claude --model claude-opus-4-6 --default-effort high \
   --globs 'src/**/*.py' \
   --max-refactors 10 \
   --max-attempts 2 \
@@ -116,9 +116,9 @@ If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`, the
 
 ### Shared `run` / `run-once` flags
 
-- `--with`, `--model`, `--default-effort` — required agent backend/model/default effort selection. Valid effort labels are `low`, `medium`, `high`, `xhigh`.
-- `--effort` — backward-compatible alias for `--default-effort`.
-- `--max-allowed-effort` — cap for any escalation in this run. If omitted, it equals `--default-effort`, so legacy `--effort high` behaves as fixed high.
+- `--with`, `--model` — required agent backend/model selection.
+- `--default-effort` — default effort for run calls. Defaults to `low`. Valid labels are `low`, `medium`, `high`, `xhigh`.
+- `--max-allowed-effort` — cap for target overrides and migration escalation. Defaults to `xhigh`.
 - `--repo-root PATH` — repository root; defaults to the current directory.
 - `--validation-command` — defaults to `uv run pytest`. Swap it for whatever keeps your repo honest.
 - `--timeout` — per-agent-call timeout in seconds.

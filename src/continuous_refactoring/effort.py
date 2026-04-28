@@ -7,6 +7,8 @@ from typing import Literal, cast
 from continuous_refactoring.artifacts import ContinuousRefactorError
 
 __all__ = [
+    "DEFAULT_EFFORT",
+    "DEFAULT_MAX_ALLOWED_EFFORT",
     "EFFORT_TIERS",
     "EffortBudget",
     "EffortResolution",
@@ -23,6 +25,8 @@ __all__ = [
 
 EffortTier = Literal["low", "medium", "high", "xhigh"]
 EFFORT_TIERS: tuple[EffortTier, ...] = ("low", "medium", "high", "xhigh")
+DEFAULT_EFFORT: EffortTier = "low"
+DEFAULT_MAX_ALLOWED_EFFORT: EffortTier = "xhigh"
 _EFFORT_RANK = {tier: index for index, tier in enumerate(EFFORT_TIERS)}
 
 
@@ -87,12 +91,16 @@ def cap_effort(requested: EffortTier, max_allowed: EffortTier) -> EffortTier:
 
 
 def resolve_effort_budget(
-    default_effort: object,
+    default_effort: object | None,
     max_allowed_effort: object | None,
 ) -> EffortBudget:
-    default = require_effort_tier(default_effort, field="default_effort")
+    default = (
+        DEFAULT_EFFORT
+        if default_effort is None
+        else require_effort_tier(default_effort, field="default_effort")
+    )
     maximum = (
-        default
+        DEFAULT_MAX_ALLOWED_EFFORT
         if max_allowed_effort is None
         else require_effort_tier(max_allowed_effort, field="max_allowed_effort")
     )

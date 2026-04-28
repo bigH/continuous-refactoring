@@ -20,11 +20,18 @@ def test_effort_tiers_are_ordered() -> None:
     assert cap_effort("low", "high") == "low"
 
 
-def test_budget_defaults_max_to_default_effort() -> None:
+def test_budget_uses_open_defaults_when_omitted() -> None:
+    budget = resolve_effort_budget(None, None)
+
+    assert budget.default_effort == "low"
+    assert budget.max_allowed_effort == "xhigh"
+
+
+def test_budget_defaults_missing_max_to_xhigh() -> None:
     budget = resolve_effort_budget("high", None)
 
     assert budget.default_effort == "high"
-    assert budget.max_allowed_effort == "high"
+    assert budget.max_allowed_effort == "xhigh"
 
 
 def test_budget_rejects_max_below_default() -> None:

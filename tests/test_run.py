@@ -134,7 +134,6 @@ def test_run_parser_accepts_sleep_flag() -> None:
             "run",
             "--with", "codex",
             "--model", "m",
-            "--effort", "high",
             "--scope-instruction", "s",
             "--max-refactors", "1",
             "--sleep", "0.25",
@@ -142,6 +141,20 @@ def test_run_parser_accepts_sleep_flag() -> None:
     )
 
     assert args.sleep == 0.25
+
+
+def test_run_parser_defaults_effort_budget() -> None:
+    args = build_parser().parse_args(
+        [
+            "run-once",
+            "--with", "codex",
+            "--model", "m",
+            "--scope-instruction", "s",
+        ],
+    )
+
+    assert args.default_effort == "low"
+    assert args.max_allowed_effort == "xhigh"
 
 
 def test_run_parser_accepts_default_and_max_allowed_effort() -> None:
@@ -158,27 +171,40 @@ def test_run_parser_accepts_default_and_max_allowed_effort() -> None:
     )
 
     assert args.default_effort == "high"
-    assert args.effort == "high"
     assert args.max_allowed_effort == "xhigh"
 
 
-def test_run_parser_keeps_effort_alias_for_default_effort() -> None:
+def test_run_parser_rejects_removed_effort_alias() -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        build_parser().parse_args(
+            [
+                "run-once",
+                "--with", "codex",
+                "--model", "m",
+                "--effort", "medium",
+                "--scope-instruction", "s",
+            ],
+        )
+
+    assert exc_info.value.code == 2
+
+
+def test_run_parser_accepts_max_allowed_without_default_effort() -> None:
     args = build_parser().parse_args(
         [
             "run-once",
             "--with", "codex",
             "--model", "m",
-            "--effort", "medium",
+            "--max-allowed-effort", "medium",
             "--scope-instruction", "s",
         ],
     )
 
-    assert args.default_effort == "medium"
-    assert args.effort == "medium"
-    assert args.max_allowed_effort is None
+    assert args.default_effort == "low"
+    assert args.max_allowed_effort == "medium"
 
 
-@pytest.mark.parametrize("flag", ["--effort", "--default-effort", "--max-allowed-effort"])
+@pytest.mark.parametrize("flag", ["--default-effort", "--max-allowed-effort"])
 def test_run_parser_rejects_unknown_effort_tiers(flag: str) -> None:
     argv = [
         "run",
@@ -188,10 +214,7 @@ def test_run_parser_rejects_unknown_effort_tiers(flag: str) -> None:
         "--scope-instruction", "s",
         "--max-refactors", "1",
     ]
-    if flag == "--effort":
-        argv[argv.index("--default-effort")] = "--effort"
-        argv[argv.index("medium")] = "extreme"
-    elif flag == "--default-effort":
+    if flag == "--default-effort":
         argv[argv.index("medium")] = "extreme"
     else:
         argv.extend([flag, "extreme"])

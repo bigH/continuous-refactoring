@@ -12,7 +12,7 @@ Create a failing-ready baseline for cause-preserving failure behavior without ch
 1. Add baseline tests in `tests/test_continuous_refactoring.py` for artifact persistence paths:
    - fail-fast behavior on malformed payload flows
    - boundary failures now asserting `__cause__` expectations only where behavior already depends on translation
-2. Add baseline tests in `tests/test_phases.py` for readyness/phase parsing failure paths that already route through `ContinuousRefactorError`.
+2. Add baseline tests in `tests/test_phases.py` for readiness/phase parsing failure paths that already route through `ContinuousRefactorError`.
 3. Add focused checks in `tests/test_loop_migration_tick.py` for artifact summary/failure text preservation and non-masked root causes.
 4. Keep all production files untouched in this phase.
 

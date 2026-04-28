@@ -16,11 +16,11 @@ Ensure loop and CLI behavior remains shippable when artifact/config/git boundari
 
 ## Instructions
 1. Update boundary catch/relay points in `loop.py` so config/artifacts/git failures are wrapped only at decision points and keep current fallback logic when safe (`load_taste` defaults, non-fatal taste path failures, validation path continuity).
-2. Tighten `config.py` helpers (`load_manifest`, `_load_manifest_payload`, and related config loaders) only where needed to align with consistent cause-chaining semantics with artifacts and keep missing-manifest behavior unchanged.
+2. Tighten `config.py` helpers (`continuous_refactoring.config.load_manifest`, `_load_manifest_payload`, and related config loaders) only where needed to align with consistent cause-chaining semantics with artifacts and keep missing-manifest behavior unchanged.
 3. Update CLI taste/upgrade/init paths to preserve exact user-facing behavior on boundary failures while adding richer cause-linked debug context internally.
 4. Add regression tests for malformed/unreadable manifest and log-write failures in config/CLI/loop surfaces that must not crash into less useful errors.
 5. Keep command output and exit status stable where existing tests assert exact semantics.
-6. Ensure `tests/test_phases.py` includes migration/tick expectations that still validate unchanged high-level outcomes under loop/cli boundary stress paths.
+6. Ensure `tests/test_phases.py` still validates unchanged high-level phase outcomes under loop/cli boundary stress paths.
 
 ## Precondition
 - Phase 3 complete and passing targeted gates.

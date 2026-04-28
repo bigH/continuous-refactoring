@@ -1,7 +1,7 @@
 # Migration: src-continuous-refactoring-artifacts-py-20260427T215942
 
 ## Goal
-Harden artifact and command-boundary behavior around `continuous_refactoring.artifacts` in place so that failures at module boundaries preserve root-cause context, callsites remain stable, and execution behavior stays shippable between phases.
+Harden artifact persistence and adjacent command-boundary behavior around `continuous_refactoring.artifacts` in place so that failures at module boundaries preserve root-cause context, callsites remain stable, and execution behavior stays shippable between phases.
 
 ## Chosen approach
 [`inplace-artifact-boundary-hardening`](approaches/inplace-artifact-boundary-hardening.md)
@@ -10,6 +10,7 @@ Harden artifact and command-boundary behavior around `continuous_refactoring.art
 - `src/continuous_refactoring/artifacts.py`
 - `src/continuous_refactoring/agent.py`
 - `src/continuous_refactoring/loop.py`
+- `src/continuous_refactoring/migration_tick.py`
 - `src/continuous_refactoring/phases.py`
 - `src/continuous_refactoring/cli.py`
 - `src/continuous_refactoring/config.py`
@@ -58,8 +59,8 @@ flowchart TD
 
 ## Dependency summary
 - Phase 1 creates a test baseline and verifies current behavior before production edits.
-- Phase 2 introduces helper contracts in `artifacts.py`; all other production modules consume these contracts later.
-- Phase 3 applies direct boundary wrappers in adjacent modules and must run only after Phase 2 is green.
+- Phase 2 introduces helper contracts in `artifacts.py` for summary/event persistence; all other production modules consume these contracts later.
+- Phase 3 applies direct boundary wrappers in adjacent modules and migration-tick reporting seams, and must run only after Phase 2 is green.
 - Phase 4 applies boundary resilience in orchestration and CLI surfaces and must run only after callsite behavior in Phase 3 is locked.
 - Phase 5 performs final contract lock validation across the scope and must run only after Phase 4 is green.
 

@@ -6,6 +6,7 @@ Lock export/runtime contracts after boundary hardening and complete migration-wi
 ## Scope
 - `src/continuous_refactoring/__init__.py`
 - `src/continuous_refactoring/loop.py`
+- `src/continuous_refactoring/migration_tick.py`
 - `src/continuous_refactoring/phases.py`
 - `src/continuous_refactoring/config.py`
 - `src/continuous_refactoring/git.py`
@@ -30,7 +31,7 @@ Lock export/runtime contracts after boundary hardening and complete migration-wi
    - artifact summary/event content,
    - CLI taste/init messages,
    - run/run-once loop outcomes.
-3. Confirm migration docs and this plan match scope edits and that no phase introduced behavior outside migration intent.
+3. Confirm migration docs and this plan match scope edits and that no phase introduced behavior outside migration intent, including the current `migration_tick.py` seam covered by `tests/test_loop_migration_tick.py`.
 4. If any CLI exit path changed only in wording for more context, add/adjust exact-string assertions in dedicated CLI tests and call this out explicitly in DoD.
 5. Verify `migrations/src-continuous-refactoring-artifacts-py-20260427T215942/manifest.json` phase graph and metadata remain consistent with this plan (no missing or renamed phase files).
 
@@ -43,7 +44,7 @@ Lock export/runtime contracts after boundary hardening and complete migration-wi
 ## Definition of Done
 - Package export checks are clean for touched modules.
 - All phase-level target validations and full suite are green.
-- Boundary-cause semantics are consistent across `artifacts`, `agent`, `git`, `loop`, `phases`, `config`, and CLI callsites.
+- Boundary-cause semantics are consistent across `artifacts`, `agent`, `git`, `loop`, `migration_tick`, `phases`, `config`, and CLI callsites.
 - Migration scope and docs are aligned to the final code shape.
 - `manifest.json` and `plan.md` are coherent with delivered phase files and scope.
 - No unresolved documentation/process debt introduced by this migration.

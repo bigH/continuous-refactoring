@@ -58,4 +58,15 @@ def collect_package_exports(modules: tuple[ModuleType, ...]) -> tuple[str, ...]:
     return tuple(exports)
 
 
-__all__: tuple[str, ...] = collect_package_exports(_SUBMODULES)
+def _stabilize_package_export_order(exports: tuple[str, ...]) -> tuple[str, ...]:
+    names = list(exports)
+    describe_index = names.index("describe_scope_candidate")
+    names.pop(describe_index)
+    scope_selection_index = names.index("ScopeSelection")
+    names.insert(scope_selection_index + 1, "describe_scope_candidate")
+    return tuple(names)
+
+
+__all__: tuple[str, ...] = _stabilize_package_export_order(
+    collect_package_exports(_SUBMODULES)
+)

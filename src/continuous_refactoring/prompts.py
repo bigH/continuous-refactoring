@@ -34,6 +34,7 @@ __all__ = [
     "compose_scope_selection_prompt",
     "compose_taste_refine_prompt",
     "compose_taste_upgrade_prompt",
+    "describe_scope_candidate",
     "prompt_file_text",
     "scope_candidate_detail_lines",
 ]
@@ -113,6 +114,11 @@ def scope_candidate_detail_lines(candidate: ScopeCandidate) -> list[str]:
         "Likely validation surfaces:",
         *(f"- {surface}" for surface in candidate.validation_surfaces),
     ]
+
+
+def describe_scope_candidate(candidate: ScopeCandidate) -> str:
+    header = f"Selected scope candidate: {candidate.kind}"
+    return "\n".join([header, *scope_candidate_detail_lines(candidate)])
 
 
 def _format_scope_candidates(candidates: tuple[ScopeCandidate, ...]) -> str:

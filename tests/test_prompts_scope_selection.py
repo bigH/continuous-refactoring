@@ -4,7 +4,10 @@ from itertools import combinations
 
 import pytest
 
-from continuous_refactoring.prompts import compose_scope_selection_prompt
+from continuous_refactoring.prompts import (
+    compose_scope_selection_prompt,
+    describe_scope_candidate,
+)
 from continuous_refactoring.scope_candidates import ScopeCandidate, ScopeCandidateKind
 from continuous_refactoring.targeting import Target
 
@@ -129,3 +132,11 @@ def test_prompt_preserves_taste_section() -> None:
     prompt = compose_scope_selection_prompt(_target(), _candidates(_ALL_KINDS), _TASTE)
 
     assert f"## Taste\n{_TASTE}" in prompt
+
+
+def test_describe_scope_candidate_returns_readable_block() -> None:
+    formatted = describe_scope_candidate(_candidate("local-cluster"))
+
+    assert formatted.startswith("Selected scope candidate: local-cluster")
+    assert "- packages/core/src/core/__tests__/progress.test.ts" in formatted
+    assert "- packages/core/src/core/progress.ts" in formatted

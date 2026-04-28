@@ -32,9 +32,9 @@ from continuous_refactoring.effort import EffortBudget, resolve_effort_budget
 from continuous_refactoring.git import get_head_sha
 from continuous_refactoring.migration_tick import try_migration_tick as _try_migration_tick
 from continuous_refactoring.planning import run_planning
+from continuous_refactoring.prompts import describe_scope_candidate
 from continuous_refactoring.routing import classify_target
 from continuous_refactoring.scope_expansion import (
-    describe_scope_candidate,
     scope_candidate_to_target,
     scope_expansion_bypass_reason,
     select_scope_candidate,

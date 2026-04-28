@@ -12,7 +12,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ScopeSelection",
-    "describe_scope_candidate",
     "parse_scope_selection",
     "scope_candidate_to_target",
     "scope_expansion_bypass_reason",
@@ -22,15 +21,8 @@ __all__ = [
 
 from continuous_refactoring.agent import maybe_run_agent
 from continuous_refactoring.artifacts import ContinuousRefactorError
-from continuous_refactoring.prompts import (
-    compose_scope_selection_prompt,
-    scope_candidate_detail_lines,
-)
-from continuous_refactoring.scope_candidates import (
-    ScopeCandidate,
-    ScopeCandidateKind,
-    build_scope_candidates,
-)
+from continuous_refactoring.prompts import compose_scope_selection_prompt
+from continuous_refactoring.scope_candidates import ScopeCandidate, ScopeCandidateKind
 
 _SELECTION_RE = re.compile(
     r"^selected-candidate:\s*(seed|local-cluster|cross-cluster)"
@@ -90,11 +82,6 @@ def parse_scope_selection(
 
 def scope_candidate_to_target(target: Target, candidate: ScopeCandidate) -> Target:
     return replace(target, files=candidate.files)
-
-
-def describe_scope_candidate(candidate: ScopeCandidate) -> str:
-    header = f"Selected scope candidate: {candidate.kind}"
-    return "\n".join([header, *scope_candidate_detail_lines(candidate)])
 
 
 def select_scope_candidate(

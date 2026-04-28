@@ -2,9 +2,9 @@
   "awaiting_human_review": false,
   "cooldown_until": null,
   "created_at": "2026-04-27T21:59:42.893-07:00",
-  "current_phase": "artifacts-boundary-contract",
+  "current_phase": "boundary-wrappers-at-callsites",
   "human_review_reason": null,
-  "last_touch": "2026-04-28T19:44:55.459+00:00",
+  "last_touch": "2026-04-28T15:49:23.492-07:00",
   "name": "src-continuous-refactoring-artifacts-py-20260427T215942",
   "phases": [
     {
@@ -16,7 +16,7 @@
       "required_effort": null
     },
     {
-      "done": false,
+      "done": true,
       "effort_reason": null,
       "file": "phase-2-artifacts-boundary-contract.md",
       "name": "artifacts-boundary-contract",

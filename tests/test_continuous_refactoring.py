@@ -981,9 +981,14 @@ def test_run_summary_write_preserves_previous_content_on_replace_failure(
 
     monkeypatch.setattr(artifacts.os, "replace", fail_replace)
 
-    with pytest.raises(OSError, match="replace failed"):
+    with pytest.raises(
+        ContinuousRefactorError,
+        match=rf"Could not write artifact file {re.escape(str(run.summary_path))}",
+    ) as exc_info:
         run.write_summary()
 
+    assert isinstance(exc_info.value.__cause__, OSError)
+    assert str(exc_info.value.__cause__) == "replace failed"
     assert run.summary_path.read_text(encoding="utf-8") == "previous summary\n"
     assert list(tmp_path.glob("*.tmp")) == []
 
@@ -1007,5 +1012,101 @@ def test_run_summary_write_fails_fast_on_unmakable_parent(
         started_at="2026-04-15T12:34:56.123+00:00",
     )
 
-    with pytest.raises(OSError):
+    with pytest.raises(
+        ContinuousRefactorError,
+        match=rf"Could not write artifact file {re.escape(str(run.summary_path))}",
+    ) as exc_info:
         run.write_summary()
+
+    assert isinstance(exc_info.value.__cause__, OSError)
+
+
+def test_run_log_wraps_event_append_oserror_with_cause(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    run = artifacts.RunArtifacts(
+        root=tmp_path,
+        run_id="run-1",
+        repo_root=tmp_path,
+        agent="codex",
+        model="fake-model",
+        effort="medium",
+        test_command="true",
+        events_path=tmp_path / "events.jsonl",
+        summary_path=tmp_path / "summary.json",
+        log_path=tmp_path / "run.log",
+        started_at="2026-04-15T12:34:56.123+00:00",
+    )
+    original_open = Path.open
+
+    def fail_events_open(self: Path, *args: object, **kwargs: object):
+        if self == run.events_path:
+            raise OSError("events blocked")
+        return original_open(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "open", fail_events_open)
+
+    with pytest.raises(
+        ContinuousRefactorError,
+        match=rf"Could not append artifact event to {re.escape(str(run.events_path))}",
+    ) as exc_info:
+        run.log("INFO", "hello", event="test")
+
+    assert isinstance(exc_info.value.__cause__, OSError)
+    assert str(exc_info.value.__cause__) == "events blocked"
+
+
+def test_run_summary_write_wraps_serialization_failure_with_cause(
+    tmp_path: Path,
+) -> None:
+    run = artifacts.RunArtifacts(
+        root=tmp_path,
+        run_id="run-1",
+        repo_root=tmp_path,
+        agent="codex",
+        model="fake-model",
+        effort="medium",
+        test_command="true",
+        events_path=tmp_path / "events.jsonl",
+        summary_path=tmp_path / "summary.json",
+        log_path=tmp_path / "run.log",
+        started_at="2026-04-15T12:34:56.123+00:00",
+    )
+    run.counts["bad"] = object()
+
+    with pytest.raises(
+        ContinuousRefactorError,
+        match=rf"Could not serialize run summary for {re.escape(str(run.summary_path))}",
+    ) as exc_info:
+        run.write_summary()
+
+    assert isinstance(exc_info.value.__cause__, TypeError)
+
+
+def test_create_run_artifacts_wraps_initial_summary_write_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifacts_root = tmp_path / "artifacts-root"
+    monkeypatch.setattr(artifacts, "default_artifacts_root", lambda: artifacts_root)
+
+    def fail_replace(_src: str, _dst: str) -> None:
+        raise OSError("replace failed")
+
+    monkeypatch.setattr(artifacts.os, "replace", fail_replace)
+
+    with pytest.raises(
+        ContinuousRefactorError,
+        match=r"Could not write artifact file .*summary\.json",
+    ) as exc_info:
+        create_run_artifacts(
+            tmp_path,
+            agent="codex",
+            model="fake-model",
+            effort="medium",
+            test_command="true",
+        )
+
+    assert isinstance(exc_info.value.__cause__, OSError)
+    assert str(exc_info.value.__cause__) == "replace failed"

@@ -152,8 +152,7 @@ class RunArtifacts:
         with self.log_path.open("a", encoding="utf-8") as handle:
             handle.write(f"[{timestamp}] {line}\n")
         event = {"timestamp": timestamp, "level": level, "message": message, **fields}
-        with self.events_path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(event, sort_keys=True) + "\n")
+        _append_event(self.events_path, event)
         self.write_summary()
 
     def mark_attempt_started(self, attempt: int) -> None:
@@ -304,10 +303,8 @@ class RunArtifacts:
             "counts": self.counts,
             "attempts": [asdict(self.attempts[key]) for key in sorted(self.attempts)],
         }
-        _write_text_atomic(
-            self.summary_path,
-            json.dumps(summary, indent=2, sort_keys=True) + "\n",
-        )
+        content = _serialize_summary(self.summary_path, summary)
+        _write_text_atomic(self.summary_path, content)
 
 
 def iso_timestamp() -> str:
@@ -322,20 +319,35 @@ def default_artifacts_root() -> Path:
     return Path(os.environ.get("TMPDIR") or tempfile.gettempdir())
 
 
+def _append_event(path: Path, event: Mapping[str, object]) -> None:
+    try:
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(event, sort_keys=True) + "\n")
+    except OSError as exc:
+        raise ContinuousRefactorError(f"Could not append artifact event to {path}") from exc
+
+
+def _serialize_summary(path: Path, summary: Mapping[str, object]) -> str:
+    try:
+        return json.dumps(summary, indent=2, sort_keys=True) + "\n"
+    except (TypeError, ValueError) as exc:
+        raise ContinuousRefactorError(f"Could not serialize run summary for {path}") from exc
+
+
 def _write_text_atomic(path: Path, content: str) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
     tmp_path: Path | None = None
     try:
+        path.parent.mkdir(parents=True, exist_ok=True)
         with tempfile.NamedTemporaryFile(
             mode="w", encoding="utf-8", dir=path.parent, suffix=".tmp", delete=False
         ) as tmp:
             tmp_path = Path(tmp.name)
             tmp.write(content)
         os.replace(tmp_path, path)
-    except Exception:
+    except OSError as exc:
         if tmp_path is not None:
             tmp_path.unlink(missing_ok=True)
-        raise
+        raise ContinuousRefactorError(f"Could not write artifact file {path}") from exc
 
 
 def create_run_artifacts(

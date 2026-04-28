@@ -11,12 +11,15 @@ from continuous_refactoring.artifacts import (
     create_run_artifacts,
 )
 from continuous_refactoring.migrations import (
+    MigrationManifest,
     intentional_skips_dir,
     load_manifest,
     migration_root,
+    save_manifest,
 )
 from continuous_refactoring.planning import (
     _parse_final_decision,
+    _touch_manifest,
     _review_has_findings,
     _discover_phase_files,
     PlanningOutcome,
@@ -86,6 +89,7 @@ class _MockAgent:
         self._responses = responses
         self._index = 0
         self.call_count = 0
+        self.stage_labels: list[str] = []
         self.prompts: list[str] = []
 
     def __call__(self, **kwargs: object) -> CommandCapture:
@@ -96,13 +100,14 @@ class _MockAgent:
         self._index += 1
         self.call_count += 1
         self.prompts.append(str(kwargs["prompt"]))
+        stdout_path = Path(str(kwargs["stdout_path"]))
+        self.stage_labels.append(stdout_path.parent.name)
 
         for rel_path, content in writes.items():
             full = self._mig_root / rel_path
             full.parent.mkdir(parents=True, exist_ok=True)
             full.write_text(content, encoding="utf-8")
 
-        stdout_path = Path(str(kwargs["stdout_path"]))
         stderr_path = Path(str(kwargs["stderr_path"]))
         stdout_path.parent.mkdir(parents=True, exist_ok=True)
         stdout_path.write_text("", encoding="utf-8")
@@ -227,6 +232,31 @@ def test_initial_decisions(
     assert mock.call_count == 5
 
 
+def test_no_findings_path_keeps_stage_order_and_context_sources(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir, _ = _planning_context(tmp_path, monkeypatch)
+    _, mock, _ = _run_planning(
+        tmp_path,
+        live_dir,
+        _base_responses() + [_planning_decision_response("approve-auto", "plan is solid")],
+        monkeypatch,
+    )
+
+    assert mock.stage_labels == [
+        "approaches",
+        "pick-best",
+        "expand",
+        "review",
+        "final-review",
+    ]
+    assert "Approaches:\n### incremental\n# Incremental\nStep by step approach." in mock.prompts[1]
+    assert "Chosen approach:\nChose incremental approach.\n" in mock.prompts[2]
+    assert "Plan:\n# Migration Plan\nPhased approach." in mock.prompts[3]
+    assert "Plan:\n# Migration Plan\nPhased approach." in mock.prompts[4]
+
+
 # ---------------------------------------------------------------------------
 # review findings trigger revise + review-2
 # ---------------------------------------------------------------------------
@@ -310,6 +340,37 @@ def test_revised_plan_is_reloaded_for_follow_up_reviews(
     assert "# Plan v1" not in final_review_prompt
 
 
+def test_revise_path_keeps_existing_prompt_stages_with_distinct_stage_labels(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir, _ = _planning_context(tmp_path, monkeypatch)
+    _, mock, _ = _run_planning(
+        tmp_path,
+        live_dir,
+        _revise_responses()
+        + [_planning_decision_response("approve-auto", "revised plan looks good")],
+        monkeypatch,
+    )
+
+    assert mock.stage_labels == [
+        "approaches",
+        "pick-best",
+        "expand",
+        "review",
+        "revise",
+        "review-2",
+        "final-review",
+    ]
+    assert (
+        "You are a planning agent expanding the chosen approach into a detailed migration plan."
+        in mock.prompts[4]
+    )
+    assert "Review findings to address:\n1. Missing rollback step.\n2. Phase order unclear.\n" in mock.prompts[4]
+    assert "You are a planning reviewer examining a refactoring migration plan." in mock.prompts[5]
+    assert "Plan (revised):\n# Plan v2 (revised)" in mock.prompts[5]
+
+
 def test_review_two_findings_fail_before_final_review(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -322,6 +383,68 @@ def test_review_two_findings_fail_before_final_review(
         match="planning.review-2 failed: revised plan still has findings",
     ):
         _run_planning(tmp_path, live_dir, responses, monkeypatch)
+
+
+def test_manifest_phase_discovery_refreshes_only_after_file_writing_stages(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir, _ = _planning_context(tmp_path, monkeypatch)
+    discover_calls: list[tuple[str, ...]] = []
+    real_discover = _discover_phase_files
+
+    def spy_discover(mig_root: Path) -> tuple[object, ...]:
+        discover_calls.append(tuple(path.name for path in sorted(mig_root.glob("phase-*-*.md"))))
+        return real_discover(mig_root)
+
+    monkeypatch.setattr("continuous_refactoring.planning._discover_phase_files", spy_discover)
+
+    _run_planning(
+        tmp_path,
+        live_dir,
+        _revise_responses()
+        + [_planning_decision_response("approve-auto", "revised plan looks good")],
+        monkeypatch,
+    )
+
+    assert discover_calls == [
+        ("phase-0-prep.md",),
+        ("phase-0-prep.md", "phase-1-rollback.md"),
+    ]
+
+
+def test_touch_manifest_initializes_and_repairs_current_phase_only_when_rediscovering(
+    tmp_path: Path,
+) -> None:
+    mig_root = tmp_path / "live" / "repair-phase"
+    mig_root.mkdir(parents=True)
+    manifest_path = mig_root / "manifest.json"
+    phase_doc = _phase_doc("always", "Phase is complete.")
+    (mig_root / "phase-1-setup.md").write_text(phase_doc, encoding="utf-8")
+    (mig_root / "phase-2-ship.md").write_text(phase_doc, encoding="utf-8")
+
+    manifest = MigrationManifest(
+        name="repair-phase",
+        created_at="2026-04-28T00:00:00Z",
+        last_touch="2026-04-28T00:00:00Z",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        human_review_reason=None,
+        status="planning",
+        current_phase="",
+        phases=(),
+    )
+    save_manifest(manifest, manifest_path)
+
+    manifest = _touch_manifest(manifest, manifest_path, mig_root=mig_root)
+    assert manifest.current_phase == "setup"
+    assert tuple(phase.name for phase in manifest.phases) == ("setup", "ship")
+
+    untouched = _touch_manifest(manifest, manifest_path, status="ready")
+    assert untouched.current_phase == "setup"
+
+    repaired = _touch_manifest(manifest, manifest_path, mig_root=mig_root, current_phase="missing")
+    assert repaired.current_phase == "setup"
 
 
 def test_parse_final_decision_ignores_trailing_lines() -> None:

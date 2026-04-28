@@ -45,6 +45,16 @@ def assert_single_prompt(prompt_capture: list[str], *needles: str) -> str:
     return prompt
 
 
+def patch_classifier_trap(
+    monkeypatch: pytest.MonkeyPatch,
+    message: str = "classify_target must not be called",
+) -> None:
+    def trap(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError(message)
+
+    monkeypatch.setattr("continuous_refactoring.routing_pipeline.classify_target", trap)
+
+
 def _single_run_artifact_dir(repo_root: Path) -> Path:
     run_root = repo_root.parent / "tmpdir" / "continuous-refactoring"
     run_dirs = list(run_root.iterdir())

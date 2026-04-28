@@ -37,6 +37,7 @@ from conftest import (
     make_run_once_args,
     noop_agent,
     noop_tests,
+    patch_classifier_trap,
 )
 
 _PHASE_0 = PhaseSpec(name="setup", file="phase-0-setup.md", done=False, precondition="always")
@@ -150,13 +151,6 @@ def _assert_fell_through(
 ) -> None:
     assert len(classifier_calls) == 1
     assert len(prompts) == 1
-
-
-def _patch_classifier_trap(monkeypatch: pytest.MonkeyPatch) -> None:
-    def trap(*_a: object, **_k: object) -> object:
-        raise AssertionError("classify_target must not be called during migration tick")
-
-    monkeypatch.setattr("continuous_refactoring.routing_pipeline.classify_target", trap)
 
 
 def _patch_check_ready(
@@ -779,7 +773,10 @@ def test_eligible_ready_migration_advances_phase(
     )
 
     _patch_live_dir(monkeypatch, live_dir)
-    _patch_classifier_trap(monkeypatch)
+    patch_classifier_trap(
+        monkeypatch,
+        "classify_target must not be called during migration tick",
+    )
     check_calls = _patch_check_ready(monkeypatch, "yes")
     exec_calls = _patch_execute_phase(monkeypatch, status="done")
     _patch_one_shot(monkeypatch)
@@ -812,7 +809,10 @@ def test_migration_labels_use_phase_file_not_numeric_cursor(
     commit_messages: list[str] = []
 
     _patch_live_dir(monkeypatch, live_dir)
-    _patch_classifier_trap(monkeypatch)
+    patch_classifier_trap(
+        monkeypatch,
+        "classify_target must not be called during migration tick",
+    )
     _patch_check_ready(monkeypatch, "yes")
     _patch_execute_phase(monkeypatch, status="done")
     _patch_one_shot(monkeypatch)

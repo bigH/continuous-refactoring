@@ -15,17 +15,13 @@ from continuous_refactoring.prompts import DEFAULT_REFACTORING_PROMPT, compose_f
 from continuous_refactoring.targeting import resolve_targets
 
 from conftest import (
+    assert_single_prompt,
     make_run_loop_args,
     make_run_once_args,
     noop_agent,
     noop_tests,
+    patch_classifier_trap,
 )
-
-
-def _classifier_trap(*_args: object, **_kwargs: object) -> object:
-    raise AssertionError(
-        "classify_target must not be called when live-migrations-dir is unset"
-    )
 
 
 def _expected_one_shot_prompt(repo_root: Path, validation_command: str) -> str:
@@ -53,15 +49,15 @@ def test_run_once_prompt_matches_compose_full_prompt(
     prompt_capture: list[str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.classify_target", _classifier_trap,
+    patch_classifier_trap(
+        monkeypatch,
+        "classify_target must not be called when live-migrations-dir is unset",
     )
     args = make_run_once_args(run_once_env)
     continuous_refactoring.run_once(args)
 
-    assert len(prompt_capture) == 1
     expected = _expected_one_shot_prompt(run_once_env, args.validation_command)
-    assert prompt_capture[0] == expected
+    assert assert_single_prompt(prompt_capture) == expected
 
 
 def test_run_once_paths_arg_trims_whitespace(
@@ -78,17 +74,16 @@ def test_run_once_paths_arg_trims_whitespace(
         ["git", "commit", "-m", "add spaced paths"], cwd=run_once_env,
     )
 
-    monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.classify_target", _classifier_trap,
+    patch_classifier_trap(
+        monkeypatch,
+        "classify_target must not be called when live-migrations-dir is unset",
     )
     args = make_run_once_args(run_once_env, paths="src/foo.py: src/bar.py")
     exit_code = continuous_refactoring.run_once(args)
 
     assert exit_code == 0
-    assert len(prompt_capture) == 1
-    assert "- src/foo.py" in prompt_capture[0]
-    assert "- src/bar.py" in prompt_capture[0]
-    assert "-  src/bar.py" not in prompt_capture[0]
+    prompt = assert_single_prompt(prompt_capture, "- src/foo.py", "- src/bar.py")
+    assert "-  src/bar.py" not in prompt
 
 
 # ---------------------------------------------------------------------------
@@ -102,8 +97,9 @@ def test_run_once_stays_on_invoked_branch(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.classify_target", _classifier_trap,
+    patch_classifier_trap(
+        monkeypatch,
+        "classify_target must not be called when live-migrations-dir is unset",
     )
     starting_branch = continuous_refactoring.current_branch(run_once_env)
     args = make_run_once_args(run_once_env)
@@ -124,8 +120,9 @@ def test_run_loop_two_targets_unchanged(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.classify_target", _classifier_trap,
+    patch_classifier_trap(
+        monkeypatch,
+        "classify_target must not be called when live-migrations-dir is unset",
     )
 
     agent_calls: list[str] = []
@@ -196,8 +193,7 @@ def test_cohesive_cleanup_matches_one_shot(
     assert exit_code == 0
     assert len(classify_calls) == 1
 
-    assert len(prompt_capture) == 1
     expected = _expected_one_shot_prompt(run_once_env, args.validation_command)
-    assert prompt_capture[0] == expected
+    assert assert_single_prompt(prompt_capture) == expected
 
     assert "Branch:" not in capsys.readouterr().out

@@ -12,6 +12,7 @@ from continuous_refactoring.targeting import (
     load_targets_jsonl,
     parse_extensions,
     parse_globs,
+    parse_paths_arg,
     resolve_targets,
     select_random_files,
     validate_target_line,
@@ -76,6 +77,20 @@ def test_parse_globs_colon_separated() -> None:
         "src/**/*.py",
         "tests/**/*.py",
     )
+
+
+def test_parse_paths_arg_trims_and_drops_empty_segments() -> None:
+    assert parse_paths_arg("src/foo.py: src/bar.py::  :tests/test_foo.py") == (
+        "src/foo.py",
+        "src/bar.py",
+        "tests/test_foo.py",
+    )
+
+
+def test_parse_paths_arg_none_or_blank_returns_none() -> None:
+    assert parse_paths_arg(None) is None
+    assert parse_paths_arg("") is None
+    assert parse_paths_arg("  :   : ") is None
 
 
 # ---------------------------------------------------------------------------
@@ -422,6 +437,26 @@ def test_resolve_targets_extensions_no_match_returns_empty(tmp_path: Path) -> No
     )
 
     assert targets == []
+
+
+def test_resolve_targets_prefers_paths_when_present(tmp_path: Path) -> None:
+    _repo_with_files(tmp_path)
+
+    targets = resolve_targets(
+        extensions=None,
+        globs=None,
+        targets_path=None,
+        paths=parse_paths_arg("src/foo.py: src/bar.py"),
+        repo_root=tmp_path,
+    )
+
+    assert targets == [
+        Target(
+            description="specified paths",
+            files=("src/foo.py", "src/bar.py"),
+            provenance="paths",
+        )
+    ]
 
 
 def test_expand_patterns_handles_recursive_glob(tmp_path: Path) -> None:

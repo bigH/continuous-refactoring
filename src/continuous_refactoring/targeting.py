@@ -21,6 +21,7 @@ __all__ = [
     "load_targets_jsonl",
     "parse_extensions",
     "parse_globs",
+    "parse_paths_arg",
     "resolve_targets",
     "select_random_files",
     "validate_target_line",
@@ -70,6 +71,13 @@ def parse_extensions(raw: str) -> tuple[str, ...]:
 def parse_globs(raw: str) -> tuple[str, ...]:
     """Split colon-separated glob patterns."""
     return tuple(g for g in (p.strip() for p in raw.split(":")) if g)
+
+
+def parse_paths_arg(raw_paths: str | None) -> tuple[str, ...] | None:
+    if raw_paths is None:
+        return None
+    parsed = tuple(path.strip() for path in raw_paths.split(":") if path.strip())
+    return parsed or None
 
 
 def _optional_str(data: dict[str, object], key: str) -> str | None:

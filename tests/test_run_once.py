@@ -14,25 +14,10 @@ from conftest import (
     make_run_once_args,
     noop_agent,
     noop_tests,
+    read_single_run_events,
+    read_single_run_summary,
+    touch_file_agent,
 )
-
-
-def _read_single_run_summary(run_once_env: Path) -> dict[str, object]:
-    run_root = run_once_env.parent / "tmpdir" / "continuous-refactoring"
-    run_dirs = list(run_root.iterdir())
-    assert len(run_dirs) == 1
-    return json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
-
-
-def _read_single_run_events(run_once_env: Path) -> list[dict[str, object]]:
-    run_root = run_once_env.parent / "tmpdir" / "continuous-refactoring"
-    run_dirs = list(run_root.iterdir())
-    assert len(run_dirs) == 1
-    return [
-        json.loads(line)
-        for line in (run_dirs[0] / "events.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
 
 
 def _run_once_prompt_capture(
@@ -198,7 +183,7 @@ def test_run_once_direct_refactor_audits_effort_budget(
     assert continuous_refactoring.run_once(args) == 0
     assert captured_efforts == ["medium"]
 
-    summary = _read_single_run_summary(run_once_env)
+    summary = read_single_run_summary(run_once_env)
     attempt = summary["attempts"][0]
     assert attempt["requested_effort"] == "xhigh"
     assert attempt["effective_effort"] == "medium"
@@ -207,7 +192,7 @@ def test_run_once_direct_refactor_audits_effort_budget(
     assert attempt["effort_capped"] is True
 
     refactor_events = [
-        event for event in _read_single_run_events(run_once_env)
+        event for event in read_single_run_events(run_once_env)
         if event.get("event") == "call_started"
         and event.get("call_role") == "refactor"
     ]
@@ -221,12 +206,10 @@ def test_run_once_prints_diff(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    def touching_agent(**kwargs: object) -> CommandCapture:
-        rr = Path(str(kwargs.get("repo_root", "")))
-        (rr / "new_file.txt").write_text("x\n", encoding="utf-8")
-        return noop_agent(**kwargs)
-
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop.maybe_run_agent",
+        touch_file_agent("new_file.txt"),
+    )
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     exit_code = continuous_refactoring.run_once(make_run_once_args(run_once_env))
@@ -242,12 +225,10 @@ def test_run_once_prints_and_records_commit(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    def touching_agent(**kwargs: object) -> CommandCapture:
-        rr = Path(str(kwargs.get("repo_root", "")))
-        (rr / "new_file.txt").write_text("x\n", encoding="utf-8")
-        return noop_agent(**kwargs)
-
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", touching_agent)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop.maybe_run_agent",
+        touch_file_agent("new_file.txt"),
+    )
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
     exit_code = continuous_refactoring.run_once(make_run_once_args(run_once_env))
@@ -261,7 +242,7 @@ def test_run_once_prints_and_records_commit(
     ).stdout
     assert "continuous refactor: run-once" in log
 
-    summary = _read_single_run_summary(run_once_env)
+    summary = read_single_run_summary(run_once_env)
     assert summary["counts"]["commits_created"] == 1
     attempts = summary["attempts"]
     assert len(attempts) == 1

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import json
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -42,6 +43,31 @@ def assert_single_prompt(prompt_capture: list[str], *needles: str) -> str:
     for needle in needles:
         assert needle in prompt
     return prompt
+
+
+def _single_run_artifact_dir(repo_root: Path) -> Path:
+    run_root = repo_root.parent / "tmpdir" / "continuous-refactoring"
+    run_dirs = list(run_root.iterdir())
+    assert len(run_dirs) == 1
+    return run_dirs[0]
+
+
+def read_single_run_summary(repo_root: Path) -> dict[str, object]:
+    return json.loads(
+        (_single_run_artifact_dir(repo_root) / "summary.json").read_text(
+            encoding="utf-8"
+        )
+    )
+
+
+def read_single_run_events(repo_root: Path) -> list[dict[str, object]]:
+    return [
+        json.loads(line)
+        for line in (_single_run_artifact_dir(repo_root) / "events.jsonl").read_text(
+            encoding="utf-8"
+        ).splitlines()
+        if line.strip()
+    ]
 
 
 def make_taste_agent_writer(
@@ -226,6 +252,17 @@ def noop_agent(**kwargs: object) -> CommandCapture:
         stdout_path=kwargs["stdout_path"],  # type: ignore[arg-type]
         stderr_path=kwargs["stderr_path"],  # type: ignore[arg-type]
     )
+
+
+def touch_file_agent(relative_path: str, content: str = "x\n") -> Callable[..., CommandCapture]:
+    def fake(**kwargs: object) -> CommandCapture:
+        repo_root = Path(str(kwargs.get("repo_root", "")))
+        destination = repo_root / relative_path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(content, encoding="utf-8")
+        return noop_agent(**kwargs)
+
+    return fake
 
 
 def noop_tests(

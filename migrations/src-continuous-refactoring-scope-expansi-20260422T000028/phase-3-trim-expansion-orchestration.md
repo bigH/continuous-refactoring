@@ -4,7 +4,7 @@
 
 Finish the boundary cleanup after extraction.
 
-`scope_expansion.py` should be about bypass, selection, target conversion, and artifact writing. Candidate presentation should live with prompt formatting unless a direct call-site shows it belongs with candidate discovery.
+`scope_expansion.py` should be about bypass, selection, target conversion, and artifact writing. Human review approved candidate presentation living with prompt formatting, so `describe_scope_candidate()` should move to `prompts.py`.
 
 ## Precondition
 
@@ -27,10 +27,8 @@ Allowed files:
 
 ## Instructions
 
-1. Decide the final home for `describe_scope_candidate()` based on call-site meaning:
-   - Prefer moving it to `prompts.py` because it formats candidate detail lines for planning context.
-   - Keep it outside `scope_expansion.py` unless selection orchestration truly owns the wording.
-2. Update `routing_pipeline.py` to import candidate formatting from the chosen final module.
+1. Move `describe_scope_candidate()` to `prompts.py`. Keep its text behavior stable unless a test proves a change is required.
+2. Update `routing_pipeline.py` to import candidate formatting from `prompts.py`.
 3. Remove now-unused imports and helper dependencies from `scope_expansion.py`.
 4. Keep prompt text behavior stable. If formatting changes are unavoidable, make them smaller and verify them with outcome tests.
 5. Keep `__all__` accurate in every touched module.
@@ -39,6 +37,7 @@ Allowed files:
 ## Definition of Done
 
 - `scope_expansion.py` contains no candidate discovery helpers and no prompt-formatting helpers.
+- `prompts.py` owns both `scope_candidate_detail_lines()` and `describe_scope_candidate()`.
 - Candidate description formatting has one canonical public home with direct imports from call sites.
 - `prompts.py` has no runtime circular import with candidate or expansion modules.
 - Scope selection prompts still include candidate files, cluster labels, evidence, validation surfaces, and taste.
@@ -50,6 +49,6 @@ Run:
 
 ```sh
 uv run pytest tests/test_prompts_scope_selection.py tests/test_prompts.py
-uv run pytest tests/test_scope_expansion.py tests/test_scope_loop_integration.py
+uv run pytest tests/test_scope_candidates.py tests/test_scope_expansion.py tests/test_scope_loop_integration.py
 uv run pytest
 ```

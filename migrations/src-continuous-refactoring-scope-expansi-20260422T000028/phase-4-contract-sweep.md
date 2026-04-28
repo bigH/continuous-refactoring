@@ -18,6 +18,7 @@ Allowed files:
 - `src/continuous_refactoring/scope_expansion.py`
 - `src/continuous_refactoring/prompts.py`
 - `src/continuous_refactoring/__init__.py`
+- `tests/test_scope_candidates.py`
 - `tests/test_scope_expansion.py`
 - `tests/test_scope_selection.py`
 - `tests/test_prompts_scope_selection.py`
@@ -30,6 +31,7 @@ Allowed files:
    - Package import/export uniqueness still succeeds.
    - Scope expansion artifacts preserve their JSON keys and candidate field names.
    - Prompt rendering still includes candidate detail and taste sections.
+   - Pure discovery coverage lives in `tests/test_scope_candidates.py`, not in a stale `scope_expansion`-owned contract.
    - Parser errors still translate at the module boundary through `ContinuousRefactorError`.
 2. Remove stale imports, dead helper functions, and misleading comments created by the migration.
 3. Check `AGENTS.md` for module layout, vocabulary, and load-bearing subtlety drift caused by this migration. Update only if needed as a repo-contract exception required by the repository instructions.
@@ -39,7 +41,7 @@ Allowed files:
 ## Definition of Done
 
 - The final module boundary is reflected by source imports, tests, and `AGENTS.md` where applicable.
-- No stale references suggest candidate discovery still lives in `scope_expansion.py`.
+- No stale references suggest candidate discovery or its canonical tests still live in `scope_expansion.py`.
 - No compatibility shims, dead helpers, or duplicate exports remain.
 - Focused scope-selection tests and the full test suite pass.
 - The repository is shippable after this phase.
@@ -49,7 +51,7 @@ Allowed files:
 Run:
 
 ```sh
-uv run pytest tests/test_scope_expansion.py tests/test_scope_selection.py tests/test_prompts_scope_selection.py tests/test_scope_loop_integration.py
+uv run pytest tests/test_scope_candidates.py tests/test_scope_expansion.py tests/test_scope_selection.py tests/test_prompts_scope_selection.py tests/test_scope_loop_integration.py
 uv run pytest tests/test_continuous_refactoring.py tests/test_prompts.py
 uv run pytest
 ```

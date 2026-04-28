@@ -1,10 +1,14 @@
 # Phase 1: Characterize Discovery In Place
 
+## Status
+
+Human review on `2026-04-27` confirmed that the live tree already satisfies this phase and the full test suite passes. This file now records the characterization baseline that later phases must preserve.
+
 ## Objective
 
-Make candidate discovery behavior explicit and well-covered while all public symbols remain in `scope_expansion.py`.
+Keep candidate discovery explicit, well-covered, and in place while all public symbols remain in `scope_expansion.py`.
 
-This phase reduces extraction risk. It should clarify the data flow around evidence, scores, ranking, and candidate construction without changing import paths.
+This phase reduced extraction risk before symbols move. It should remain the behavioral baseline for later phases, not a prompt to re-add the same tests.
 
 ## Precondition
 
@@ -22,18 +26,14 @@ Do not edit package exports or production call sites in this phase.
 
 ## Instructions
 
-1. Add focused outcome tests for discovery behavior that is currently implicit. Prefer tests that build small real git repos through existing test helpers.
-2. Cover at least these cases if missing:
-   - An untracked seed returns only the seed candidate.
-   - Reverse references contribute evidence and can produce a local cluster when appropriate.
-   - `max_candidates` prunes deterministically without dropping the seed candidate.
-   - Local-only git co-change evidence does not create a noisy local sibling unless another local signal exists.
-3. Reshape `build_scope_candidates()` in place so the flow is easier to read:
-   - Keep score/support accumulation separate from candidate construction.
-   - Use a small frozen value object only if it makes the discovery flow clearer.
-   - Keep helper names domain-specific; avoid generic names like `data`, `temp`, or `thing`.
-4. Keep all public imports unchanged. Tests should still import discovery symbols from `continuous_refactoring.scope_expansion`.
-5. Do not move `describe_scope_candidate()` or prompt formatting in this phase.
+1. Treat the current discovery tests in `tests/test_scope_expansion.py` as load-bearing characterization, especially:
+   - an untracked seed returns only the seed candidate
+   - reverse references contribute evidence and can form a local cluster
+   - `max_candidates` prunes deterministically without dropping the seed candidate
+   - local-only git co-change evidence does not create a noisy local sibling unless another local signal exists
+2. Keep `build_scope_candidates()` readable as a small orchestration over named helpers for support accumulation, ranking, inclusion, and candidate construction.
+3. Keep all public imports unchanged. Tests should still import discovery symbols from `continuous_refactoring.scope_expansion` during this phase.
+4. Do not move `describe_scope_candidate()` or prompt formatting in this phase.
 
 ## Definition of Done
 

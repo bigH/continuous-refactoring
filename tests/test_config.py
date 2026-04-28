@@ -202,6 +202,34 @@ def test_load_manifest_rejects_project_entry_missing_required_fields(
         load_manifest()
 
 
+def test_load_manifest_rejects_project_entry_uuid_mismatch(
+    tmp_path: Path,
+) -> None:
+    manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "projects": {
+                    "abc": {
+                        "uuid": "different",
+                        "path": "/tmp/project",
+                        "git_remote": None,
+                        "created_at": "x",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ContinuousRefactorError,
+        match="project 'abc' uuid mismatch",
+    ):
+        load_manifest()
+
+
 @pytest.mark.parametrize("field_name", ["git_remote", "live_migrations_dir"])
 def test_load_manifest_rejects_non_string_optional_project_fields(
     tmp_path: Path,

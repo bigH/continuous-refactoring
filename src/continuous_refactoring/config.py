@@ -161,8 +161,13 @@ def _entry_from_object(uid: str, data: object) -> ProjectEntry:
         raise ContinuousRefactorError(
             f"Manifest file is malformed: project '{uid}' must be a JSON object."
         )
+    entry_uuid = _string_field(data, "uuid", project_id=uid, required=True)
+    if entry_uuid != uid:
+        raise ContinuousRefactorError(
+            f"Manifest file is malformed: project '{uid}' uuid mismatch."
+        )
     return ProjectEntry(
-        uuid=_string_field(data, "uuid", project_id=uid, required=True),
+        uuid=entry_uuid,
         path=_string_field(data, "path", project_id=uid, required=True),
         git_remote=_string_field(
             data,

@@ -102,6 +102,20 @@ def _require_phase_entry(
     return phase_entry
 
 
+def _next_phase_name(
+    phases: tuple[PhaseSpec, ...], phase_name: str, *, error_message: str,
+) -> str | None:
+    phase_index, _ = _require_phase_entry(
+        phases,
+        phase_name,
+        error_message=error_message,
+    )
+    next_index = phase_index + 1
+    if next_index >= len(phases):
+        return None
+    return phases[next_index].name
+
+
 def has_executable_phase(manifest: MigrationManifest) -> bool:
     """Whether the manifest's current_phase addresses an existing phase."""
     return _phase_entry(manifest.phases, manifest.current_phase) is not None
@@ -122,15 +136,11 @@ def resolve_current_phase(manifest: MigrationManifest) -> PhaseSpec:
 def advance_phase_cursor(
     manifest: MigrationManifest, completed_phase_name: str,
 ) -> str | None:
-    phase_index, _ = _require_phase_entry(
+    return _next_phase_name(
         manifest.phases,
         completed_phase_name,
         error_message=f"Cannot advance unknown phase {completed_phase_name!r}",
     )
-    next_index = phase_index + 1
-    if next_index >= len(manifest.phases):
-        return None
-    return manifest.phases[next_index].name
 
 
 def complete_manifest_phase(
@@ -156,11 +166,10 @@ def complete_manifest_phase(
         human_review_reason=None,
         cooldown_until=None,
     )
-    next_index = phase_index + 1
-    next_phase_name = (
-        manifest.phases[next_index].name
-        if next_index < len(manifest.phases)
-        else None
+    next_phase_name = _next_phase_name(
+        manifest.phases,
+        completed_phase_name,
+        error_message=f"Cannot complete unknown phase {completed_phase_name!r}",
     )
     if next_phase_name is None:
         return replace(updated_manifest, current_phase="", status="done")

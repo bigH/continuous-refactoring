@@ -9,6 +9,7 @@ import json
 import re
 import sys
 import time
+from types import ModuleType
 from pathlib import Path
 
 import pytest
@@ -232,6 +233,46 @@ def test_package_exports_contain_known_public_symbols() -> None:
     ):
         assert name in continuous_refactoring.__all__
         assert hasattr(continuous_refactoring, name)
+
+
+def test_collect_package_exports_reports_symbol_and_module_provenance() -> None:
+    module_a = ModuleType("continuous_refactoring.fake_alpha")
+    module_b = ModuleType("continuous_refactoring.fake_beta")
+
+    module_a.__all__ = ("dupe",)
+    module_b.__all__ = ("dupe",)
+    module_a.dupe = 1
+    module_b.dupe = 2
+
+    with pytest.raises(
+        RuntimeError,
+        match=r"Duplicate exported symbol .* 'dupe'.*original module: continuous_refactoring.fake_alpha.*conflicting module: continuous_refactoring.fake_beta",
+    ):
+        continuous_refactoring.collect_package_exports((module_a, module_b))
+
+    assert hasattr(continuous_refactoring, "dupe")
+    del continuous_refactoring.dupe
+
+
+def test_collect_package_exports_non_duplicate_path_remains_unchanged() -> None:
+    module_a = ModuleType("continuous_refactoring.fake_a")
+    module_b = ModuleType("continuous_refactoring.fake_b")
+
+    module_a.__all__ = ("alpha", "beta")
+    module_b.__all__ = ("gamma",)
+    module_a.alpha = 1
+    module_a.beta = 2
+    module_b.gamma = 3
+
+    exports = continuous_refactoring.collect_package_exports((module_a, module_b))
+
+    assert exports == ("alpha", "beta", "gamma")
+    assert continuous_refactoring.alpha == 1
+    assert continuous_refactoring.beta == 2
+    assert continuous_refactoring.gamma == 3
+
+    for name in ("alpha", "beta", "gamma"):
+        delattr(continuous_refactoring, name)
 
 
 def test_migration_manifest_codec_stays_internal() -> None:

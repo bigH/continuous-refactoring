@@ -42,12 +42,17 @@ _SUBMODULES: tuple[ModuleType, ...] = _PACKAGE_EXPORT_MODULES
 
 def collect_package_exports(modules: tuple[ModuleType, ...]) -> tuple[str, ...]:
     exports: list[str] = []
+    exporters: dict[str, str] = {}
     for module in modules:
+        module_name = module.__name__
         for name in module.__all__:
-            if name in exports:
+            if name in exporters:
                 raise RuntimeError(
-                    f"Duplicate exported symbol in package __init__: {name!r}"
+                    "Duplicate exported symbol in package __init__: "
+                    f"{name!r} (original module: {exporters[name]}, "
+                    f"conflicting module: {module_name})"
                 )
+            exporters[name] = module_name
             globals()[name] = getattr(module, name)
             exports.append(name)
     return tuple(exports)

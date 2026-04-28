@@ -349,6 +349,24 @@ def test_find_project_resolves_path(
     assert found.uuid == registered.entry.uuid
 
 
+def test_find_project_matches_normalized_paths(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_path = tmp_path / "findme-norm"
+    _init_repo(project_path)
+
+    registered = ProjectEntry(
+        uuid="normalized",
+        path=str(project_path / "."),
+        git_remote=None,
+        created_at="2025-01-01T00:00:00.000+00:00",
+    )
+    manifest = {registered.uuid: registered}
+    save_manifest(manifest)
+    found = find_project(project_path / "." / ".." / "findme-norm", manifest)
+    assert found == registered
+
+
 # ---------------------------------------------------------------------------
 # Taste
 # ---------------------------------------------------------------------------

@@ -8,6 +8,7 @@ import uuid
 from dataclasses import asdict, dataclass, replace
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Mapping
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
 
@@ -134,15 +135,26 @@ def _parse_manifest_payload(text: str) -> dict[str, object]:
     return raw
 
 
-def _str_field(
-    data: dict[str, object], key: str, *, project_id: str, required: bool
+def _require_string_field(
+    data: Mapping[str, object], key: str, *, project_id: str
+) -> str:
+    value = data.get(key)
+    if value is None:
+        raise ContinuousRefactorError(
+            f"Manifest file is malformed: project '{project_id}' missing '{key}'."
+        )
+    if not isinstance(value, str):
+        raise ContinuousRefactorError(
+            f"Manifest file is malformed: project '{project_id}' field '{key}' must be a string."
+        )
+    return value
+
+
+def _optional_string_field(
+    data: Mapping[str, object], key: str, *, project_id: str
 ) -> str | None:
     value = data.get(key)
     if value is None:
-        if required:
-            raise ContinuousRefactorError(
-                f"Manifest file is malformed: project '{project_id}' missing '{key}'."
-            )
         return None
     if not isinstance(value, str):
         raise ContinuousRefactorError(
@@ -151,27 +163,22 @@ def _str_field(
     return value
 
 
+def _entry_from_mapping(uid: str, data: Mapping[str, object]) -> ProjectEntry:
+    return ProjectEntry(
+        uuid=_require_string_field(data, "uuid", project_id=uid),
+        path=_require_string_field(data, "path", project_id=uid),
+        git_remote=_optional_string_field(data, "git_remote", project_id=uid),
+        created_at=_require_string_field(data, "created_at", project_id=uid),
+        live_migrations_dir=_optional_string_field(data, "live_migrations_dir", project_id=uid),
+    )
+
+
 def _entry_from_dict(uid: str, data: object) -> ProjectEntry:
     if not isinstance(data, dict):
         raise ContinuousRefactorError(
             f"Manifest file is malformed: project '{uid}' must be a JSON object."
         )
-
-    def required(key: str) -> str:
-        value = _str_field(data, key, project_id=uid, required=True)
-        assert value is not None
-        return value
-
-    def optional(key: str) -> str | None:
-        return _str_field(data, key, project_id=uid, required=False)
-
-    return ProjectEntry(
-        uuid=required("uuid"),
-        path=required("path"),
-        git_remote=optional("git_remote"),
-        created_at=required("created_at"),
-        live_migrations_dir=optional("live_migrations_dir"),
-    )
+    return _entry_from_mapping(uid, data)
 
 
 def load_manifest() -> dict[str, ProjectEntry]:
@@ -220,11 +227,14 @@ def config_is_current() -> bool:
 def find_project(
     path: Path, manifest: dict[str, ProjectEntry]
 ) -> ProjectEntry | None:
-    resolved = str(path.resolve())
     for entry in manifest.values():
-        if entry.path == resolved:
+        if _project_path_matches(path, entry.path):
             return entry
     return None
+
+
+def _project_path_matches(path: Path, stored_path: str) -> bool:
+    return path.resolve() == Path(stored_path).resolve()
 
 
 def _detect_git_remote(path: Path) -> str | None:
@@ -296,11 +306,16 @@ def resolve_live_migrations_dir(project: ResolvedProject) -> Path | None:
     return resolved
 
 
+def _get_project(manifest: dict[str, ProjectEntry], project_uuid: str) -> ProjectEntry:
+    project = manifest.get(project_uuid)
+    if project is None:
+        raise ContinuousRefactorError(f"Project not registered: {project_uuid}")
+    return project
+
+
 def set_live_migrations_dir(project_uuid: str, relative_dir: str) -> None:
     manifest = load_manifest()
-    old = manifest.get(project_uuid)
-    if old is None:
-        raise ContinuousRefactorError(f"Project not registered: {project_uuid}")
+    old = _get_project(manifest, project_uuid)
     manifest[project_uuid] = replace(old, live_migrations_dir=relative_dir)
     save_manifest(manifest)
 

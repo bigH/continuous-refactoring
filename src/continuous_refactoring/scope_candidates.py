@@ -20,6 +20,7 @@ __all__ = [
 from continuous_refactoring.targeting import list_tracked_files
 
 ScopeCandidateKind = Literal["seed", "local-cluster", "cross-cluster"]
+_SupportKind = Literal["source-test-pairing", "direct-reference", "reverse-reference", "git-cochange"]
 
 _IDENTIFIER_BOUNDARY = r"[A-Za-z0-9_]"
 _COMMON_STEMS = {"__init__", "index", "main", "test"}
@@ -38,6 +39,7 @@ class ScopeCandidate:
 class _CandidateSupport:
     scores: dict[str, int]
     evidence: dict[str, tuple[str, ...]]
+    support_kinds: dict[str, tuple[_SupportKind, ...]]
 
 
 def _is_test_file(path: str) -> bool:
@@ -254,12 +256,15 @@ def _candidate_from_files(
 
 def _record_support(
     support_lines: dict[str, list[str]],
+    support_kinds: dict[str, list[_SupportKind]],
     scores: Counter[str],
     file_path: str,
+    support_kind: _SupportKind,
     evidence_line: str,
     score: int,
 ) -> None:
     support_lines[file_path].append(evidence_line)
+    support_kinds[file_path].append(support_kind)
     scores[file_path] += score
 
 
@@ -271,13 +276,16 @@ def _candidate_support(
     max_git_commits: int,
 ) -> _CandidateSupport:
     support_lines: dict[str, list[str]] = defaultdict(list)
+    support_kinds: dict[str, list[_SupportKind]] = defaultdict(list)
     scores: Counter[str] = Counter()
 
     for paired in _paired_source_test_files(seed_file, tracked):
         _record_support(
             support_lines,
+            support_kinds,
             scores,
             paired,
+            "source-test-pairing",
             f"source/test pairing with {seed_file}",
             50,
         )
@@ -285,8 +293,10 @@ def _candidate_support(
     for path, alias in _find_direct_references(seed_file, tracked, repo_root).items():
         _record_support(
             support_lines,
+            support_kinds,
             scores,
             path,
+            "direct-reference",
             f"direct reference/import-like match from {seed_file}: {alias}",
             30,
         )
@@ -294,8 +304,10 @@ def _candidate_support(
     for path, alias in _find_reverse_references(seed_file, tracked, repo_root).items():
         _record_support(
             support_lines,
+            support_kinds,
             scores,
             path,
+            "reverse-reference",
             f"reverse reference/import-like match to {seed_file}: {alias}",
             30,
         )
@@ -305,8 +317,10 @@ def _candidate_support(
     ):
         _record_support(
             support_lines,
+            support_kinds,
             scores,
             path,
+            "git-cochange",
             f"git co-change with {seed_file}: {count} recent commit(s)",
             min(count, 5) * 5,
         )
@@ -317,14 +331,18 @@ def _candidate_support(
             path: tuple(dict.fromkeys(lines))
             for path, lines in sorted(support_lines.items())
         },
+        support_kinds={
+            path: tuple(dict.fromkeys(kinds))
+            for path, kinds in sorted(support_kinds.items())
+        },
     )
 
 
 def _rank_paths(
     scores: dict[str, int],
-    evidence_by_file: dict[str, tuple[str, ...]],
+    support_kinds_by_file: dict[str, tuple[_SupportKind, ...]],
     seed_file: str,
-    include: Callable[[bool, tuple[str, ...]], bool],
+    include: Callable[[bool, tuple[_SupportKind, ...]], bool],
 ) -> list[str]:
     seed_parent = _cluster_label(seed_file)
     ranked = [
@@ -332,24 +350,24 @@ def _rank_paths(
         for path, score in scores.items()
         if include(
             _cluster_label(path) == seed_parent,
-            evidence_by_file.get(path, ()),
+            support_kinds_by_file.get(path, ()),
         )
     ]
     ranked.sort(key=lambda item: (-item[0], item[1]))
     return [path for _score, path in ranked]
 
 
-def _include_local(same_dir: bool, evidence: tuple[str, ...]) -> bool:
-    has_pairing = any(line.startswith("source/test pairing") for line in evidence)
-    has_non_cochange = any(not line.startswith("git co-change") for line in evidence)
+def _include_local(same_dir: bool, support_kinds: tuple[_SupportKind, ...]) -> bool:
+    has_pairing = "source-test-pairing" in support_kinds
+    has_non_cochange = any(kind != "git-cochange" for kind in support_kinds)
     return has_pairing or (same_dir and has_non_cochange)
 
 
-def _include_cross(same_dir: bool, evidence: tuple[str, ...]) -> bool:
+def _include_cross(same_dir: bool, support_kinds: tuple[_SupportKind, ...]) -> bool:
     return not (
         same_dir
-        and evidence
-        and all(line.startswith("git co-change") for line in evidence)
+        and support_kinds
+        and all(kind == "git-cochange" for kind in support_kinds)
     )
 
 
@@ -377,7 +395,7 @@ def build_scope_candidates(
     candidates = [_build_seed_candidate(seed_file)]
 
     local_ranked = _rank_paths(
-        support.scores, support.evidence, seed_file, _include_local,
+        support.scores, support.support_kinds, seed_file, _include_local,
     )
     local_extras = tuple(local_ranked[: max_files - 1])
     if local_extras:
@@ -389,7 +407,7 @@ def build_scope_candidates(
         )
 
     cross_ranked = _rank_paths(
-        support.scores, support.evidence, seed_file, _include_cross,
+        support.scores, support.support_kinds, seed_file, _include_cross,
     )
     cross_extras = tuple(cross_ranked[: max_files - 1])
     if cross_extras:

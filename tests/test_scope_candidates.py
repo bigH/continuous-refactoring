@@ -5,7 +5,11 @@ from pathlib import Path
 import continuous_refactoring
 
 from conftest import init_repo
-from continuous_refactoring.scope_candidates import build_scope_candidates
+from continuous_refactoring.scope_candidates import (
+    _include_cross,
+    _include_local,
+    build_scope_candidates,
+)
 from continuous_refactoring.targeting import Target
 
 
@@ -106,6 +110,18 @@ def test_local_git_cochange_alone_does_not_add_noisy_local_sibling(
     candidates = build_scope_candidates(_seed_target("src/foo.py"), tmp_path)
 
     assert [candidate.kind for candidate in candidates] == ["seed"]
+
+
+def test_local_scope_inclusion_uses_structured_support_kinds() -> None:
+    assert _include_local(True, ("direct-reference",))
+    assert _include_local(False, ("source-test-pairing",))
+    assert not _include_local(True, ("git-cochange",))
+
+
+def test_cross_scope_inclusion_filters_same_dir_git_only_support() -> None:
+    assert not _include_cross(True, ("git-cochange",))
+    assert _include_cross(True, ("git-cochange", "reverse-reference"))
+    assert _include_cross(False, ("git-cochange",))
 
 
 def test_git_cochange_neighbors_are_capped_and_deterministic(tmp_path: Path) -> None:

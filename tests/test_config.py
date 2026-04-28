@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import random
+import json
 import subprocess
 import uuid
 from pathlib import Path
@@ -19,6 +20,7 @@ from continuous_refactoring.config import (
     find_project,
     global_dir,
     load_manifest,
+    load_config_version,
     load_taste,
     parse_taste_version,
     register_project,
@@ -97,6 +99,65 @@ def test_load_manifest_rejects_non_object_payload(
 
     with pytest.raises(ContinuousRefactorError, match="malformed"):
         load_manifest()
+
+
+def test_load_config_version_rejects_non_object_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text("[]", encoding="utf-8")
+
+    with pytest.raises(ContinuousRefactorError, match="malformed"):
+        load_config_version()
+
+
+def test_load_manifest_wraps_json_parse_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parse_error = json.JSONDecodeError("mock parse error", "", 0)
+
+    def broken_payload() -> dict[str, object]:
+        raise ContinuousRefactorError("Manifest file is malformed") from parse_error
+
+    monkeypatch.setattr(config, "_load_manifest_payload", broken_payload)
+
+    with pytest.raises(ContinuousRefactorError) as exc_info:
+        load_manifest()
+
+    assert exc_info.value.__cause__ is parse_error
+
+
+def test_load_config_version_wraps_json_parse_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    parse_error = json.JSONDecodeError("mock parse error", "", 0)
+
+    def broken_payload() -> dict[str, object]:
+        raise ContinuousRefactorError("Manifest file is malformed") from parse_error
+
+    monkeypatch.setattr(config, "_load_manifest_payload", broken_payload)
+
+    with pytest.raises(ContinuousRefactorError) as exc_info:
+        load_config_version()
+
+    assert exc_info.value.__cause__ is parse_error
+
+
+def test_load_manifest_wraps_read_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    io_error = OSError("mock read error")
+
+    def broken_payload() -> dict[str, object]:
+        raise ContinuousRefactorError("Manifest file could not be read") from io_error
+
+    monkeypatch.setattr(config, "_load_manifest_payload", broken_payload)
+
+    with pytest.raises(ContinuousRefactorError) as exc_info:
+        load_manifest()
+
+    assert exc_info.value.__cause__ is io_error
 
 
 def test_load_manifest_rejects_non_mapping_projects(

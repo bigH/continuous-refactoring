@@ -170,6 +170,7 @@ def try_migration_tick(
     now = datetime.now(timezone.utc)
     candidates = enumerate_eligible_manifests(live_dir, now, resolved_budget)
     deferred_record: DecisionRecord | None = None
+    pending_defers: list[tuple[MigrationManifest, Path]] = []
 
     for manifest, manifest_path in candidates:
         phase = resolve_current_phase(manifest)
@@ -192,14 +193,16 @@ def try_migration_tick(
                 reason,
                 max_allowed_effort=resolved_budget.max_allowed_effort,
             )
-            save_manifest(
-                _defer_manifest(
-                    manifest,
-                    now,
-                    verdict="effort-over-budget",
-                    reason=reason,
-                ),
-                manifest_path,
+            pending_defers.append(
+                (
+                    _defer_manifest(
+                        manifest,
+                        now,
+                        verdict="effort-over-budget",
+                        reason=reason,
+                    ),
+                    manifest_path,
+                )
             )
             deferred_record = _effort_deferred_record(reason, repo_root, target_label)
             continue
@@ -274,14 +277,18 @@ def try_migration_tick(
                 return "abandon", _phase_failure_record(outcome, repo_root, target_label)
             return "commit", _phase_commit_record(outcome, repo_root, target_label)
 
-        save_manifest(
-            _defer_manifest(manifest, now, verdict=verdict, reason=reason),
-            manifest_path,
+        pending_defers.append(
+            (
+                _defer_manifest(manifest, now, verdict=verdict, reason=reason),
+                manifest_path,
+            )
         )
         if verdict == "unverifiable":
+            _save_pending_defers(pending_defers)
             return "blocked", _human_review_record(reason, repo_root, target_label)
         deferred_record = _deferred_record(reason, repo_root, target_label)
 
+    _save_pending_defers(pending_defers)
     return "not-routed", deferred_record
 
 
@@ -306,6 +313,13 @@ def _is_baseline_validation_uncertainty(reason: str) -> bool:
         phrase in reason_lower
         for phrase in _BASELINE_VALIDATION_UNCERTAINTY_PHRASES
     )
+
+
+def _save_pending_defers(
+    pending_defers: list[tuple[MigrationManifest, Path]],
+) -> None:
+    for deferred_manifest, manifest_path in pending_defers:
+        save_manifest(deferred_manifest, manifest_path)
 
 
 def _effort_defer_reason(

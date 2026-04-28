@@ -12,7 +12,7 @@
       "effort_reason": null,
       "file": "phase-1-targeting-parse-foundation.md",
       "name": "targeting-parse-foundation",
-      "precondition": "- `rg -n \\\"def _parse_paths_arg\\\\(|parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` returns no matches before edits. - `rg -n \\\"def parse_paths_arg\\\\(\\\" src/continuous_refactoring/targeting.py` returns no matches before edits.",
+      "precondition": "- `rg -n \\\"def parse_paths_arg\\\\(\\\" src/continuous_refactoring/targeting.py` returns no matches before edits. - Existing `loop.py` path parsing may still be present; phase 2 owns loop delegation and removal.",
       "required_effort": null
     },
     {
@@ -20,7 +20,7 @@
       "effort_reason": null,
       "file": "phase-2-loop-delegates-targeting-parse.md",
       "name": "loop-delegates-targeting-parse",
-      "precondition": "- `phase-1-targeting-parse-foundation.md` is marked complete in the migration manifest. - `rg -n \\\"def parse_paths_arg\\\\(\\\" src/continuous_refactoring/targeting.py` finds the parser in `targeting.py`. - `rg -n \\\"def _parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` returns no matches. - `rg -n \\\"_resolve_targets_from_args\\\\(\\\" src/continuous_refactoring/loop.py` matches one call path for argument resolution.",
+      "precondition": "- `phase-1-targeting-parse-foundation.md` is marked complete in the migration manifest. - `rg -n \\\"def parse_paths_arg\\\\(\\\" src/continuous_refactoring/targeting.py` finds the parser in `targeting.py`. - `rg -n \\\"def _parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` finds the local parser that this phase removes. - `rg -n \\\"_resolve_targets_from_args\\\\(\\\" src/continuous_refactoring/loop.py` matches one call path for argument resolution.",
       "required_effort": null
     },
     {

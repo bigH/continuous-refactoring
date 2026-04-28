@@ -612,6 +612,188 @@ def test_not_ready_phase_defers_without_overwriting_existing_wake_up(
     assert reloaded.awaiting_human_review is False
 
 
+def test_deferred_candidate_does_not_dirty_worktree_before_later_ready_check(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    now = _utc_now()
+    first_path = _save(
+        _make_manifest(
+            "first-not-ready",
+            last_touch=now - timedelta(hours=24),
+            created_at=now - timedelta(hours=2),
+        ),
+        live_dir,
+    )
+    second_path = _save(
+        _make_manifest(
+            "second-ready",
+            last_touch=now - timedelta(hours=24),
+            created_at=now - timedelta(hours=1),
+        ),
+        live_dir,
+    )
+    _git_commit_all(run_once_env)
+
+    ready_calls: list[str] = []
+    execute_statuses: list[list[str]] = []
+
+    def fake_ready(
+        phase: PhaseSpec,
+        manifest: MigrationManifest,
+        *_args: object,
+        **_kwargs: object,
+    ) -> tuple[str, str]:
+        ready_calls.append(manifest.name)
+        if manifest.name == "first-not-ready":
+            return ("no", "wait for prerequisite")
+        assert continuous_refactoring.workspace_status_lines(run_once_env) == []
+        return ("yes", "ready")
+
+    def fake_execute(*_args: object, **_kwargs: object) -> ExecutePhaseOutcome:
+        execute_statuses.append(
+            continuous_refactoring.workspace_status_lines(run_once_env)
+        )
+        return ExecutePhaseOutcome(status="done", reason="ok")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.check_phase_ready",
+        fake_ready,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.execute_phase",
+        fake_execute,
+    )
+
+    outcome, record = _tick(live_dir, run_once_env)
+
+    assert outcome == "commit"
+    assert record is not None
+    assert ready_calls == ["first-not-ready", "second-ready"]
+    assert execute_statuses == [[]]
+    assert load_manifest(first_path).cooldown_until is None
+    assert load_manifest(second_path).cooldown_until is None
+
+
+def test_effort_deferred_candidate_does_not_dirty_worktree_before_ready_check(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    now = _utc_now()
+    high_effort_phase = replace(_PHASE_0, required_effort="xhigh")
+    first_path = _save(
+        _make_manifest(
+            "first-over-budget",
+            last_touch=now - timedelta(hours=24),
+            created_at=now - timedelta(hours=2),
+            phases=(high_effort_phase, _PHASE_1),
+        ),
+        live_dir,
+    )
+    _save(
+        _make_manifest(
+            "second-ready",
+            last_touch=now - timedelta(hours=24),
+            created_at=now - timedelta(hours=1),
+        ),
+        live_dir,
+    )
+    _git_commit_all(run_once_env)
+
+    ready_calls: list[str] = []
+    execute_statuses: list[list[str]] = []
+
+    def fake_ready(
+        phase: PhaseSpec,
+        manifest: MigrationManifest,
+        *_args: object,
+        **_kwargs: object,
+    ) -> tuple[str, str]:
+        ready_calls.append(manifest.name)
+        assert continuous_refactoring.workspace_status_lines(run_once_env) == []
+        return ("yes", "ready")
+
+    def fake_execute(*_args: object, **_kwargs: object) -> ExecutePhaseOutcome:
+        execute_statuses.append(
+            continuous_refactoring.workspace_status_lines(run_once_env)
+        )
+        return ExecutePhaseOutcome(status="done", reason="ok")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.check_phase_ready",
+        fake_ready,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.execute_phase",
+        fake_execute,
+    )
+
+    outcome, record = _tick(
+        live_dir,
+        run_once_env,
+        effort_budget=EffortBudget(default_effort="high", max_allowed_effort="high"),
+    )
+
+    assert outcome == "commit"
+    assert record is not None
+    assert ready_calls == ["second-ready"]
+    assert execute_statuses == [[]]
+    assert load_manifest(first_path).cooldown_until is None
+
+
+def test_pending_deferred_candidate_is_saved_when_later_phase_blocks(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    now = _utc_now()
+    first_path = _save(
+        _make_manifest(
+            "first-not-ready",
+            last_touch=now - timedelta(hours=24),
+            created_at=now - timedelta(hours=2),
+        ),
+        live_dir,
+    )
+    second_path = _save(
+        _make_manifest(
+            "second-needs-review",
+            last_touch=now - timedelta(hours=24),
+            created_at=now - timedelta(hours=1),
+        ),
+        live_dir,
+    )
+    _git_commit_all(run_once_env)
+
+    def fake_ready(
+        phase: PhaseSpec,
+        manifest: MigrationManifest,
+        *_args: object,
+        **_kwargs: object,
+    ) -> tuple[str, str]:
+        if manifest.name == "first-not-ready":
+            return ("no", "wait for prerequisite")
+        return ("unverifiable", "needs manual check")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.check_phase_ready",
+        fake_ready,
+    )
+    _patch_execute_phase_trap(monkeypatch)
+
+    outcome, record = _tick(live_dir, run_once_env)
+
+    first = load_manifest(first_path)
+    second = load_manifest(second_path)
+    assert outcome == "blocked"
+    assert record is not None
+    assert record.failure_kind == "phase-ready-unverifiable"
+    assert first.cooldown_until is not None
+    assert first.awaiting_human_review is False
+    assert second.cooldown_until is not None
+    assert second.awaiting_human_review is True
+    assert second.human_review_reason == "needs manual check"
+
+
 def test_missing_fresh_validation_evidence_defers_without_human_review(
     run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

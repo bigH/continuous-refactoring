@@ -25,7 +25,7 @@ Make `loop.py` a thin orchestration layer by delegating all target argument pars
 ## Precondition
 - `phase-1-targeting-parse-foundation.md` is marked complete in the migration manifest.
 - `rg -n \"def parse_paths_arg\\(\" src/continuous_refactoring/targeting.py` finds the parser in `targeting.py`.
-- `rg -n \"def _parse_paths_arg\\(\" src/continuous_refactoring/loop.py` returns no matches.
+- `rg -n \"def _parse_paths_arg\\(\" src/continuous_refactoring/loop.py` finds the local parser that this phase removes.
 - `rg -n \"_resolve_targets_from_args\\(\" src/continuous_refactoring/loop.py` matches one call path for argument resolution.
 
 ## Definition of Done

@@ -75,11 +75,11 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
   - `make_run_once_args` / `make_run_loop_args` — build argparse `Namespace`s so tests bypass the CLI layer.
 - Claude stream-json parsing is covered with recorded NDJSON at `tests/fixtures/claude_stream_json/selection.stdout.log`.
 
-## 9. Active migration of `loop.py`
+## 9. Structural `loop.py` work
 
-Active migration: `migrations/src-continuous-refactoring-loop-py-20260428T032118/`.
-Keep `loop.py` edits inside that live plan's scoped phase work until the
-migration is complete.
+No dedicated `loop.py` migration is active. Keep broad structural `loop.py`
+edits behind a live migration plan; narrow edits are allowed only when an
+active phase explicitly names `loop.py` in scope.
 
 ## 10. Load-bearing subtleties — do not "simplify" without reading
 
@@ -89,6 +89,7 @@ migration is complete.
 - **Watchdog** (`agent.py:549-665`) — silent ≥5 min → SIGTERM → SIGKILL → `ContinuousRefactorError`.
 - **Driver owns commits** (`refactor_attempts.py:_finalize_commit()`, called from `loop.py`) — if an agent commits mid-attempt, driver does `git reset --soft head_before` and re-commits with its own message.
 - **Migration scheduling split** (`migrations.py`, `loop.py`, `phases.py`) — `last_touch` is activity bookkeeping, not the 6-hour retry gate. Deferred/blocked migrations set `cooldown_until`; successful phase completion clears deferral markers so the next ready phase can run immediately.
+- **Migration tick deferral writes** (`migration_tick.py`) — ready-check deferrals are queued while scanning candidates and saved only when the tick finds no executable phase or blocks for human review. Do not save a deferred manifest before checking later candidates; that dirties the worktree and can make ready-checks reject runnable phases.
 - **Manifest codec boundary** (`migration_manifest_codec.py`, `migrations.py`) — codec owns legacy `ready_when`, legacy integer `current_phase`, duplicate phase-name rejection, and saved JSON formatting. `load_manifest()` / `save_manifest()` own filesystem and JSON boundary errors.
 - **Review CLI boundary** (`cli.py`, `review_cli.py`) — `cli.py` owns parser wiring and run dispatch; migration review internals live in `review_cli.py`, which stays internal and out of package-root `_SUBMODULES`.
 - **Human-review gating** (`planning.py`, `migration_tick.py`, `review_cli.py`) — migrations with `awaiting_human_review=true` must be invisible to automated migration ticks/ready-checks until `review perform` clears the flag.

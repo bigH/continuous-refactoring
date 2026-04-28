@@ -6,32 +6,14 @@ from pathlib import Path
 
 import pytest
 
-from conftest import init_repo, init_repo_with_temp_home
+from conftest import init_repo, init_repo_with_temp_home, load_single_registered_project
 
 from continuous_refactoring.cli import _handle_init, _handle_taste
 from continuous_refactoring.config import (
-    ProjectEntry,
+    app_data_dir,
     default_taste_text,
-    load_manifest,
     register_project,
 )
-
-def _xdg_home(tmp_path: Path) -> Path:
-    return tmp_path / "xdg"
-
-
-def _project_dir(xdg_path: Path, entry_uuid: str) -> Path:
-    return xdg_path / "continuous-refactoring" / "projects" / entry_uuid
-
-
-def _taste_path(xdg_path: Path, entry_uuid: str) -> Path:
-    return _project_dir(xdg_path, entry_uuid) / "taste.md"
-
-
-def _single_manifest_entry() -> ProjectEntry:
-    manifest = load_manifest()
-    assert len(manifest) == 1
-    return next(iter(manifest.values()))
 
 
 # ---------------------------------------------------------------------------
@@ -47,9 +29,8 @@ def test_init_creates_manifest_entry(
     args = argparse.Namespace(path=repo)
     _handle_init(args)
 
-    entry = _single_manifest_entry()
-    assert entry is not None
-    assert entry.path == str(repo.resolve())
+    project = load_single_registered_project()
+    assert project.entry.path == str(repo.resolve())
 
 
 def test_init_creates_project_dir(
@@ -60,9 +41,8 @@ def test_init_creates_project_dir(
     args = argparse.Namespace(path=repo)
     _handle_init(args)
 
-    entry = _single_manifest_entry()
-    project_dir = _project_dir(_xdg_home(tmp_path), entry.uuid)
-    assert project_dir.is_dir()
+    project = load_single_registered_project()
+    assert project.project_dir.is_dir()
 
 
 def test_init_creates_taste_template(
@@ -73,10 +53,9 @@ def test_init_creates_taste_template(
     args = argparse.Namespace(path=repo)
     _handle_init(args)
 
-    entry = _single_manifest_entry()
-    taste = _taste_path(_xdg_home(tmp_path), entry.uuid)
-    assert taste.exists()
-    assert taste.read_text(encoding="utf-8") == default_taste_text()
+    project = load_single_registered_project()
+    assert project.taste_path.exists()
+    assert project.taste_path.read_text(encoding="utf-8") == default_taste_text()
 
 
 def test_init_idempotent(
@@ -86,14 +65,14 @@ def test_init_idempotent(
     args = argparse.Namespace(path=repo)
 
     _handle_init(args)
-    first = _single_manifest_entry()
-    taste_path = _taste_path(_xdg_home(tmp_path), first.uuid)
+    first = load_single_registered_project()
+    taste_path = first.taste_path
     custom_content = "- My custom taste.\n"
     taste_path.write_text(custom_content, encoding="utf-8")
 
     _handle_init(args)
-    second = _single_manifest_entry()
-    assert first.uuid == second.uuid
+    second = load_single_registered_project()
+    assert first.entry.uuid == second.entry.uuid
     assert taste_path.read_text(encoding="utf-8") == custom_content
 
 
@@ -113,11 +92,11 @@ def test_init_with_explicit_path(
     args = argparse.Namespace(path=repo)
     _handle_init(args)
 
-    entry = _single_manifest_entry()
-    assert entry.path == str(repo.resolve())
+    project = load_single_registered_project()
+    assert project.entry.path == str(repo.resolve())
 
     out = capsys.readouterr().out
-    assert entry.uuid in out
+    assert project.entry.uuid in out
 
 
 def test_init_detects_git_remote(
@@ -133,9 +112,9 @@ def test_init_detects_git_remote(
     args = argparse.Namespace(path=repo)
     _handle_init(args)
 
-    assert _xdg_home(tmp_path).is_dir()
-    entry = _single_manifest_entry()
-    assert entry.git_remote == remote_url
+    assert (tmp_path / "xdg").is_dir()
+    project = load_single_registered_project()
+    assert project.entry.git_remote == remote_url
 
 
 def test_init_live_migrations_dir_creates_and_stores(
@@ -148,21 +127,21 @@ def test_init_live_migrations_dir_creates_and_stores(
     args = argparse.Namespace(path=repo, live_migrations_dir=Path(".migrations"))
     _handle_init(args)
 
-    entry = _single_manifest_entry()
-    assert entry.live_migrations_dir == ".migrations"
+    project = load_single_registered_project()
+    assert project.entry.live_migrations_dir == ".migrations"
     assert (repo / ".migrations").is_dir()
 
     out = capsys.readouterr().out
-    assert entry.uuid in out
+    assert project.entry.uuid in out
     assert "Live migrations dir:" in out
 
     # Second call is idempotent: overwrites value, no duplicate entries
     args2 = argparse.Namespace(path=repo, live_migrations_dir=Path("other-dir"))
     _handle_init(args2)
 
-    entry2 = _single_manifest_entry()
-    assert entry2.uuid == entry.uuid
-    assert entry2.live_migrations_dir == "other-dir"
+    project2 = load_single_registered_project()
+    assert project2.entry.uuid == project.entry.uuid
+    assert project2.entry.live_migrations_dir == "other-dir"
     assert (repo / "other-dir").is_dir()
 
 
@@ -239,7 +218,7 @@ def test_taste_global_flag(
     _handle_taste(args)
 
     out = capsys.readouterr().out.strip()
-    expected = _xdg_home(tmp_path) / "continuous-refactoring" / "global" / "taste.md"
+    expected = app_data_dir() / "global" / "taste.md"
     assert out == str(expected)
     assert expected.exists()
     assert expected.read_text(encoding="utf-8") == default_taste_text()

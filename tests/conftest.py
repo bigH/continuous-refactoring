@@ -5,6 +5,7 @@ import hashlib
 import json
 import sys
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -13,7 +14,12 @@ import pytest
 import continuous_refactoring
 import continuous_refactoring.loop
 from continuous_refactoring.artifacts import CommandCapture
-from continuous_refactoring.config import register_project
+from continuous_refactoring.config import (
+    ProjectEntry,
+    app_data_dir,
+    load_manifest,
+    register_project,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -137,6 +143,13 @@ def make_taste_args(
     )
 
 
+@dataclass(frozen=True)
+class RegisteredProjectLayout:
+    entry: ProjectEntry
+    project_dir: Path
+    taste_path: Path
+
+
 def init_repo(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     continuous_refactoring.run_command(["git", "init", "-b", "main"], cwd=path)
@@ -169,6 +182,18 @@ def init_taste_project(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     taste_path = project.project_dir / "taste.md"
     taste_path.parent.mkdir(parents=True, exist_ok=True)
     return taste_path
+
+
+def load_single_registered_project() -> RegisteredProjectLayout:
+    manifest = load_manifest()
+    assert len(manifest) == 1
+    entry = next(iter(manifest.values()))
+    project_dir = app_data_dir() / "projects" / entry.uuid
+    return RegisteredProjectLayout(
+        entry=entry,
+        project_dir=project_dir,
+        taste_path=project_dir / "taste.md",
+    )
 
 
 def write_fake_codex(bin_dir: Path) -> Path:

@@ -1,10 +1,10 @@
 {
-  "awaiting_human_review": false,
-  "cooldown_until": null,
+  "awaiting_human_review": true,
+  "cooldown_until": "2026-04-28T10:37:07.935+00:00",
   "created_at": "2026-04-22T00:00:28.596-07:00",
   "current_phase": "trim-expansion-orchestration",
-  "human_review_reason": null,
-  "last_touch": "2026-04-27T21:37:07.848-07:00",
+  "human_review_reason": "Phase 2 and earlier phase completion are reflected in migration state and symbol ownership/imports are in the expected places, and the tree is clean, but the precondition\u2019s \u201cfull test suite passes\u201d requirement has no fresh verification evidence available in this check.",
+  "last_touch": "2026-04-28T04:37:07.935+00:00",
   "name": "src-continuous-refactoring-scope-expansi-20260422T000028",
   "phases": [
     {
@@ -33,5 +33,5 @@
     }
   ],
   "status": "ready",
-  "wake_up_on": null
+  "wake_up_on": "2026-05-05T04:37:07.935+00:00"
 }

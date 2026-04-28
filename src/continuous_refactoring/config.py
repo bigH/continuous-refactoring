@@ -355,14 +355,23 @@ def ensure_taste_file(path: Path) -> Path:
     return path
 
 
+def _read_taste_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ContinuousRefactorError(
+            f"Taste file could not be read: {path}"
+        ) from exc
+
+
 def load_taste(project: ResolvedProject | None) -> str:
     if project is not None:
         project_taste = project.project_dir / "taste.md"
         if project_taste.exists():
-            return project_taste.read_text(encoding="utf-8")
+            return _read_taste_text(project_taste)
 
     global_taste = global_dir() / "taste.md"
     if global_taste.exists():
-        return global_taste.read_text(encoding="utf-8")
+        return _read_taste_text(global_taste)
 
     return _DEFAULT_TASTE

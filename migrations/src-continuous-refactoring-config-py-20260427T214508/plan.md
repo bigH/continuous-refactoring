@@ -7,14 +7,18 @@ Harden `continuous_refactoring.config` in-place by making manifest/config IO and
 `in-place-config-hygiene`
 
 ## Scope
+- `AGENTS.md`
 - `src/continuous_refactoring/config.py`
 - `src/continuous_refactoring/loop.py`
 - `src/continuous_refactoring/cli.py`
 - `src/continuous_refactoring/prompts.py`
 - `src/continuous_refactoring/agent.py`
 - `src/continuous_refactoring/artifacts.py`
+- `src/continuous_refactoring/failure_report.py`
 - `src/continuous_refactoring/git.py`
+- `src/continuous_refactoring/review_cli.py`
 - `tests/test_config.py`
+- `tests/test_cli_taste_warning.py`
 - `tests/test_cli_init_taste.py`
 - `tests/test_cli_upgrade.py`
 - `tests/test_run_once_regression.py`
@@ -60,7 +64,7 @@ flowchart TD
 - `phase-1` gate: `uv run pytest tests/test_config.py`
 - `phase-2` gate: `uv run pytest tests/test_config.py`
 - `phase-3` gate: `uv run pytest tests/test_config.py`
-- `phase-4` gate: `uv run pytest tests/test_config.py tests/test_cli_init_taste.py tests/test_cli_upgrade.py tests/test_run_once_regression.py`
+- `phase-4` gate: `uv run pytest tests/test_config.py tests/test_cli_taste_warning.py tests/test_cli_init_taste.py tests/test_cli_upgrade.py tests/test_run_once_regression.py`
 - Post-merge gate: `uv run pytest`
 
 ## Verification rule

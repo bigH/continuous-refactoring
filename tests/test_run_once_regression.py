@@ -11,7 +11,7 @@ import continuous_refactoring
 import continuous_refactoring.loop
 import continuous_refactoring.refactor_attempts
 from continuous_refactoring.artifacts import CommandCapture
-from continuous_refactoring.config import load_taste
+from continuous_refactoring.config import default_taste_text, load_taste
 from continuous_refactoring.prompts import DEFAULT_REFACTORING_PROMPT, compose_full_prompt
 from continuous_refactoring.targeting import resolve_targets
 
@@ -59,6 +59,29 @@ def test_run_once_prompt_matches_compose_full_prompt(
 
     expected = _expected_one_shot_prompt(run_once_env, args.validation_command)
     assert assert_single_prompt(prompt_capture) == expected
+
+
+def test_load_taste_safe_falls_back_when_global_taste_unreadable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    taste_path = tmp_path / "xdg" / "continuous-refactoring" / "global" / "taste.md"
+    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path.write_text(default_taste_text(), encoding="utf-8")
+    io_error = OSError("mock read error")
+    original_read_text = Path.read_text
+
+    def broken_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        if self == taste_path:
+            raise io_error
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", broken_read_text)
+
+    assert continuous_refactoring.loop._load_taste_safe(repo) == default_taste_text()
 
 
 def test_run_once_paths_arg_trims_whitespace(

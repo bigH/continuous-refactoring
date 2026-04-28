@@ -160,6 +160,52 @@ def test_load_manifest_wraps_read_fault(
     assert exc_info.value.__cause__ is io_error
 
 
+def test_load_taste_wraps_project_read_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    project = register_project(repo)
+    taste_path = project.project_dir / "taste.md"
+    taste_path.write_text(default_taste_text(), encoding="utf-8")
+    io_error = OSError("mock read error")
+    original_read_text = Path.read_text
+
+    def broken_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        if self == taste_path:
+            raise io_error
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", broken_read_text)
+
+    with pytest.raises(ContinuousRefactorError) as exc_info:
+        load_taste(project)
+
+    assert exc_info.value.__cause__ is io_error
+
+
+def test_load_taste_wraps_global_read_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    taste_path = tmp_path / "xdg" / "continuous-refactoring" / "global" / "taste.md"
+    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path.write_text(default_taste_text(), encoding="utf-8")
+    io_error = OSError("mock read error")
+    original_read_text = Path.read_text
+
+    def broken_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        if self == taste_path:
+            raise io_error
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", broken_read_text)
+
+    with pytest.raises(ContinuousRefactorError) as exc_info:
+        load_taste(None)
+
+    assert exc_info.value.__cause__ is io_error
+
+
 def test_load_manifest_rejects_non_mapping_projects(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

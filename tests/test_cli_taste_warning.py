@@ -157,3 +157,28 @@ def test_warning_does_not_mutate_taste(
     cli.cli_main()
 
     assert taste_path.read_text(encoding="utf-8") == before
+
+
+def test_warning_skips_unreadable_taste(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    xdg_root: Path,
+) -> None:
+    _write_current_taste(xdg_root)
+    taste_path = xdg_root / "continuous-refactoring" / "global" / "taste.md"
+    io_error = OSError("mock read error")
+    original_read_text = Path.read_text
+
+    def broken_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        if self == taste_path:
+            raise io_error
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", broken_read_text)
+    monkeypatch.setattr(sys, "argv", ["cr", "upgrade"])
+    monkeypatch.setattr(cli, "_handle_upgrade", lambda _: None)
+
+    cli.cli_main()
+
+    err = capsys.readouterr().err
+    assert cli._TASTE_WARNING not in err

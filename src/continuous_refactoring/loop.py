@@ -30,6 +30,7 @@ from continuous_refactoring.agent import (
     summarize_output,
 )
 from continuous_refactoring.config import (
+    default_taste_text,
     load_taste,
     resolve_live_migrations_dir,
     resolve_project,
@@ -98,7 +99,10 @@ def _load_taste_safe(repo_root: Path) -> str:
         project = resolve_project(repo_root)
         return load_taste(project)
     except ContinuousRefactorError:
-        return load_taste(None)
+        try:
+            return load_taste(None)
+        except ContinuousRefactorError:
+            return default_taste_text()
 
 
 def _resolve_live_migrations_dir(repo_root: Path) -> Path | None:

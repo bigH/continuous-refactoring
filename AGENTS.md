@@ -96,6 +96,7 @@ migration is complete.
 - **Phase execution validation gate** (`phases.py`, `prompts.py`, `loop.py`) — a migration phase is complete only after host-side full validation passes. `execute_phase()` retries validation-red attempts from `head_before` up to the effective `--max-attempts` budget, and the phase prompt must include the literal configured validation command plus the phase file's Definition of Done as the completion contract.
 - **Effort budgeting** (`effort.py`, `loop.py`, `migration_tick.py`, `planning.py`) — `run` / `run-once` default to `--default-effort low` and `--max-allowed-effort xhigh`; there is no `--effort` alias on those commands. Target `effort-override` changes that target's default but is still capped. Migration `required_effort` above the cap defers the phase without failing the run.
 - **Taste injection** — every prompt includes a `## Taste` section. `tests/test_prompts.py` enforces this via `_TASTE_INJECTED_PROMPTS`. Do not drop it.
+- **Taste read boundary** (`config.py`, `cli.py`, `loop.py`) — `load_taste()` translates unreadable project/global taste reads into `ContinuousRefactorError`; CLI stale-taste checks and loop taste loading must treat that boundary failure as non-fatal and skip/fall back instead of leaking raw `OSError`/`PermissionError`.
 
 ## 11. Surprising CLI semantics
 

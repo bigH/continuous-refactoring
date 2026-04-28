@@ -628,7 +628,10 @@ def _maybe_warn_stale_taste() -> None:
     except ContinuousRefactorError:
         project = None
 
-    taste_text = load_taste(project)
+    try:
+        taste_text = load_taste(project)
+    except ContinuousRefactorError:
+        return
     if taste_is_stale(taste_text):
         print(_TASTE_WARNING, file=sys.stderr)
 

@@ -93,29 +93,40 @@ def _phase_entry(
     return None
 
 
+def _require_phase_entry(
+    phases: tuple[PhaseSpec, ...], phase_name: str, *, error_message: str,
+) -> tuple[int, PhaseSpec]:
+    phase_entry = _phase_entry(phases, phase_name)
+    if phase_entry is None:
+        raise ContinuousRefactorError(error_message)
+    return phase_entry
+
+
 def has_executable_phase(manifest: MigrationManifest) -> bool:
     """Whether the manifest's current_phase addresses an existing phase."""
     return _phase_entry(manifest.phases, manifest.current_phase) is not None
 
 
 def resolve_current_phase(manifest: MigrationManifest) -> PhaseSpec:
-    phase_entry = _phase_entry(manifest.phases, manifest.current_phase)
-    if phase_entry is None:
-        raise ContinuousRefactorError(
-            f"Current phase {manifest.current_phase!r} does not match any phase name"
-        )
-    return phase_entry[1]
+    _, phase = _require_phase_entry(
+        manifest.phases,
+        manifest.current_phase,
+        error_message=(
+            f"Current phase {manifest.current_phase!r} "
+            "does not match any phase name"
+        ),
+    )
+    return phase
 
 
 def advance_phase_cursor(
     manifest: MigrationManifest, completed_phase_name: str,
 ) -> str | None:
-    phase_entry = _phase_entry(manifest.phases, completed_phase_name)
-    if phase_entry is None:
-        raise ContinuousRefactorError(
-            f"Cannot advance unknown phase {completed_phase_name!r}"
-        )
-    phase_index, _ = phase_entry
+    phase_index, _ = _require_phase_entry(
+        manifest.phases,
+        completed_phase_name,
+        error_message=f"Cannot advance unknown phase {completed_phase_name!r}",
+    )
     next_index = phase_index + 1
     if next_index >= len(manifest.phases):
         return None
@@ -127,12 +138,11 @@ def complete_manifest_phase(
     completed_phase_name: str,
     completed_at: str,
 ) -> MigrationManifest:
-    phase_entry = _phase_entry(manifest.phases, completed_phase_name)
-    if phase_entry is None:
-        raise ContinuousRefactorError(
-            f"Cannot complete unknown phase {completed_phase_name!r}"
-        )
-    phase_index, _ = phase_entry
+    phase_index, _ = _require_phase_entry(
+        manifest.phases,
+        completed_phase_name,
+        error_message=f"Cannot complete unknown phase {completed_phase_name!r}",
+    )
     updated_phases = tuple(
         replace(manifest_phase, done=True) if index == phase_index else manifest_phase
         for index, manifest_phase in enumerate(manifest.phases)
@@ -146,7 +156,12 @@ def complete_manifest_phase(
         human_review_reason=None,
         cooldown_until=None,
     )
-    next_phase_name = advance_phase_cursor(manifest, completed_phase_name)
+    next_index = phase_index + 1
+    next_phase_name = (
+        manifest.phases[next_index].name
+        if next_index < len(manifest.phases)
+        else None
+    )
     if next_phase_name is None:
         return replace(updated_manifest, current_phase="", status="done")
     return replace(updated_manifest, current_phase=next_phase_name)

@@ -18,6 +18,7 @@ from continuous_refactoring.migrations import (
     has_executable_phase,
     load_manifest,
     migration_root,
+    resolve_current_phase,
     save_manifest,
 )
 
@@ -206,6 +207,60 @@ def test_has_executable_phase_rejects_invalid_phase_names() -> None:
     assert has_executable_phase(manifest_valid) is True
 
 
+def test_resolve_current_phase_returns_matching_phase() -> None:
+    manifest = MigrationManifest(
+        name="valid-phase",
+        created_at="2025-01-01T00:00:00.000+00:00",
+        last_touch="2025-01-01T00:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="ready",
+        current_phase="migrate",
+        phases=(
+            PhaseSpec(
+                name="setup",
+                file="phase-0-setup.md",
+                done=True,
+                precondition="always",
+            ),
+            PhaseSpec(
+                name="migrate",
+                file="phase-1-migrate.md",
+                done=False,
+                precondition="setup done",
+            ),
+        ),
+    )
+
+    assert resolve_current_phase(manifest) == manifest.phases[1]
+
+
+def test_resolve_current_phase_rejects_unknown_phase_name() -> None:
+    manifest = MigrationManifest(
+        name="missing-phase",
+        created_at="2025-01-01T00:00:00.000+00:00",
+        last_touch="2025-01-01T00:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="ready",
+        current_phase="missing",
+        phases=(
+            PhaseSpec(
+                name="setup",
+                file="phase-0-setup.md",
+                done=False,
+                precondition="always",
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        ContinuousRefactorError,
+        match="Current phase 'missing' does not match any phase name",
+    ):
+        resolve_current_phase(manifest)
+
+
 # ---------------------------------------------------------------------------
 # Phase completion
 # ---------------------------------------------------------------------------
@@ -313,6 +368,31 @@ def test_advance_phase_cursor_returns_next_phase_name() -> None:
 
     assert advance_phase_cursor(manifest, "setup") == "migrate"
     assert advance_phase_cursor(manifest, "migrate") is None
+
+
+def test_advance_phase_cursor_rejects_unknown_phase() -> None:
+    manifest = MigrationManifest(
+        name="phase-cursor",
+        created_at="2026-04-22T00:00:00.000+00:00",
+        last_touch="2026-04-22T06:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="in-progress",
+        current_phase="setup",
+        phases=(
+            PhaseSpec(
+                name="setup",
+                file="phase-0-setup.md",
+                done=True,
+                precondition="always",
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        ContinuousRefactorError, match="Cannot advance unknown phase 'missing'",
+    ):
+        advance_phase_cursor(manifest, "missing")
 
 
 def test_complete_manifest_phase_rejects_unknown_phase() -> None:

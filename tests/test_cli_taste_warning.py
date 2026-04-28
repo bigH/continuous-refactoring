@@ -25,17 +25,17 @@ def _write_current_taste(xdg_root: Path) -> None:
 
 
 _SUBCOMMANDS: list[tuple[list[str], str]] = [
-    (["cr", "init"], "init"),
-    (["cr", "taste", "--global"], "taste"),
-    (["cr", "upgrade"], "upgrade"),
-    (["cr", "review", "list"], "review"),
+    (["cr", "init"], "_handle_init"),
+    (["cr", "taste", "--global"], "_handle_taste"),
+    (["cr", "upgrade"], "_handle_upgrade"),
+    (["cr", "review", "list"], "handle_review"),
     (
         [
             "cr", "run-once",
             "--with", "codex", "--model", "m",
             "--scope-instruction", "s",
         ],
-        "run-once",
+        "_handle_run_once",
     ),
     (
         [
@@ -43,7 +43,7 @@ _SUBCOMMANDS: list[tuple[list[str], str]] = [
             "--with", "codex", "--model", "m",
             "--scope-instruction", "s", "--max-refactors", "1",
         ],
-        "run",
+        "_handle_run",
     ),
 ]
 
@@ -53,13 +53,12 @@ def _run_cli_for_subcommand(
     xdg_root: Path,
     monkeypatch: pytest.MonkeyPatch,
     argv: list[str],
-    command: str,
+    handler_name: str,
     write_taste: Callable[[Path], None],
 ) -> None:
     write_taste(xdg_root)
     monkeypatch.setattr(sys, "argv", argv)
-    assert command in cli._COMMAND_HANDLERS
-    monkeypatch.setitem(cli._COMMAND_HANDLERS, command, lambda _: None)
+    monkeypatch.setattr(cli, handler_name, lambda _: None)
     cli.cli_main()
 
 
@@ -79,7 +78,7 @@ def xdg_root(
 
 
 @pytest.mark.parametrize(
-    "argv,command",
+    "argv,handler_name",
     _SUBCOMMANDS,
     ids=["init", "taste", "upgrade", "review", "run-once", "run"],
 )
@@ -93,7 +92,7 @@ def test_taste_warning_behavior(
     capsys: pytest.CaptureFixture[str],
     xdg_root: Path,
     argv: list[str],
-    command: str,
+    handler_name: str,
     taste_writer: Callable[[Path], None],
     warns: bool,
 ) -> None:
@@ -101,7 +100,7 @@ def test_taste_warning_behavior(
         xdg_root=xdg_root,
         monkeypatch=monkeypatch,
         argv=argv,
-        command=command,
+        handler_name=handler_name,
         write_taste=taste_writer,
     )
 
@@ -128,7 +127,7 @@ def test_warning_preserves_exit_code(
     def fake_upgrade(_: object) -> None:
         raise SystemExit(42)
 
-    monkeypatch.setitem(cli._COMMAND_HANDLERS, "upgrade", fake_upgrade)
+    monkeypatch.setattr(cli, "_handle_upgrade", fake_upgrade)
 
     with pytest.raises(SystemExit) as exc_info:
         cli.cli_main()
@@ -153,7 +152,7 @@ def test_warning_does_not_mutate_taste(
     before = taste_path.read_text(encoding="utf-8")
 
     monkeypatch.setattr(sys, "argv", ["cr", "upgrade"])
-    monkeypatch.setitem(cli._COMMAND_HANDLERS, "upgrade", lambda _: None)
+    monkeypatch.setattr(cli, "_handle_upgrade", lambda _: None)
 
     cli.cli_main()
 

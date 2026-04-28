@@ -63,6 +63,31 @@ def test_review_parser_accepts_list_and_perform_subcommands() -> None:
     assert perform_args.effort == "low"
 
 
+def test_parser_binds_handlers_for_top_level_commands() -> None:
+    parser = build_parser()
+
+    assert parser.parse_args(["init"]).handler.__name__ == "_handle_init"
+    assert parser.parse_args(["taste"]).handler.__name__ == "_handle_taste"
+    assert parser.parse_args(["upgrade"]).handler.__name__ == "_handle_upgrade"
+    assert parser.parse_args(["review"]).handler.__name__ == "handle_review"
+    assert parser.parse_args(
+        ["run-once", "--with", "codex", "--model", "m", "--scope-instruction", "s"]
+    ).handler.__name__ == "_handle_run_once"
+    assert parser.parse_args(
+        [
+            "run",
+            "--with",
+            "codex",
+            "--model",
+            "m",
+            "--scope-instruction",
+            "s",
+            "--max-refactors",
+            "1",
+        ]
+    ).handler.__name__ == "_handle_run"
+
+
 def _init_repo(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     subprocess.run(["git", "init"], cwd=path, check=True, capture_output=True)

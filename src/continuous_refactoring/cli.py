@@ -106,6 +106,7 @@ def _add_init_parser(subparsers: argparse._SubParsersAction) -> None:
         "init",
         help="Register a project for continuous refactoring.",
     )
+    init_parser.set_defaults(handler=_handle_init)
     init_parser.add_argument(
         "--path",
         type=Path,
@@ -125,6 +126,7 @@ def _add_taste_parser(subparsers: argparse._SubParsersAction) -> None:
         "taste",
         help="Manage refactoring taste files.",
     )
+    taste_parser.set_defaults(handler=_handle_taste)
     taste_parser.add_argument(
         "--global",
         dest="global_",
@@ -176,6 +178,7 @@ def _add_run_once_parser(subparsers: argparse._SubParsersAction) -> None:
         "run-once",
         help="Single refactoring attempt (one agent call, no fix retry).",
     )
+    run_once_parser.set_defaults(handler=_handle_run_once)
     _add_common_args(run_once_parser)
 
 
@@ -184,6 +187,7 @@ def _add_run_parser(subparsers: argparse._SubParsersAction) -> None:
         "run",
         help="Continuous refactoring loop with fix-prompt retry.",
     )
+    run_parser.set_defaults(handler=_handle_run)
     _add_common_args(run_parser)
     run_parser.add_argument(
         "--max-attempts",
@@ -229,6 +233,7 @@ def _add_review_parser(subparsers: argparse._SubParsersAction) -> None:
         "review",
         help="Review migrations awaiting human review.",
     )
+    review_parser.set_defaults(handler=handle_review)
     review_sub = review_parser.add_subparsers(dest="review_command")
     review_sub.add_parser("list", help="List migrations flagged for review.")
     perform_parser = review_sub.add_parser(
@@ -254,10 +259,11 @@ def build_parser() -> argparse.ArgumentParser:
     _add_taste_parser(subparsers)
     _add_run_once_parser(subparsers)
     _add_run_parser(subparsers)
-    subparsers.add_parser(
+    upgrade_parser = subparsers.add_parser(
         "upgrade",
         help="Verify and upgrade global configuration.",
     )
+    upgrade_parser.set_defaults(handler=_handle_upgrade)
     _add_review_parser(subparsers)
 
     return parser
@@ -628,22 +634,12 @@ def cli_main() -> None:
     if args.command is not None:
         _maybe_warn_stale_taste()
 
-    handler = _COMMAND_HANDLERS.get(args.command) if args.command else None
+    handler = getattr(args, "handler", None)
     if handler is None:
         parser.print_help()
         raise SystemExit(1)
 
     return handler(args)
-
-
-_COMMAND_HANDLERS: dict[str, Callable[[argparse.Namespace], None]] = {
-    "init": _handle_init,
-    "taste": _handle_taste,
-    "upgrade": _handle_upgrade,
-    "review": handle_review,
-    "run-once": _handle_run_once,
-    "run": _handle_run,
-}
 
 _TASTE_MODE_HANDLERS: dict[str, Callable[[argparse.Namespace], None]] = {
     "interview": _handle_taste_interview,

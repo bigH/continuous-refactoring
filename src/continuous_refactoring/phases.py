@@ -19,6 +19,7 @@ __all__ = [
 
 from continuous_refactoring.agent import maybe_run_agent, run_tests
 from continuous_refactoring.artifacts import ContinuousRefactorError, iso_timestamp
+from continuous_refactoring.commit_messages import commit_rationale
 from continuous_refactoring.decisions import (
     error_failure_kind,
     read_status,
@@ -529,6 +530,8 @@ def _complete_phase(
     manifest: MigrationManifest,
     live_dir: Path,
     *,
+    status: AgentStatus | None,
+    repo_root: Path,
     retry: int,
 ) -> ExecutePhaseOutcome:
     updated_manifest = complete_manifest_phase(
@@ -540,9 +543,14 @@ def _complete_phase(
     manifest_path = migration_root(live_dir, manifest.name) / "manifest.json"
     save_manifest(updated_manifest, manifest_path)
 
+    reason = commit_rationale(
+        status,
+        fallback="Phase completed successfully",
+        repo_root=repo_root,
+    )
     return ExecutePhaseOutcome(
         status="done",
-        reason="Phase completed successfully",
+        reason=reason,
         retry=retry,
     )
 
@@ -617,6 +625,8 @@ def execute_phase(
                 phase,
                 manifest,
                 live_dir,
+                status=agent_run.status,
+                repo_root=repo_root,
                 retry=retry_number,
             )
 

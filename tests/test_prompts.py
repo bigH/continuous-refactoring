@@ -110,6 +110,8 @@ def test_refactoring_prompt_defers_commit_to_driver() -> None:
 def test_refactoring_prompt_has_status_block_contract() -> None:
     assert CONTINUOUS_REFACTORING_STATUS_BEGIN in DEFAULT_REFACTORING_PROMPT
     assert CONTINUOUS_REFACTORING_STATUS_END in DEFAULT_REFACTORING_PROMPT
+    assert "commit_rationale:" in DEFAULT_REFACTORING_PROMPT
+    assert "why the refactor" in DEFAULT_REFACTORING_PROMPT
 
 
 def test_phase_execution_prompt_has_status_block_contract() -> None:

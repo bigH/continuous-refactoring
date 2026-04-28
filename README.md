@@ -132,12 +132,13 @@ If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`, the
 - `--max-refactors N` — cap the number of targets per run. Required unless you use `--targets`.
 - `--max-consecutive-failures N` — bail after N targets fail in a row. Default 3.
 - `--sleep SECONDS` — pause between completed targets. Useful when you want a long batch without hammering the repo or your agent budget.
-- `--commit-message-prefix TEXT` — prefix for successful refactor or migration-plan commits. Default `continuous refactor`.
+- `--commit-message-prefix TEXT` — subject prefix for successful refactor or migration-plan commits. Default `continuous refactor`.
 
 ## Safety behaviors
 
 - Refuses to start with a dirty worktree.
 - Runs on the current branch. Commits land there.
+- Successful commits include a `Why:` body section from the agent's reported rationale, plus validation context when available.
 - `run` baselines your validation command before touching anything. If the baseline is already red, it stops.
 - On a failed attempt, resets back to the pre-attempt HEAD and cleans workspace changes before retrying or moving on.
 - Watchdog kills any agent or test process that's been silent for 5 minutes.

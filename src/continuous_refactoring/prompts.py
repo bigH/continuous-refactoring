@@ -136,7 +136,8 @@ phase_reached: refactor
 decision: commit
 retry_recommendation: none
 failure_kind: none
-summary: Ready to commit.
+summary: <short outcome or failure reason>
+commit_rationale: <why this refactor is worth committing, or none>
 next_retry_focus: none
 tests_run: <short command or none>
 evidence:
@@ -241,8 +242,11 @@ Output:
 - Use only `commit`, `retry`, `abandon`, or `blocked` for `decision`.
 - Use only `same-target`, `new-target`, `none`, or `human-review` for
   `retry_recommendation`.
-- Keep `summary` and `next_retry_focus` short. Do not include raw stdout/stderr,
-  full commands, or large log blobs in the status block.\
+- When `decision` is `commit`, `commit_rationale` must answer why the refactor
+  is worth preserving in history. Avoid placeholders like "Ready to commit".
+- Keep `summary`, `commit_rationale`, and `next_retry_focus` short. Do not
+  include raw stdout/stderr, full commands, or large log blobs in the status
+  block.\
 """
 
 DEFAULT_FIX_AMENDMENT = """\

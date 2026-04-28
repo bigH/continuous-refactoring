@@ -474,7 +474,15 @@ def test_ready_phase_execution_receives_runtime_settings_and_commits_phase_file(
     assert captured["model"] == "fake-model"
     assert captured["effort"] == "xhigh"
     assert captured["timeout"] == 123
-    assert commits == ["continuous refactor: migration/rework-auth/phase-0-setup.md"]
+    assert commits == [
+        "continuous refactor: migration/rework-auth/phase-0-setup.md\n"
+        "\n"
+        "Why:\n"
+        "ok\n"
+        "\n"
+        "Validation:\n"
+        "custom validation"
+    ]
     assert "phase-0/setup" not in commits[0]
     assert captured["finalize_repo_root"] == run_once_env
     assert captured["finalize_phase"] == "migration"

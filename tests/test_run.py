@@ -286,6 +286,60 @@ def test_run_commits_after_successful_change(
     assert "continuous refactor: random files" in log
 
 
+def test_run_commit_message_includes_agent_rationale(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+
+    def rationale_agent(**kwargs: object) -> CommandCapture:
+        rr = Path(str(kwargs.get("repo_root", "")))
+        (rr / "touched.txt").write_text("touched\n", encoding="utf-8")
+        last_message_path = Path(str(kwargs["last_message_path"]))
+        last_message_path.parent.mkdir(parents=True, exist_ok=True)
+        last_message_path.write_text(
+            "\n".join(
+                [
+                    "BEGIN_CONTINUOUS_REFACTORING_STATUS",
+                    "phase_reached: refactor",
+                    "decision: commit",
+                    "retry_recommendation: none",
+                    "failure_kind: none",
+                    "summary: Ready to commit.",
+                    "commit_rationale: Collapse duplicated target handling so future routing edits stay local.",
+                    "next_retry_focus: none",
+                    "tests_run: uv run pytest",
+                    "evidence:",
+                    "  - tests.stdout.log",
+                    "END_CONTINUOUS_REFACTORING_STATUS",
+                ],
+            ),
+            encoding="utf-8",
+        )
+        return noop_agent(**kwargs)
+
+    _patch_run_loop_agent(monkeypatch, rationale_agent)
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+
+    args = make_run_loop_args(
+        repo_root,
+        max_refactors=1,
+        validation_command="uv run pytest",
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    message = continuous_refactoring.run_command(
+        ["git", "log", "-1", "--format=%B"], cwd=repo_root,
+    ).stdout
+    assert message.startswith("continuous refactor: random files\n\n")
+    assert (
+        "Why:\n"
+        "Collapse duplicated target handling so future routing edits stay local."
+    ) in message
+    assert "Validation:\nuv run pytest" in message
+
+
 def test_run_sleeps_only_between_targets(
     run_loop_env: Path,
     tmp_path: Path,

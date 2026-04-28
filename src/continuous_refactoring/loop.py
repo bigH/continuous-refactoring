@@ -34,8 +34,14 @@ from continuous_refactoring.config import (
     resolve_live_migrations_dir,
     resolve_project,
 )
+from continuous_refactoring.commit_messages import (
+    build_commit_message,
+    commit_rationale,
+)
 from continuous_refactoring.decisions import (
     DecisionRecord,
+    read_status,
+    sanitize_text,
 )
 from continuous_refactoring.effort import (
     EffortBudget,
@@ -518,10 +524,26 @@ def run_once(args: argparse.Namespace) -> int:
             final_status = "validation_failed"
             raise ContinuousRefactorError("Validation failed after agent run")
 
+        agent_status = read_status(
+            args.agent,
+            last_message_path=last_message_path,
+            fallback_text=agent_result.stdout,
+        )
         _finalize_commit(
             repo_root,
             head_before,
-            "continuous refactor: run-once",
+            build_commit_message(
+                "continuous refactor: run-once",
+                why=commit_rationale(
+                    agent_status,
+                    fallback=(
+                        sanitize_text(agent_result.stdout, repo_root)
+                        or "Validated run-once cleanup."
+                    ),
+                    repo_root=repo_root,
+                ),
+                validation=args.validation_command,
+            ),
             artifacts=artifacts,
             attempt=1,
             phase="run_once",

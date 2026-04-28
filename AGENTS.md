@@ -110,7 +110,9 @@ migration is complete.
 
 ## 13. Commit conventions
 
-- Commit prefix: `continuous refactor: <path>` (dominant pattern).
+- Commit subject prefix: `continuous refactor: <path>` (dominant pattern).
+- Driver-generated commit bodies include a concise `Why:` section and validation
+  context when available.
 
 ## 14. What NOT to do
 

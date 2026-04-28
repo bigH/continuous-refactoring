@@ -19,6 +19,10 @@ if TYPE_CHECKING:
 
 from continuous_refactoring.agent import maybe_run_agent, run_tests
 from continuous_refactoring.artifacts import ContinuousRefactorError
+from continuous_refactoring.commit_messages import (
+    build_commit_message,
+    commit_rationale,
+)
 from continuous_refactoring.decisions import (
     DecisionRecord,
     default_retry_recommendation,
@@ -383,10 +387,22 @@ def _run_refactor_attempt(
             tests_stderr_path=validation_result.stderr_path,
         )
 
+    rationale = commit_rationale(
+        agent_status,
+        fallback=(
+            sanitize_text(agent_result.stdout, repo_root)
+            or f"Validated cleanup for {target.description}."
+        ),
+        repo_root=repo_root,
+    )
     _finalize_commit(
         repo_root,
         head_before,
-        f"{commit_message_prefix}: {target.description}",
+        build_commit_message(
+            f"{commit_message_prefix}: {target.description}",
+            why=rationale,
+            validation=validation_command,
+        ),
         artifacts=artifacts,
         attempt=attempt,
         phase="refactor",
@@ -399,7 +415,7 @@ def _run_refactor_attempt(
         call_role=validation_role,
         phase_reached=resolved_phase_reached(agent_status, phase_reached),
         failure_kind="none",
-        summary="Validated refactor ready to commit",
+        summary=rationale,
         agent_last_message_path=last_message_path,
         agent_stdout_path=agent_result.stdout_path,
         agent_stderr_path=agent_result.stderr_path,

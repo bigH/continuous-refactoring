@@ -45,6 +45,7 @@ class AgentStatus:
     retry_recommendation: RetryRecommendation | None = None
     failure_kind: str | None = None
     summary: str | None = None
+    commit_rationale: str | None = None
     next_retry_focus: str | None = None
     tests_run: str | None = None
     evidence: tuple[str, ...] = ()
@@ -120,6 +121,7 @@ def parse_status_block(text: str | None) -> AgentStatus | None:
         retry_recommendation=retry_recommendation,
         failure_kind=data.get("failure_kind") or None,
         summary=data.get("summary") or None,
+        commit_rationale=data.get("commit_rationale") or None,
         next_retry_focus=data.get("next_retry_focus") or None,
         tests_run=data.get("tests_run") or None,
         evidence=tuple(evidence),

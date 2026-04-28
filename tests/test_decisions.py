@@ -39,6 +39,7 @@ def test_parse_status_block_parses_expected_fields() -> None:
                     "failure_kind: validation-failed",
                     "summary: first",
                     "summary: last write wins",
+                    "commit_rationale: remove duplicated parsing paths",
                     "next_retry_focus: rerun targeted tests",
                     "tests_run: uv run pytest -x",
                     "evidence: artifacts/summary.json",
@@ -55,6 +56,7 @@ def test_parse_status_block_parses_expected_fields() -> None:
     assert status.retry_recommendation == "same-target"
     assert status.failure_kind == "validation-failed"
     assert status.summary == "last write wins"
+    assert status.commit_rationale == "remove duplicated parsing paths"
     assert status.next_retry_focus == "rerun targeted tests"
     assert status.tests_run == "uv run pytest -x"
     assert status.evidence == (

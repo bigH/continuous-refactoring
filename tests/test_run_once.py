@@ -249,6 +249,51 @@ def test_run_once_prints_and_records_commit(
     assert attempts[0]["commit_phase"] == "run_once"
 
 
+def test_run_once_commit_message_includes_agent_rationale(
+    run_once_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def rationale_agent(**kwargs: object) -> CommandCapture:
+        repo_root = Path(str(kwargs.get("repo_root", "")))
+        (repo_root / "new_file.txt").write_text("x\n", encoding="utf-8")
+        last_message_path = Path(str(kwargs["last_message_path"]))
+        last_message_path.parent.mkdir(parents=True, exist_ok=True)
+        last_message_path.write_text(
+            "\n".join(
+                [
+                    "BEGIN_CONTINUOUS_REFACTORING_STATUS",
+                    "phase_reached: refactor",
+                    "decision: commit",
+                    "retry_recommendation: none",
+                    "failure_kind: none",
+                    "summary: Ready to commit.",
+                    "commit_rationale: Keep the run-once cleanup reason visible in git history.",
+                    "next_retry_focus: none",
+                    "tests_run: uv run pytest",
+                    "evidence:",
+                    "  - tests.stdout.log",
+                    "END_CONTINUOUS_REFACTORING_STATUS",
+                ],
+            ),
+            encoding="utf-8",
+        )
+        return noop_agent(**kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", rationale_agent)
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+
+    exit_code = continuous_refactoring.run_once(
+        make_run_once_args(run_once_env, validation_command="uv run pytest"),
+    )
+
+    assert exit_code == 0
+    message = continuous_refactoring.run_command(
+        ["git", "log", "-1", "--format=%B"], cwd=run_once_env,
+    ).stdout
+    assert "Why:\nKeep the run-once cleanup reason visible in git history." in message
+    assert "Validation:\nuv run pytest" in message
+
+
 def test_run_once_replaces_agent_commit_with_driver_commit(
     run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,

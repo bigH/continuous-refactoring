@@ -18,6 +18,7 @@ __all__ = [
 ]
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
+from continuous_refactoring.commit_messages import build_commit_message
 from continuous_refactoring.decisions import (
     DecisionRecord,
     RouteOutcome,
@@ -237,8 +238,12 @@ def try_migration_tick(
                 finalize_commit(
                     repo_root,
                     head_before,
-                    f"{commit_message_prefix}: migration/{manifest.name}"
-                    f"/{phase_file_reference(phase)}",
+                    build_commit_message(
+                        f"{commit_message_prefix}: migration/{manifest.name}"
+                        f"/{phase_file_reference(phase)}",
+                        why=sanitize_text(outcome.reason, repo_root) or outcome.reason,
+                        validation=validation_command,
+                    ),
                     artifacts=artifacts,
                     attempt=attempt,
                     phase="migration",
@@ -250,7 +255,7 @@ def try_migration_tick(
             )
             if outcome.status == "failed":
                 return "abandon", _phase_failure_record(outcome, repo_root, target_label)
-            return "commit", _phase_commit_record(target_label)
+            return "commit", _phase_commit_record(outcome, repo_root, target_label)
 
         save_manifest(
             _defer_manifest(manifest, now, verdict=verdict, reason=reason),
@@ -333,7 +338,11 @@ def _phase_failure_record(
     )
 
 
-def _phase_commit_record(target_label: str) -> DecisionRecord:
+def _phase_commit_record(
+    outcome: ExecutePhaseOutcome,
+    repo_root: Path,
+    target_label: str,
+) -> DecisionRecord:
     return DecisionRecord(
         decision="commit",
         retry_recommendation="none",
@@ -341,7 +350,7 @@ def _phase_commit_record(target_label: str) -> DecisionRecord:
         call_role="phase.execute",
         phase_reached="phase.execute",
         failure_kind="none",
-        summary="Migration phase completed successfully",
+        summary=sanitize_text(outcome.reason, repo_root) or outcome.reason,
     )
 
 

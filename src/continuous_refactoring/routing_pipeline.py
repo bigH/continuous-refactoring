@@ -21,6 +21,7 @@ __all__ = [
 ]
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
+from continuous_refactoring.commit_messages import build_commit_message
 from continuous_refactoring.decisions import (
     DecisionRecord,
     RouteOutcome,
@@ -260,7 +261,10 @@ def route_and_run(
     finalize_commit(
         repo_root,
         head_before,
-        f"{commit_message_prefix}: plan {migration_name}",
+        build_commit_message(
+            f"{commit_message_prefix}: plan {migration_name}",
+            why=sanitize_text(outcome.reason, repo_root) or outcome.reason,
+        ),
         artifacts=artifacts,
         attempt=attempt,
         phase="planning",

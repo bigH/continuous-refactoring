@@ -1,0 +1,43 @@
+{
+  "awaiting_human_review": false,
+  "cooldown_until": null,
+  "created_at": "2026-04-27T21:59:42.893-07:00",
+  "current_phase": "artifact-boundary-baseline",
+  "human_review_reason": null,
+  "last_touch": "2026-04-27T22:02:34.481-07:00",
+  "name": "src-continuous-refactoring-artifacts-py-20260427T215942",
+  "phases": [
+    {
+      "done": false,
+      "file": "phase-1-artifact-boundary-baseline.md",
+      "name": "artifact-boundary-baseline",
+      "precondition": "- `tests/test_continuous_refactoring.py`, `tests/test_phases.py`, and `tests/test_loop_migration_tick.py` are green on the branch before edits. - No production files in the migration scope have been modified yet. - The target migration scope is unchanged in production modules."
+    },
+    {
+      "done": false,
+      "file": "phase-2-artifacts-boundary-contract.md",
+      "name": "artifacts-boundary-contract",
+      "precondition": "- Phase 1 complete and passing. - `tests/test_continuous_refactoring.py` passes before edits. - `src/continuous_refactoring/artifacts.py` has not been edited yet in this migration."
+    },
+    {
+      "done": false,
+      "file": "phase-3-boundary-wrappers-at-callsites.md",
+      "name": "boundary-wrappers-at-callsites",
+      "precondition": "- Phase 2 complete and green. - `tests/test_continuous_refactoring.py`, `tests/test_loop_migration_tick.py`, and `tests/test_routing.py` pass with phase-2 contracts in place. - `tests/test_phases.py` is green before this phase. - No edits are made in `config.py`, `loop.py`, or `cli.py` during this phase."
+    },
+    {
+      "done": false,
+      "file": "phase-4-loop-and-cli-boundary-resilience.md",
+      "name": "loop-and-cli-boundary-resilience",
+      "precondition": "- Phase 3 complete and passing targeted gates. - Current behavior in `tests/test_cli_init_taste.py`, `tests/test_cli_taste_warning.py`, `tests/test_run_once.py`, and `tests/test_run_once_regression.py` is green. - No edits in `__init__.py` in this phase yet."
+    },
+    {
+      "done": false,
+      "file": "phase-5-shippable-regression-and-contract-lock.md",
+      "name": "shippable-regression-and-contract-lock",
+      "precondition": "- Phase 4 complete and green. - `tests/test_continuous_refactoring.py` and phase-3/4 targeted suites pass. - All intended phase edits are present in working tree. - All phase documents in this migration directory match their intended scope (especially phase names referenced in `manifest.json`)."
+    }
+  ],
+  "status": "ready",
+  "wake_up_on": null
+}

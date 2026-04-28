@@ -6,9 +6,14 @@ import subprocess
 import uuid
 from pathlib import Path
 
+import pytest
+
+from continuous_refactoring.artifacts import ContinuousRefactorError
+from continuous_refactoring.git import GitCommandError
 from continuous_refactoring.targeting import (
     Target,
     expand_patterns_to_files,
+    list_tracked_files,
     load_targets_jsonl,
     parse_extensions,
     parse_globs,
@@ -340,6 +345,19 @@ def test_select_random_files_respects_count(tmp_path: Path) -> None:
     selected = select_random_files(tmp_path, count=2)
 
     assert len(selected) == 2
+
+
+def test_list_tracked_files_wraps_git_failures_with_cause(monkeypatch, tmp_path: Path) -> None:
+    def fail_run_command(*args, **kwargs) -> None:
+        raise GitCommandError("command failed (git ls-files -z)\nstderr:\nnope")
+
+    monkeypatch.setattr("continuous_refactoring.targeting.run_command", fail_run_command)
+
+    with pytest.raises(ContinuousRefactorError, match="failed to list tracked files") as exc_info:
+        list_tracked_files(tmp_path)
+
+    assert isinstance(exc_info.value.__cause__, GitCommandError)
+    assert str(exc_info.value.__cause__) == "command failed (git ls-files -z)\nstderr:\nnope"
 
 
 # ---------------------------------------------------------------------------

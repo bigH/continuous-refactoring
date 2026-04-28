@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import random
 import re
-import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
@@ -11,6 +10,7 @@ from typing import Literal
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
 from continuous_refactoring.effort import require_effort_tier
+from continuous_refactoring.git import GitCommandError, run_command
 
 
 __all__ = [
@@ -166,17 +166,11 @@ def list_tracked_files(repo_root: Path) -> list[str]:
     (plain ``git ls-files`` C-quotes them, e.g. ``"caf\\303\\251.py"``, which
     then fails to match any downstream pattern).
     """
-    result = subprocess.run(
-        ["git", "ls-files", "-z"],
-        cwd=repo_root,
-        capture_output=True,
-        check=False,
-    )
-    if result.returncode != 0:
-        raise ContinuousRefactorError(
-            f"git ls-files failed: {result.stderr.decode('utf-8', 'replace').strip()}"
-        )
-    return [p.decode("utf-8") for p in result.stdout.split(b"\0") if p]
+    try:
+        result = run_command(["git", "ls-files", "-z"], cwd=repo_root)
+    except GitCommandError as exc:
+        raise ContinuousRefactorError("failed to list tracked files") from exc
+    return [path for path in result.stdout.split("\0") if path]
 
 
 def select_random_files(repo_root: Path, count: int = 5) -> tuple[str, ...]:

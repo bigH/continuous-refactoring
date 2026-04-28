@@ -202,6 +202,37 @@ def test_load_manifest_rejects_project_entry_missing_required_fields(
         load_manifest()
 
 
+@pytest.mark.parametrize("field_name", ["git_remote", "live_migrations_dir"])
+def test_load_manifest_rejects_non_string_optional_project_fields(
+    tmp_path: Path,
+    field_name: str,
+) -> None:
+    manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    manifest.write_text(
+        json.dumps(
+            {
+                "projects": {
+                    "abc": {
+                        "uuid": "abc",
+                        "path": "/tmp/project",
+                        "git_remote": None,
+                        "created_at": "x",
+                        field_name: ["wrong-type"],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ContinuousRefactorError,
+        match=rf"field '{field_name}' must be a string",
+    ):
+        load_manifest()
+
+
 def test_save_and_load_manifest_roundtrip(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

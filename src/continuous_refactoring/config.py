@@ -135,26 +135,19 @@ def _parse_manifest_payload(text: str) -> dict[str, object]:
     return raw
 
 
-def _require_string_field(
-    data: Mapping[str, object], key: str, *, project_id: str
-) -> str:
-    value = data.get(key)
-    if value is None:
-        raise ContinuousRefactorError(
-            f"Manifest file is malformed: project '{project_id}' missing '{key}'."
-        )
-    if not isinstance(value, str):
-        raise ContinuousRefactorError(
-            f"Manifest file is malformed: project '{project_id}' field '{key}' must be a string."
-        )
-    return value
-
-
-def _optional_string_field(
-    data: Mapping[str, object], key: str, *, project_id: str
+def _string_field(
+    data: Mapping[str, object],
+    key: str,
+    *,
+    project_id: str,
+    required: bool,
 ) -> str | None:
     value = data.get(key)
     if value is None:
+        if required:
+            raise ContinuousRefactorError(
+                f"Manifest file is malformed: project '{project_id}' missing '{key}'."
+            )
         return None
     if not isinstance(value, str):
         raise ContinuousRefactorError(
@@ -163,22 +156,28 @@ def _optional_string_field(
     return value
 
 
-def _entry_from_mapping(uid: str, data: Mapping[str, object]) -> ProjectEntry:
-    return ProjectEntry(
-        uuid=_require_string_field(data, "uuid", project_id=uid),
-        path=_require_string_field(data, "path", project_id=uid),
-        git_remote=_optional_string_field(data, "git_remote", project_id=uid),
-        created_at=_require_string_field(data, "created_at", project_id=uid),
-        live_migrations_dir=_optional_string_field(data, "live_migrations_dir", project_id=uid),
-    )
-
-
-def _entry_from_dict(uid: str, data: object) -> ProjectEntry:
+def _entry_from_object(uid: str, data: object) -> ProjectEntry:
     if not isinstance(data, dict):
         raise ContinuousRefactorError(
             f"Manifest file is malformed: project '{uid}' must be a JSON object."
         )
-    return _entry_from_mapping(uid, data)
+    return ProjectEntry(
+        uuid=_string_field(data, "uuid", project_id=uid, required=True),
+        path=_string_field(data, "path", project_id=uid, required=True),
+        git_remote=_string_field(
+            data,
+            "git_remote",
+            project_id=uid,
+            required=False,
+        ),
+        created_at=_string_field(data, "created_at", project_id=uid, required=True),
+        live_migrations_dir=_string_field(
+            data,
+            "live_migrations_dir",
+            project_id=uid,
+            required=False,
+        ),
+    )
 
 
 def load_manifest() -> dict[str, ProjectEntry]:
@@ -188,7 +187,7 @@ def load_manifest() -> dict[str, ProjectEntry]:
         raise ContinuousRefactorError(
             "Manifest file is malformed: 'projects' must be a JSON object."
         )
-    return {uid: _entry_from_dict(uid, entry) for uid, entry in projects_raw.items()}
+    return {uid: _entry_from_object(uid, entry) for uid, entry in projects_raw.items()}
 
 
 def save_manifest(manifest: dict[str, ProjectEntry]) -> None:

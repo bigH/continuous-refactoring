@@ -222,3 +222,35 @@ def test_classify_nonzero_exit_raises(
             "decision: cohesive-cleanup\n",
             returncode=1,
         )
+
+
+def test_classify_preserves_wrapped_agent_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_tmpdir(tmp_path, monkeypatch)
+    artifacts = _make_artifacts(tmp_path)
+    failure = OSError("launch denied")
+
+    def fail_agent(**_kwargs: object) -> CommandCapture:
+        raise ContinuousRefactorError(
+            f"Failed to start codex in {tmp_path}: {failure}"
+        ) from failure
+
+    monkeypatch.setattr("continuous_refactoring.routing.maybe_run_agent", fail_agent)
+
+    with pytest.raises(ContinuousRefactorError, match="Failed to start codex") as exc_info:
+        classify_target(
+            _target(),
+            _TASTE,
+            tmp_path,
+            artifacts,
+            agent="codex",
+            model="fake",
+            effort="low",
+            timeout=None,
+        )
+
+    assert exc_info.value.__cause__ is failure
+    event = _call_finished_events(artifacts)[-1]
+    assert event["summary"] == f"Failed to start codex in {tmp_path}: {failure}"

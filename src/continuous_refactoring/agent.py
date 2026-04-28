@@ -121,6 +121,17 @@ def _require_agent_on_path(agent: str) -> None:
         raise ContinuousRefactorError(f"Required command not found in PATH: {agent}")
 
 
+def _raise_process_launch_error(
+    command: Sequence[str],
+    cwd: Path,
+    exc: OSError,
+) -> None:
+    command_name = _command_display_name(command)
+    raise ContinuousRefactorError(
+        f"Failed to start {command_name} in {cwd}: {exc}"
+    ) from exc
+
+
 def _build_interactive_command(
     agent: str,
     model: str,
@@ -232,7 +243,10 @@ def run_agent_interactive(
     terminal_fd = _terminal_control_fd()
     terminal_state = _capture_terminal_state(terminal_fd)
     try:
-        return subprocess.call(command, cwd=repo_root)
+        try:
+            return subprocess.call(command, cwd=repo_root)
+        except OSError as exc:
+            _raise_process_launch_error(command, repo_root, exc)
     finally:
         _restore_terminal_state(terminal_fd, terminal_state)
 
@@ -428,7 +442,10 @@ def run_agent_interactive_until_settled(
     command = _build_interactive_command(agent, model, effort, prompt, repo_root)
     terminal_fd = _terminal_control_fd()
     terminal_state = _capture_terminal_state(terminal_fd)
-    process = subprocess.Popen(command, cwd=repo_root)
+    try:
+        process = subprocess.Popen(command, cwd=repo_root)
+    except OSError as exc:
+        _raise_process_launch_error(command, repo_root, exc)
     settled_since: float | None = None
     last_fingerprint: tuple[str, int, int, int, int] | None = None
     forced_codex_stop = False
@@ -591,15 +608,18 @@ def run_observed_command(
 ) -> CommandCapture:
     stdout_path.parent.mkdir(parents=True, exist_ok=True)
     stderr_path.parent.mkdir(parents=True, exist_ok=True)
-    process = subprocess.Popen(
-        command,
-        cwd=cwd,
-        text=True,
-        shell=False,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        bufsize=1,
-    )
+    try:
+        process = subprocess.Popen(
+            command,
+            cwd=cwd,
+            text=True,
+            shell=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            bufsize=1,
+        )
+    except OSError as exc:
+        _raise_process_launch_error(command, cwd, exc)
     if process.stdout is None or process.stderr is None:
         command_name = _command_display_name(command)
         raise ContinuousRefactorError(

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import subprocess
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -270,6 +271,26 @@ def test_check_ready_propagates_agent_cause(tmp_path: Path, monkeypatch: pytest.
         )
 
     assert exc_info.value.__cause__ is failure
+
+
+def test_check_ready_nonzero_exit_wraps_called_process_error(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _patch_status_agent(monkeypatch, "ready: yes\n", tmp_path, returncode=7)
+
+    with pytest.raises(
+        ContinuousRefactorError,
+        match="Phase ready-check agent failed with exit code 7",
+    ) as exc_info:
+        check_phase_ready(
+            _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
+            taste=_TASTE, agent="codex", model="fake", effort="low", timeout=None,
+        )
+
+    cause = exc_info.value.__cause__
+    assert isinstance(cause, subprocess.CalledProcessError)
+    assert cause.returncode == 7
 
 
 def test_check_ready_no(

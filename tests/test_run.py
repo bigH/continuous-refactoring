@@ -166,6 +166,29 @@ def test_run_parser_accepts_sleep_flag() -> None:
     assert args.sleep == 0.25
 
 
+def test_run_observed_command_wraps_launch_failures_with_cause(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    failure = PermissionError("launch denied")
+
+    def broken_popen(*_args: object, **_kwargs: object) -> object:
+        raise failure
+
+    monkeypatch.setattr("continuous_refactoring.agent.subprocess.Popen", broken_popen)
+
+    with pytest.raises(ContinuousRefactorError, match="Failed to start fake") as exc_info:
+        continuous_refactoring.run_observed_command(
+            ("fake", "--version"),
+            cwd=tmp_path,
+            stdout_path=tmp_path / "stdout.log",
+            stderr_path=tmp_path / "stderr.log",
+            mirror_to_terminal=False,
+        )
+
+    assert exc_info.value.__cause__ is failure
+
+
 def test_run_parser_defaults_effort_budget() -> None:
     args = build_parser().parse_args(
         [

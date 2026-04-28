@@ -393,6 +393,37 @@ def test_ready_check_error_abandons_with_sanitized_decision_record(
     assert record.summary == "ready check failed at <repo>/phase.md <tmp>"
 
 
+def test_ready_check_wrapped_failure_keeps_root_cause_in_summary(
+    run_once_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir, _, _ = _seed_manifest(
+        run_once_env,
+        name="rework-auth",
+        last_touch=_utc_now() - timedelta(hours=24),
+    )
+    failure = FileNotFoundError("No such file or directory: 'codex'")
+
+    def fail_ready(*_args: object, **_kwargs: object) -> tuple[str, str]:
+        raise ContinuousRefactorError(
+            f"Failed to start codex in {run_once_env}: {failure}"
+        ) from failure
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.check_phase_ready",
+        fail_ready,
+    )
+    _patch_execute_phase_trap(monkeypatch)
+
+    outcome, record = _tick(live_dir, run_once_env)
+
+    assert outcome == "abandon"
+    assert record is not None
+    assert record.summary == (
+        "Failed to start codex in <repo>: No such file or directory: 'codex'"
+    )
+
+
 def test_ready_phase_execution_receives_runtime_settings_and_commits_phase_file(
     run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

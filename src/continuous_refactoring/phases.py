@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
@@ -183,9 +184,15 @@ def check_phase_ready(
             summary=f"{agent} exited with code {result.returncode}",
             effort=effort_metadata,
         )
+        process_error = subprocess.CalledProcessError(
+            result.returncode,
+            result.command,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
         raise ContinuousRefactorError(
             f"Phase ready-check agent failed with exit code {result.returncode}"
-        )
+        ) from process_error
 
     artifacts.log_call_finished(
         attempt=attempt,

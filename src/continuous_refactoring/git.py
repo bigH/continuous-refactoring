@@ -45,7 +45,7 @@ def run_command(
             check=False,
             capture_output=capture_output,
         )
-    except FileNotFoundError as exc:
+    except OSError as exc:
         raise GitCommandError(
             f"command could not be started: {command!r}\n"
             f"cwd: {cwd}"

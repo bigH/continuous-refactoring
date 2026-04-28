@@ -3,7 +3,6 @@ from __future__ import annotations
 import random
 import sys
 import time
-from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -65,6 +64,11 @@ from continuous_refactoring.prompts import (
     DEFAULT_REFACTORING_PROMPT,
     compose_full_prompt,
     prompt_file_text,
+)
+from continuous_refactoring.refactor_attempts import (
+    _preserve_workspace_tree,
+    _PreservedWorkspaceTree,
+    _reset_to_source_baseline,
 )
 import continuous_refactoring.migration_tick as migration_tick
 import continuous_refactoring.routing_pipeline as routing_pipeline
@@ -176,57 +180,6 @@ def _log_effort_resolution(
         target=target,
         **resolution.event_fields(),
     )
-
-
-@dataclass(frozen=True)
-class _PreservedFile:
-    relative_path: Path
-    content: bytes
-
-
-@dataclass(frozen=True)
-class _PreservedWorkspaceTree:
-    files: tuple[_PreservedFile, ...]
-
-    def restore(self, repo_root: Path) -> None:
-        for preserved in self.files:
-            path = repo_root / preserved.relative_path
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_bytes(preserved.content)
-
-
-def _preserve_workspace_tree(
-    repo_root: Path,
-    root: Path | None,
-) -> _PreservedWorkspaceTree | None:
-    if root is None:
-        return None
-    try:
-        root.relative_to(repo_root)
-    except ValueError:
-        return None
-    if not root.exists():
-        return None
-
-    files = tuple(
-        _PreservedFile(path.relative_to(repo_root), path.read_bytes())
-        for path in sorted(root.rglob("*"))
-        if path.is_file()
-    )
-    if not files:
-        return None
-    return _PreservedWorkspaceTree(files)
-
-
-def _reset_to_source_baseline(
-    repo_root: Path,
-    revision: str,
-    preserved_workspace: _PreservedWorkspaceTree | None,
-) -> None:
-    revert_to(repo_root, revision)
-    if preserved_workspace is not None:
-        preserved_workspace.restore(repo_root)
-
 
 def _run_refactor_attempt(
     *,

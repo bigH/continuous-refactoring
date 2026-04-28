@@ -1,0 +1,37 @@
+{
+  "awaiting_human_review": false,
+  "cooldown_until": null,
+  "created_at": "2026-04-27T22:06:24.348-07:00",
+  "current_phase": "targeting-parse-foundation",
+  "human_review_reason": null,
+  "last_touch": "2026-04-27T22:09:48.319-07:00",
+  "name": "src-continuous-refactoring-targeting-py-20260427T220624",
+  "phases": [
+    {
+      "done": false,
+      "file": "phase-1-targeting-parse-foundation.md",
+      "name": "targeting-parse-foundation",
+      "precondition": "- `uv run pytest tests/test_targeting.py` passes on the current state. - `rg -n \\\"def _parse_paths_arg\\\\(|parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` returns no matches before edits. - `rg -n \\\"def parse_paths_arg\\\\(\\\" src/continuous_refactoring/targeting.py` returns no matches before edits."
+    },
+    {
+      "done": false,
+      "file": "phase-2-loop-delegates-targeting-parse.md",
+      "name": "loop-delegates-targeting-parse",
+      "precondition": "- `phase-1-targeting-parse-foundation.md` completion checks are green: - `uv run pytest tests/test_targeting.py` - `rg -n \\\"def parse_paths_arg\\\\(\\\" src/continuous_refactoring/targeting.py` - `rg -n \\\"def _parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` - `uv run pytest tests/test_run_once_regression.py tests/test_run.py` passes. - `rg -n \\\"_resolve_targets_from_args\\\\(\\\" src/continuous_refactoring/loop.py` matches one call path for argument resolution."
+    },
+    {
+      "done": false,
+      "file": "phase-3-targeting-git-boundary-hardening.md",
+      "name": "targeting-git-boundary-hardening",
+      "precondition": "- `uv run pytest tests/test_targeting.py tests/test_run_once_regression.py tests/test_run.py` passes after phase-2 behavior changes. - `rg -n \\\"parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` reports only callsite usage, confirming runtime targets now flow through the boundary for all callers. - `rg -n \\\"list_tracked_files\\\\(\\\" src/continuous_refactoring/targeting.py` resolves to exactly one implementation path."
+    },
+    {
+      "done": false,
+      "file": "phase-4-targeting-surface-regression-lock.md",
+      "name": "targeting-surface-regression-lock",
+      "precondition": "- Phase 1, 2, and 3 DoD gates are green: - `uv run pytest tests/test_targeting.py` - `uv run pytest tests/test_targeting.py tests/test_run_once_regression.py tests/test_run.py` - `uv run pytest tests/test_targeting.py tests/test_run.py` - `rg -n \\\"parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` shows only callsite usage from `targeting`. - `rg -n \\\"_parse_paths_arg\\\\(\\\" src/continuous_refactoring/loop.py` returns no matches."
+    }
+  ],
+  "status": "ready",
+  "wake_up_on": null
+}

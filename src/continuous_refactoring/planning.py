@@ -78,6 +78,13 @@ def _review_has_findings(stdout: str) -> bool:
     return has_non_empty
 
 
+def _require_review_clear(stdout: str, stage_label: str) -> None:
+    if _review_has_findings(stdout):
+        raise ContinuousRefactorError(
+            f"planning.{stage_label} failed: revised plan still has findings"
+        )
+
+
 # ---------------------------------------------------------------------------
 # Phase discovery
 # ---------------------------------------------------------------------------
@@ -450,7 +457,7 @@ def run_planning(
         )
         manifest = _touch_manifest(manifest, manifest_path, mig_root=mig_root)
 
-        _run_stage(
+        review_two_stdout = _run_stage(
             "review", migration_name, target, taste,
             _build_context(
                 target,
@@ -467,6 +474,7 @@ def run_planning(
             stage_label="review-2",
             **agent_kw,
         )
+        _require_review_clear(review_two_stdout, "review-2")
         manifest = _touch_manifest(manifest, manifest_path)
 
     # Stage 6: final-review

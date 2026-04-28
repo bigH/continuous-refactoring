@@ -310,6 +310,20 @@ def test_revised_plan_is_reloaded_for_follow_up_reviews(
     assert "# Plan v1" not in final_review_prompt
 
 
+def test_review_two_findings_fail_before_final_review(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir, _ = _planning_context(tmp_path, monkeypatch)
+    responses = _revise_responses()
+    responses[5] = ("1. Still missing rollback validation.\n", {})
+
+    with pytest.raises(
+        ContinuousRefactorError,
+        match="planning.review-2 failed: revised plan still has findings",
+    ):
+        _run_planning(tmp_path, live_dir, responses, monkeypatch)
+
+
 def test_parse_final_decision_ignores_trailing_lines() -> None:
     decision, reason = _parse_final_decision(
         "\n".join(

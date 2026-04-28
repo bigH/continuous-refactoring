@@ -60,8 +60,6 @@ from continuous_refactoring.prompts import (
 from continuous_refactoring.refactor_attempts import (
     _finalize_commit,
     _preserve_workspace_tree,
-    _PreservedWorkspaceTree,
-    _reset_to_source_baseline,
     _retry_context,
     _run_refactor_attempt,
 )

@@ -24,7 +24,7 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 
 ## 4. Layout
 
-- `src/continuous_refactoring/` — flat, ~13 modules, no subpackages
+- `src/continuous_refactoring/` — flat module layout, no subpackages
 - `tests/` — flat, `test_<module>.py` per source module plus behavior bundles (`test_e2e.py`, `test_run.py`, `test_run_once.py`)
 - `migrations/` — live multi-phase plans (dog-food output)
 - `.scratchpad/` — ephemeral agent state, gitignored
@@ -77,8 +77,9 @@ No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only 
 
 ## 9. Active migration of `loop.py`
 
-No active `loop.py` migration is present. Keep edits minimal unless a new live
-migration explicitly scopes structural work.
+Active migration: `migrations/src-continuous-refactoring-loop-py-20260428T032118/`.
+Keep `loop.py` edits inside that live plan's scoped phase work until the
+migration is complete.
 
 ## 10. Load-bearing subtleties — do not "simplify" without reading
 
@@ -86,7 +87,7 @@ migration explicitly scopes structural work.
 - **Codex terminal reset** (`agent.py:342-372`) — raw ANSI reset after force-stop. Codex leaves the tty corrupt. Do not remove.
 - **Claude stream-json unwrap** (`agent.py:68-102`) — NDJSON; prefer the last `result` event, else join assistant text blocks, else return raw.
 - **Watchdog** (`agent.py:549-665`) — silent ≥5 min → SIGTERM → SIGKILL → `ContinuousRefactorError`.
-- **Driver owns commits** (`loop.py:474-479`) — if an agent commits mid-attempt, driver does `git reset --soft head_before` and re-commits with its own message.
+- **Driver owns commits** (`refactor_attempts.py:_finalize_commit()`, called from `loop.py`) — if an agent commits mid-attempt, driver does `git reset --soft head_before` and re-commits with its own message.
 - **Migration scheduling split** (`migrations.py`, `loop.py`, `phases.py`) — `last_touch` is activity bookkeeping, not the 6-hour retry gate. Deferred/blocked migrations set `cooldown_until`; successful phase completion clears deferral markers so the next ready phase can run immediately.
 - **Manifest codec boundary** (`migration_manifest_codec.py`, `migrations.py`) — codec owns legacy `ready_when`, legacy integer `current_phase`, duplicate phase-name rejection, and saved JSON formatting. `load_manifest()` / `save_manifest()` own filesystem and JSON boundary errors.
 - **Review CLI boundary** (`cli.py`, `review_cli.py`) — `cli.py` owns parser wiring and run dispatch; migration review internals live in `review_cli.py`, which stays internal and out of package-root `_SUBMODULES`.

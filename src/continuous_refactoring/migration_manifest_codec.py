@@ -60,13 +60,6 @@ def _require_bool(value: object, *, field: str) -> bool:
     return value
 
 
-def _phase_index(phases: tuple[PhaseSpec, ...], phase_name: str) -> int | None:
-    for index, phase in enumerate(phases):
-        if phase.name == phase_name:
-            return index
-    return None
-
-
 def _require_unique_phase_names(phases: tuple[PhaseSpec, ...]) -> None:
     seen: set[str] = set()
     duplicates: list[str] = []
@@ -148,7 +141,7 @@ def _require_current_phase(value: object, *, phases: tuple[PhaseSpec, ...]) -> s
     if isinstance(value, str):
         if value == "":
             return ""
-        if _phase_index(phases, value) is None:
+        if not any(phase.name == value for phase in phases):
             raise ContinuousRefactorError(
                 f"Migration field 'current_phase' names an unknown phase: {value!r}"
             )
@@ -188,9 +181,9 @@ def decode_manifest_payload(raw_payload: object) -> MigrationManifest:
 def encode_manifest_payload(manifest: MigrationManifest) -> str:
     _require_status(manifest.status)
     _require_unique_phase_names(manifest.phases)
-    if manifest.current_phase and _phase_index(
-        manifest.phases, manifest.current_phase,
-    ) is None:
+    if manifest.current_phase and not any(
+        phase.name == manifest.current_phase for phase in manifest.phases
+    ):
         raise ContinuousRefactorError(
             f"Cannot save manifest with unknown current phase {manifest.current_phase!r}"
         )

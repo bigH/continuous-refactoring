@@ -8,6 +8,7 @@ import pytest
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
 from continuous_refactoring.migrations import (
+    advance_phase_cursor,
     MigrationManifest,
     PhaseSpec,
     approaches_dir,
@@ -283,6 +284,35 @@ def test_complete_manifest_phase_marks_final_phase_done() -> None:
     assert completed.current_phase == ""
     assert completed.status == "done"
     assert completed.last_touch == completed_at
+
+
+def test_advance_phase_cursor_returns_next_phase_name() -> None:
+    manifest = MigrationManifest(
+        name="phase-cursor",
+        created_at="2026-04-22T00:00:00.000+00:00",
+        last_touch="2026-04-22T06:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="in-progress",
+        current_phase="setup",
+        phases=(
+            PhaseSpec(
+                name="setup",
+                file="phase-0-setup.md",
+                done=True,
+                precondition="always",
+            ),
+            PhaseSpec(
+                name="migrate",
+                file="phase-1-migrate.md",
+                done=False,
+                precondition="setup done",
+            ),
+        ),
+    )
+
+    assert advance_phase_cursor(manifest, "setup") == "migrate"
+    assert advance_phase_cursor(manifest, "migrate") is None
 
 
 def test_complete_manifest_phase_rejects_unknown_phase() -> None:
@@ -677,6 +707,39 @@ def test_load_manifest_rejects_unknown_string_current_phase(
 
     with pytest.raises(ContinuousRefactorError, match="names an unknown phase"):
         load_manifest(path)
+
+
+def test_save_manifest_rejects_unknown_current_phase_before_writing(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "unknown-current-phase-save" / "manifest.json"
+    path.parent.mkdir(parents=True)
+    path.write_text('{"name": "old"}\n', encoding="utf-8")
+    manifest = MigrationManifest(
+        name="unknown-current-phase-save",
+        created_at="2025-01-01T00:00:00.000+00:00",
+        last_touch="2025-01-01T00:00:00.000+00:00",
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="ready",
+        current_phase="missing",
+        phases=(
+            PhaseSpec(
+                name="setup",
+                file="phase-0-setup.md",
+                done=False,
+                precondition="always",
+            ),
+        ),
+    )
+
+    with pytest.raises(
+        ContinuousRefactorError, match="unknown current phase 'missing'",
+    ):
+        save_manifest(manifest, path)
+
+    assert path.read_text(encoding="utf-8") == '{"name": "old"}\n'
+    assert list(path.parent.glob("*.tmp")) == []
 
 
 def test_load_manifest_rejects_duplicate_phase_names(tmp_path: Path) -> None:

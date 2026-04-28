@@ -73,41 +73,16 @@ def test_returns_result_event_value_when_present() -> None:
 
 
 def test_result_is_error_true_falls_back_to_assistant_parts() -> None:
-    stream = _stream(
-        _assistant_event("selected-candidate: local-cluster"),
+    invalid_result_events = (
         _result_event("error payload", is_error=True, subtype="error_max_turns"),
-    )
-
-    assert (
-        _extract_claude_final_text(stream) == "selected-candidate: local-cluster"
-    )
-
-
-def test_result_missing_field_falls_back_to_assistant_parts() -> None:
-    stream = _stream(
-        _assistant_event("fallback body"),
         {"type": "result", "subtype": "success", "is_error": False},
-    )
-
-    assert _extract_claude_final_text(stream) == "fallback body"
-
-
-def test_result_null_value_falls_back() -> None:
-    stream = _stream(
-        _assistant_event("assistant wins"),
         _result_event(None),
-    )
-
-    assert _extract_claude_final_text(stream) == "assistant wins"
-
-
-def test_result_with_nested_object_falls_back() -> None:
-    stream = _stream(
-        _assistant_event("string wins over dict"),
         _result_event({"text": "not a top-level string"}),
     )
 
-    assert _extract_claude_final_text(stream) == "string wins over dict"
+    for event in invalid_result_events:
+        stream = _stream(_assistant_event("assistant fallback"), event)
+        assert _extract_claude_final_text(stream) == "assistant fallback"
 
 
 def test_only_assistant_events_returns_joined_text() -> None:

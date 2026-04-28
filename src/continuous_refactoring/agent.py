@@ -68,71 +68,51 @@ def _build_claude_command(
 def _extract_claude_final_text(raw: str) -> str:
     """Pull plain-text output from claude's ``--output-format stream-json`` stream.
 
-    Downstream parsers expect single-line prose; claude emits NDJSON events.
-    Prefer the last valid top-level ``result`` string; otherwise join text
-    from assistant messages; otherwise return ``raw`` unchanged so upstream
-    errors like "produced no output" stay meaningful.
+    Claude emits NDJSON events. Prefer the last valid top-level ``result``
+    string; otherwise join assistant text blocks; otherwise return ``raw``
+    unchanged so upstream errors like "produced no output" stay meaningful.
     """
     last_result: str | None = None
     assistant_messages: list[str] = []
     for line in raw.splitlines():
-        event = _claude_stream_event(line)
-        if event is None:
+        if not line.lstrip().startswith("{"):
             continue
-        event_type = event.get("type")
-        if event_type == "result":
-            result_text = _result_event_text(event)
-            if result_text is not None:
-                last_result = result_text
-        elif event_type == "assistant":
-            text = _assistant_event_text(event)
-            if text:
-                assistant_messages.append(text)
+        try:
+            event = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(event, dict):
+            continue
+        if event.get("type") == "result":
+            if event.get("is_error") is True:
+                continue
+            result = event.get("result")
+            if isinstance(result, str) and result:
+                last_result = result
+            continue
+        if event.get("type") != "assistant":
+            continue
+        message = event.get("message")
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        parts = [
+            text
+            for block in content
+            if isinstance(block, dict)
+            and block.get("type") == "text"
+            and isinstance(text := block.get("text"), str)
+            and text
+        ]
+        if parts:
+            assistant_messages.append("".join(parts))
     if last_result is not None:
         return last_result
     if assistant_messages:
         return "\n".join(assistant_messages)
     return raw
-
-
-def _claude_stream_event(line: str) -> dict[str, object] | None:
-    if not line.lstrip().startswith("{"):
-        return None
-    try:
-        event = json.loads(line)
-    except ValueError:
-        return None
-    if not isinstance(event, dict):
-        return None
-    return event
-
-
-def _result_event_text(event: dict[str, object]) -> str | None:
-    if event.get("is_error") is True:
-        return None
-    result = event.get("result")
-    if isinstance(result, str) and result:
-        return result
-    return None
-
-
-def _assistant_event_text(event: dict[str, object]) -> str:
-    message = event.get("message")
-    if not isinstance(message, dict):
-        return ""
-    content = message.get("content")
-    if not isinstance(content, list):
-        return ""
-    parts: list[str] = []
-    for block in content:
-        if not isinstance(block, dict):
-            continue
-        if block.get("type") != "text":
-            continue
-        text = block.get("text")
-        if isinstance(text, str) and text:
-            parts.append(text)
-    return "".join(parts)
 
 
 def _require_agent_on_path(agent: str) -> None:

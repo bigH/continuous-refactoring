@@ -36,6 +36,14 @@ def extract_settle_path(prompt: str) -> Path:
     return _extract_prompt_field(prompt, "Taste settle target")
 
 
+def assert_single_prompt(prompt_capture: list[str], *needles: str) -> str:
+    assert len(prompt_capture) == 1
+    prompt = prompt_capture[0]
+    for needle in needles:
+        assert needle in prompt
+    return prompt
+
+
 def make_taste_agent_writer(
     *,
     content: str | None = None,

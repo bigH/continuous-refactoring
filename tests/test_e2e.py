@@ -15,6 +15,7 @@ from continuous_refactoring.artifacts import CommandCapture
 from continuous_refactoring.config import default_taste_text, register_project
 
 from conftest import (
+    assert_single_prompt,
     make_run_loop_args,
     make_run_once_args,
     noop_agent,
@@ -34,13 +35,6 @@ def _assert_final_status(tmp_path: Path, expected_status: str) -> None:
     assert len(run_dirs) == 1
     summary = json.loads((run_dirs[0] / "summary.json").read_text(encoding="utf-8"))
     assert summary["final_status"] == expected_status
-
-
-def _assert_single_prompt(prompt_capture: list[str], *needles: str) -> None:
-    assert len(prompt_capture) == 1
-    prompt = prompt_capture[0]
-    for needle in needles:
-        assert needle in prompt
 
 
 def test_e2e_init_then_run_once(
@@ -161,7 +155,7 @@ def test_e2e_taste_flows_through(
     args = make_run_once_args(run_once_env)
     continuous_refactoring.run_once(args)
 
-    _assert_single_prompt(prompt_capture, "Never use print statements in production code")
+    assert_single_prompt(prompt_capture, "Never use print statements in production code")
 
 
 def test_e2e_targets_jsonl_flow(
@@ -185,7 +179,7 @@ def test_e2e_targets_jsonl_flow(
     args = make_run_once_args(run_once_env, targets=targets_file, scope_instruction=None)
     continuous_refactoring.run_once(args)
 
-    _assert_single_prompt(
+    assert_single_prompt(
         prompt_capture,
         "src/errors.py",
         "src/handlers.py",
@@ -235,4 +229,4 @@ def test_e2e_without_init_uses_default_taste(
         for line in default_taste_text().splitlines()
         if line.strip().startswith("-")
     ]
-    _assert_single_prompt(prompt_capture, *needles)
+    assert_single_prompt(prompt_capture, *needles)

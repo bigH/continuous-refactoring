@@ -19,7 +19,7 @@ from continuous_refactoring import routing_pipeline
 from continuous_refactoring import scope_candidates
 from continuous_refactoring import scope_expansion
 
-_SUBMODULES: tuple[ModuleType, ...] = (
+_PACKAGE_EXPORT_MODULES: tuple[ModuleType, ...] = (
     agent,
     artifacts,
     cli,
@@ -37,11 +37,12 @@ _SUBMODULES: tuple[ModuleType, ...] = (
     scope_candidates,
     scope_expansion,
 )
+_SUBMODULES: tuple[ModuleType, ...] = _PACKAGE_EXPORT_MODULES
 
 
-def _reexport() -> tuple[str, ...]:
+def collect_package_exports(modules: tuple[ModuleType, ...]) -> tuple[str, ...]:
     exports: list[str] = []
-    for module in _SUBMODULES:
+    for module in modules:
         for name in module.__all__:
             if name in exports:
                 raise RuntimeError(
@@ -52,4 +53,4 @@ def _reexport() -> tuple[str, ...]:
     return tuple(exports)
 
 
-__all__: tuple[str, ...] = _reexport()
+__all__: tuple[str, ...] = collect_package_exports(_SUBMODULES)

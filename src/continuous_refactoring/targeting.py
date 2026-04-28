@@ -43,6 +43,10 @@ def _warn_skip(message: str) -> None:
     print(f"warning: target line has {message}, skipping", file=sys.stderr)
 
 
+class _InvalidTargetFieldError(ValueError):
+    """Raised when a JSONL target line contains an invalid optional field."""
+
+
 def parse_extensions(raw: str) -> tuple[str, ...]:
     """Convert comma-separated extensions to glob patterns.
 
@@ -67,14 +71,14 @@ def parse_globs(raw: str) -> tuple[str, ...]:
     return tuple(g for g in (p.strip() for p in raw.split(":")) if g)
 
 
-def _optional_str(data: dict[str, object], key: str) -> tuple[bool, str | None]:
+def _optional_str(data: dict[str, object], key: str) -> str | None:
     value = data.get(key)
     if value is None:
-        return True, None
+        return None
     if isinstance(value, str) and value.strip():
-        return True, value
+        return value
     _warn_skip(f"non-string or empty {key}")
-    return False, None
+    raise _InvalidTargetFieldError(key)
 
 
 def validate_target_line(data: object) -> Target | None:
@@ -96,10 +100,11 @@ def validate_target_line(data: object) -> Target | None:
         _warn_skip("invalid file entries")
         return None
 
-    valid_scoping, scoping = _optional_str(data, "scoping")
-    valid_model_override, model_override = _optional_str(data, "model-override")
-    valid_effort_override, effort_override = _optional_str(data, "effort-override")
-    if not (valid_scoping and valid_model_override and valid_effort_override):
+    try:
+        scoping = _optional_str(data, "scoping")
+        model_override = _optional_str(data, "model-override")
+        effort_override = _optional_str(data, "effort-override")
+    except _InvalidTargetFieldError:
         return None
 
     return Target(
@@ -115,18 +120,22 @@ def validate_target_line(data: object) -> Target | None:
 def load_targets_jsonl(path: Path) -> list[Target]:
     """Load targets from a JSONL file, skipping invalid lines."""
     targets: list[Target] = []
-    for line_num, line in enumerate(path.read_text(encoding="utf-8").splitlines(), start=1):
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            data = json.loads(line)
-        except json.JSONDecodeError:
-            print(f"warning: invalid JSON on line {line_num}, skipping", file=sys.stderr)
-            continue
-        target = validate_target_line(data)
-        if target is not None:
-            targets.append(target)
+    with path.open(encoding="utf-8") as handle:
+        for line_num, line in enumerate(handle, start=1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                data = json.loads(line)
+            except json.JSONDecodeError:
+                print(
+                    f"warning: invalid JSON on line {line_num}, skipping",
+                    file=sys.stderr,
+                )
+                continue
+            target = validate_target_line(data)
+            if target is not None:
+                targets.append(target)
     return targets
 
 

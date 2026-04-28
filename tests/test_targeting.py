@@ -104,6 +104,21 @@ def test_load_targets_jsonl_valid(tmp_path: Path) -> None:
     assert targets[1].scoping == "only utils"
 
 
+def test_load_targets_jsonl_last_line_without_newline(tmp_path: Path) -> None:
+    jsonl = tmp_path / "targets.jsonl"
+    jsonl.write_text(json.dumps({"description": "single", "files": ["*.py"]}), encoding="utf-8")
+
+    targets = load_targets_jsonl(jsonl)
+
+    assert len(targets) == 1
+    assert targets[0].description == "single"
+    assert targets[0].files == ("*.py",)
+    assert targets[0].scoping is None
+    assert targets[0].model_override is None
+    assert targets[0].effort_override is None
+    assert targets[0].provenance == "targets"
+
+
 def test_load_targets_jsonl_skips_invalid(tmp_path: Path, capsys) -> None:
     jsonl = tmp_path / "targets.jsonl"
     lines = [

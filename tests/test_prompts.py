@@ -261,6 +261,21 @@ def test_taste_refine_prompt_preserves_current_version_header_by_default() -> No
     assert "Do not add one unless the user explicitly asks for it." not in result
 
 
+def test_taste_upgrade_prompt_uses_target_version_for_legacy_upgrade() -> None:
+    taste_path = Path("/tmp/taste.md")
+    settle_path = Path("/tmp/taste.md.done")
+
+    result = compose_taste_upgrade_prompt(
+        taste_path=taste_path,
+        settle_path=settle_path,
+        existing_taste="",
+        stored_version=None,
+        target_version=2,
+    )
+
+    assert "version 2" in result
+
+
 def test_taste_prompts_tell_agent_to_exit_after_settle() -> None:
     taste_path = Path("/tmp/taste.md")
     settle_path = Path("/tmp/taste.md.done")

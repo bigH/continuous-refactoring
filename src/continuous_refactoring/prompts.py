@@ -78,6 +78,21 @@ _RETRY_CONTEXT_WARNING = (
     "Use this as focused context only. Do not copy raw failure text into code."
 )
 
+_SETTLE_PROTOCOL = """\
+After writing {taste_path}, compute its SHA-256 and write exactly
+'sha256:<hex>' to {settle_path}.
+After writing {settle_path}, do not modify either file again.
+After writing {settle_path}, exit immediately without any extra output.
+The host will end the session after both files settle.\
+"""
+
+
+def _settle_protocol(taste_path: Path, settle_path: Path) -> str:
+    return _SETTLE_PROTOCOL.format(
+        taste_path=taste_path,
+        settle_path=settle_path,
+    )
+
 
 def _retry_context_sections(retry_context: str | None) -> tuple[str, ...]:
     retry_text = _strip_or_none(retry_context)
@@ -257,10 +272,7 @@ Rules:
 - Synthesize into 5-10 concise bullet points in the style: "- Do/Prefer X. Avoid Y when Z."
 - Show the draft. Ask for corrections. Iterate until the user approves.
 - Write the final bullet list to {taste_path}. Overwrite any existing content.
-- After writing {taste_path}, compute its SHA-256 and write exactly
-  'sha256:<hex>' to {settle_path}.
-- After writing {settle_path}, do not modify either file again.
-- After writing {settle_path}, exit immediately without any extra output.
+- {settle_protocol}
 - Do not add a header -- the file is consumed verbatim.
 - The host will end the session after both files settle.\
 """
@@ -289,10 +301,7 @@ Rules:
 - Show updated draft text when it changes. Iterate until the user says to write it.
 - Wait to write until the user explicitly tells you to write the file.
 - Write the final content to {taste_path}. Overwrite any existing content.
-- After writing {taste_path}, compute its SHA-256 and write exactly
-  'sha256:<hex>' to {settle_path}.
-- After writing {settle_path}, do not modify either file again.
-- After writing {settle_path}, exit immediately without any extra output.
+- {settle_protocol}
 - The host will end the session after both files settle.\
 """
 
@@ -322,10 +331,7 @@ Rules:
   followed by a blank line.
 - Show the draft. Ask for corrections. Iterate until the user approves.
 - Write the final content to {taste_path}. Overwrite any existing content.
-- After writing {taste_path}, compute its SHA-256 and write exactly
-  'sha256:<hex>' to {settle_path}.
-- After writing {settle_path}, do not modify either file again.
-- After writing {settle_path}, exit immediately without any extra output.
+- {settle_protocol}
 - The host will end the session after both files settle.\
 """
 
@@ -340,7 +346,8 @@ def compose_taste_upgrade_prompt(
     if stored_version is None:
         version_context = (
             "The stored taste has no version header. This is a legacy taste file.\n"
-            "Replace it with a versioned v1 taste that includes the two new\n"
+            f"Replace it with a versioned taste for version {target_version} that "
+            "includes the two new\n"
             "dimensions: large-scope decisions and rollout style."
         )
     else:
@@ -358,6 +365,7 @@ def compose_taste_upgrade_prompt(
     return TASTE_UPGRADE_PROMPT_TEMPLATE.format(
         taste_path=str(taste_path),
         settle_path=str(settle_path),
+        settle_protocol=_settle_protocol(taste_path, settle_path),
         version_context=version_context,
         existing_block=existing_block,
         target_version=target_version,
@@ -388,6 +396,7 @@ def compose_taste_refine_prompt(
         settle_path=str(settle_path),
         starting_taste=starting_taste,
         version_policy=version_policy,
+        settle_protocol=_settle_protocol(taste_path, settle_path),
     )
 
 
@@ -407,6 +416,7 @@ def compose_interview_prompt(
         taste_path=str(taste_path),
         settle_path=str(settle_path),
         existing_block=existing_block,
+        settle_protocol=_settle_protocol(taste_path, settle_path),
     )
 
 

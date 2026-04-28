@@ -9,6 +9,7 @@ if TYPE_CHECKING:
 
 import continuous_refactoring
 import continuous_refactoring.loop
+import continuous_refactoring.refactor_attempts
 from continuous_refactoring.artifacts import CommandCapture
 from continuous_refactoring.config import load_taste
 from continuous_refactoring.prompts import DEFAULT_REFACTORING_PROMPT, compose_full_prompt
@@ -132,8 +133,18 @@ def test_run_loop_two_targets_unchanged(
         (rr / f"change{len(agent_calls)}.txt").write_text("x\n", encoding="utf-8")
         return noop_agent(**kwargs)
 
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", tracking_agent)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
+    monkeypatch.setattr(continuous_refactoring.loop, "maybe_run_agent", tracking_agent)
+    monkeypatch.setattr(
+        continuous_refactoring.refactor_attempts,
+        "maybe_run_agent",
+        tracking_agent,
+    )
+    monkeypatch.setattr(continuous_refactoring.loop, "run_tests", noop_tests)
+    monkeypatch.setattr(
+        continuous_refactoring.refactor_attempts,
+        "run_tests",
+        noop_tests,
+    )
 
     targets_file = tmp_path / "targets.jsonl"
     lines = [

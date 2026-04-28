@@ -20,6 +20,10 @@ from continuous_refactoring.config import (
     load_manifest,
     register_project,
 )
+from continuous_refactoring.effort import (
+    DEFAULT_EFFORT,
+    DEFAULT_MAX_ALLOWED_EFFORT,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -364,12 +368,13 @@ def _build_run_args(
     if validation_command is None:
         validation_command = _default_validation_command(repo_root)
     resolved_default_effort = default_effort or effort
+    resolved_max_allowed_effort = max_allowed_effort or DEFAULT_MAX_ALLOWED_EFFORT
     return {
         "agent": agent,
         "model": model,
         "effort": resolved_default_effort,
         "default_effort": resolved_default_effort,
-        "max_allowed_effort": max_allowed_effort,
+        "max_allowed_effort": resolved_max_allowed_effort,
         "validation_command": validation_command,
         "extensions": extensions,
         "globs": globs,
@@ -389,7 +394,7 @@ def make_run_once_args(
     *,
     agent: str = "codex",
     model: str = "fake-model",
-    effort: str = "xhigh",
+    effort: str = DEFAULT_EFFORT,
     default_effort: str | None = None,
     max_allowed_effort: str | None = None,
     validation_command: str | None = None,
@@ -427,7 +432,7 @@ def make_run_loop_args(
     *,
     agent: str = "codex",
     model: str = "fake-model",
-    effort: str = "xhigh",
+    effort: str = DEFAULT_EFFORT,
     default_effort: str | None = None,
     max_allowed_effort: str | None = None,
     validation_command: str | None = None,

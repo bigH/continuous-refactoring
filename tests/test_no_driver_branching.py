@@ -127,6 +127,18 @@ def test_branching_detector_allows_non_mutating_commands(
     assert not _is_branching_argv(argv)
 
 
+def test_run_arg_helpers_match_cli_effort_defaults(run_once_env: Path) -> None:
+    run_once_args = make_run_once_args(run_once_env)
+    run_loop_args = make_run_loop_args(run_once_env)
+
+    assert run_once_args.effort == "low"
+    assert run_once_args.default_effort == "low"
+    assert run_once_args.max_allowed_effort == "xhigh"
+    assert run_loop_args.effort == "low"
+    assert run_loop_args.default_effort == "low"
+    assert run_loop_args.max_allowed_effort == "xhigh"
+
+
 def _install_argv_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
     """Record every argv passed to git.run_command across the driver."""
     captured: list[tuple[str, ...]] = []

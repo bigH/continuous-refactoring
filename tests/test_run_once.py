@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -10,6 +9,7 @@ import continuous_refactoring.loop
 from continuous_refactoring.artifacts import CommandCapture, ContinuousRefactorError
 
 from conftest import (
+    assert_single_prompt,
     failing_tests,
     make_run_once_args,
     noop_agent,
@@ -17,16 +17,8 @@ from conftest import (
     read_single_run_events,
     read_single_run_summary,
     touch_file_agent,
+    write_targets_file,
 )
-
-
-def _run_once_prompt_capture(
-    run_once_env: Path, prompt_capture: list[str], **kwargs: object
-) -> str:
-    args = make_run_once_args(run_once_env, **kwargs)
-    continuous_refactoring.run_once(args)
-    assert len(prompt_capture) == 1
-    return prompt_capture[0]
 
 
 def _is_baseline_validation(stdout_path: Path) -> bool:
@@ -54,9 +46,9 @@ def test_run_once_prompt_composition(
     kwargs: dict[str, object],
     needles: tuple[str, ...],
 ) -> None:
-    prompt = _run_once_prompt_capture(run_once_env, prompt_capture, **kwargs)
-    for needle in needles:
-        assert needle in prompt
+    args = make_run_once_args(run_once_env, **kwargs)
+    continuous_refactoring.run_once(args)
+    assert_single_prompt(prompt_capture, *needles)
 
 
 def test_run_once_baseline_validation_blocks_routing_and_agent_when_red(
@@ -308,14 +300,13 @@ def test_run_once_direct_refactor_audits_effort_budget(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", effort_capturing_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        json.dumps({
+    targets_file = write_targets_file(
+        tmp_path,
+        targets=[{
             "description": "direct override",
             "files": ["foo.py"],
             "effort-override": "xhigh",
-        }),
-        encoding="utf-8",
+        }],
     )
     args = make_run_once_args(
         run_once_env,

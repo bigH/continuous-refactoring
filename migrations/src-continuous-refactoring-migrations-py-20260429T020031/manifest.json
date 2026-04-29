@@ -1,0 +1,45 @@
+{
+  "awaiting_human_review": false,
+  "cooldown_until": null,
+  "created_at": "2026-04-29T02:00:31.729-07:00",
+  "current_phase": "lock-current-surface",
+  "human_review_reason": null,
+  "last_touch": "2026-04-29T02:07:32.938-07:00",
+  "name": "src-continuous-refactoring-migrations-py-20260429T020031",
+  "phases": [
+    {
+      "done": false,
+      "effort_reason": "behavior-locking test work is local and should stay cheap",
+      "file": "phase-1-lock-current-surface.md",
+      "name": "lock-current-surface",
+      "precondition": "This migration is still in planning or at its first executable phase, and `src/continuous_refactoring/migrations.py` still contains the shipped manifest types, manifest I/O helpers, and exported operational helpers that later phases intend to split.",
+      "required_effort": "low"
+    },
+    {
+      "done": false,
+      "effort_reason": "module extraction has real import-cycle and compatibility risk",
+      "file": "phase-2-extract-manifest-ops.md",
+      "name": "extract-manifest-ops",
+      "precondition": "Phase 1 is complete, and the compatibility export contract plus behavior-locking tests for `continuous_refactoring.migrations` are in place.",
+      "required_effort": "medium"
+    },
+    {
+      "done": false,
+      "effort_reason": "import rewrites span several call sites and can hide behavior drift",
+      "file": "phase-3-redirect-internal-callers.md",
+      "name": "redirect-internal-callers",
+      "precondition": "Phase 2 is complete, `migration_manifest_ops.py` owns the extracted operational helpers, and `migrations.py` still re-exports those helpers through the locked compatibility surface.",
+      "required_effort": "medium"
+    },
+    {
+      "done": false,
+      "effort_reason": "boundary cleanup can accidentally change error semantics or public exports",
+      "file": "phase-4-tighten-boundary-contracts.md",
+      "name": "tighten-boundary-contracts",
+      "precondition": "Phase 3 is complete, `src/continuous_refactoring/phases.py`, `src/continuous_refactoring/loop.py`, and `src/continuous_refactoring/prompts.py` now import their extracted operational helpers from `migration_manifest_ops.py`, and `migrations.py` still preserves the locked compatibility export set.",
+      "required_effort": "medium"
+    }
+  ],
+  "status": "planning",
+  "wake_up_on": null
+}

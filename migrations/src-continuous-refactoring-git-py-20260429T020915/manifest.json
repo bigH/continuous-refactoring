@@ -1,0 +1,45 @@
+{
+  "awaiting_human_review": false,
+  "cooldown_until": null,
+  "created_at": "2026-04-29T02:09:15.185-07:00",
+  "current_phase": "lock-git-behavior",
+  "human_review_reason": null,
+  "last_touch": "2026-04-29T02:17:11.327-07:00",
+  "name": "src-continuous-refactoring-git-py-20260429T020915",
+  "phases": [
+    {
+      "done": false,
+      "effort_reason": "focused characterization work on a small module and its tests",
+      "file": "phase-1-lock-git-behavior.md",
+      "name": "lock-git-behavior",
+      "precondition": "This migration is at its first executable phase, and `src/continuous_refactoring/git.py` still exposes the current public helpers listed in its `__all__` for downstream callers and package-root re-export.",
+      "required_effort": "low"
+    },
+    {
+      "done": false,
+      "effort_reason": "in-place helper reordering and local cleanup only",
+      "file": "phase-2-reorganize-domain-flow.md",
+      "name": "reorganize-domain-flow",
+      "precondition": "Phase 1 is marked complete, and `tests/test_git.py` already contains characterization coverage for `run_command()`, workspace status helpers, clean-worktree enforcement, destructive reset helpers, and commit/revert flows.",
+      "required_effort": "low"
+    },
+    {
+      "done": false,
+      "effort_reason": "localized boundary cleanup with narrow downstream verification",
+      "file": "phase-3-tighten-error-boundaries.md",
+      "name": "tighten-error-boundaries",
+      "precondition": "Phase 2 is marked complete, and `run_command()` is still the subprocess entry point used by the public git helpers touched by this migration.",
+      "required_effort": "low"
+    },
+    {
+      "done": false,
+      "effort_reason": "final cleanup is limited to transitional private helpers and",
+      "file": "phase-4-trim-helper-shapes-and-verify-surface.md",
+      "name": "trim-helper-shapes-and-verify-surface",
+      "precondition": "Phase 3 is marked complete, and the public symbol set in `src/continuous_refactoring/git.py::__all__` still matches the surface this migration is preserving.",
+      "required_effort": "low"
+    }
+  ],
+  "status": "planning",
+  "wake_up_on": null
+}

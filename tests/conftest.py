@@ -13,6 +13,8 @@ import pytest
 
 import continuous_refactoring
 import continuous_refactoring.loop
+import continuous_refactoring.refactor_attempts
+import continuous_refactoring.targeting
 from continuous_refactoring.artifacts import CommandCapture
 from continuous_refactoring.config import (
     ProjectEntry,
@@ -339,6 +341,23 @@ def failing_tests(
         stdout_path=stdout_path,
         stderr_path=stderr_path,
     )
+
+
+def install_run_command_spy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[str, ...]]:
+    captured: list[tuple[str, ...]] = []
+    real_run_command = continuous_refactoring.run_command
+
+    def spy(command, cwd, *args, **kwargs):  # type: ignore[no-untyped-def]
+        captured.append(tuple(command))
+        return real_run_command(command, cwd, *args, **kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.git.run_command", spy)
+    monkeypatch.setattr("continuous_refactoring.loop.run_command", spy)
+    monkeypatch.setattr("continuous_refactoring.refactor_attempts.run_command", spy)
+    monkeypatch.setattr("continuous_refactoring.targeting.run_command", spy)
+    return captured
 
 
 def _default_validation_command(repo_root: Path) -> str:

@@ -15,6 +15,7 @@ from continuous_refactoring.migrations import (
 )
 
 from conftest import (
+    install_run_command_spy,
     make_run_loop_args,
     make_run_once_args,
     noop_agent,
@@ -139,21 +140,6 @@ def test_run_arg_helpers_match_cli_effort_defaults(run_once_env: Path) -> None:
     assert run_loop_args.max_allowed_effort == "xhigh"
 
 
-def _install_argv_spy(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, ...]]:
-    """Record every argv passed to git.run_command across the driver."""
-    captured: list[tuple[str, ...]] = []
-    real_run_command = continuous_refactoring.git.run_command
-
-    def spy(command, cwd, *args, **kwargs):  # type: ignore[no-untyped-def]
-        captured.append(tuple(command))
-        return real_run_command(command, cwd, *args, **kwargs)
-
-    # The driver imports run_command into multiple modules; patch each binding.
-    monkeypatch.setattr("continuous_refactoring.git.run_command", spy)
-    monkeypatch.setattr("continuous_refactoring.loop.run_command", spy)
-    return captured
-
-
 def _assert_no_branching(captured: list[tuple[str, ...]]) -> None:
     branching = [argv for argv in captured if _is_branching_argv(argv)]
     assert not branching, (
@@ -192,11 +178,12 @@ def test_run_once_makes_no_branching_calls(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", noop_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
-    captured = _install_argv_spy(monkeypatch)
+    captured = install_run_command_spy(monkeypatch)
 
     exit_code = continuous_refactoring.run_once(make_run_once_args(run_once_env))
 
     assert exit_code == 0
+    assert ("git", "ls-files", "-z") in captured
     _assert_no_branching(captured)
 
 
@@ -224,7 +211,7 @@ def test_run_loop_makes_no_branching_calls(
         encoding="utf-8",
     )
 
-    captured = _install_argv_spy(monkeypatch)
+    captured = install_run_command_spy(monkeypatch)
 
     exit_code = continuous_refactoring.run_loop(
         make_run_loop_args(
@@ -289,7 +276,7 @@ def test_focused_loop_migration_tick_makes_no_branching_calls(
         "continuous_refactoring.migration_tick.execute_phase", fake_execute_phase,
     )
 
-    captured = _install_argv_spy(monkeypatch)
+    captured = install_run_command_spy(monkeypatch)
 
     exit_code = continuous_refactoring.run_migrations_focused_loop(
         make_run_loop_args(

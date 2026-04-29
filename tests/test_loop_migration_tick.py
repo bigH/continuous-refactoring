@@ -324,6 +324,47 @@ def test_enumerate_eligible_manifests_ignores_noise_and_sorts_by_created_at(
     assert [path.parent.name for _, path in candidates] == ["older", "newer"]
 
 
+def test_enumerate_eligible_manifests_includes_cooling_effort_candidate_once(
+    tmp_path: Path,
+) -> None:
+    live_dir = tmp_path / "live"
+    live_dir.mkdir()
+    now = _utc_now()
+    over_budget_phase = replace(_PHASE_0, required_effort="xhigh")
+
+    _save(
+        replace(
+            _make_manifest(
+                "cooling-over-budget",
+                last_touch=now - timedelta(days=1),
+                created_at=now - timedelta(hours=2),
+                phases=(over_budget_phase, _PHASE_1),
+            ),
+            cooldown_until=(now + timedelta(hours=1)).isoformat(timespec="milliseconds"),
+        ),
+        live_dir,
+    )
+    _save(
+        _make_manifest(
+            "ready-now",
+            last_touch=now - timedelta(days=1),
+            created_at=now - timedelta(hours=1),
+        ),
+        live_dir,
+    )
+
+    candidates = enumerate_eligible_manifests(
+        live_dir,
+        now,
+        EffortBudget(default_effort="high", max_allowed_effort="xhigh"),
+    )
+
+    assert [manifest.name for manifest, _ in candidates] == [
+        "cooling-over-budget",
+        "ready-now",
+    ]
+
+
 def test_try_migration_tick_skips_migrations_awaiting_human_review(
     run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

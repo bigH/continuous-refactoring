@@ -78,25 +78,10 @@ def enumerate_eligible_manifests(
     now: datetime,
     effort_budget: EffortBudget | None = None,
 ) -> list[tuple[MigrationManifest, Path]]:
-    if not live_dir.is_dir():
-        return []
     candidates: list[tuple[MigrationManifest, Path]] = []
-    for entry in sorted(live_dir.iterdir()):
-        if not entry.is_dir() or entry.name.startswith("__"):
-            continue
-        manifest_path = entry / "manifest.json"
-        if not manifest_path.exists():
-            continue
-        manifest = load_manifest(manifest_path)
-        if manifest.status not in ("ready", "in-progress"):
-            continue
-        if manifest.awaiting_human_review:
-            continue
-        if not has_executable_phase(manifest):
-            continue
-        if not eligible_now(manifest, now):
-            continue
-        candidates.append((manifest, manifest_path))
+    for manifest, manifest_path in _iter_candidate_manifests(live_dir):
+        if _is_normally_eligible(manifest, now):
+            candidates.append((manifest, manifest_path))
     if effort_budget is not None:
         seen_paths = {path for _, path in candidates}
         for manifest, manifest_path in _cooling_effort_candidates(
@@ -113,6 +98,17 @@ def _cooling_effort_candidates(
     now: datetime,
     budget: EffortBudget,
 ) -> list[tuple[MigrationManifest, Path]]:
+    candidates: list[tuple[MigrationManifest, Path]] = []
+    for manifest, manifest_path in _iter_candidate_manifests(live_dir):
+        if not _can_ignore_effort_cooldown(manifest, now, budget):
+            continue
+        candidates.append((manifest, manifest_path))
+    return candidates
+
+
+def _iter_candidate_manifests(
+    live_dir: Path,
+) -> list[tuple[MigrationManifest, Path]]:
     if not live_dir.is_dir():
         return []
     candidates: list[tuple[MigrationManifest, Path]] = []
@@ -122,11 +118,17 @@ def _cooling_effort_candidates(
         manifest_path = entry / "manifest.json"
         if not manifest_path.exists():
             continue
-        manifest = load_manifest(manifest_path)
-        if not _can_ignore_effort_cooldown(manifest, now, budget):
-            continue
-        candidates.append((manifest, manifest_path))
+        candidates.append((load_manifest(manifest_path), manifest_path))
     return candidates
+
+
+def _is_normally_eligible(manifest: MigrationManifest, now: datetime) -> bool:
+    return (
+        manifest.status in ("ready", "in-progress")
+        and not manifest.awaiting_human_review
+        and has_executable_phase(manifest)
+        and eligible_now(manifest, now)
+    )
 
 
 def _can_ignore_effort_cooldown(
@@ -134,9 +136,7 @@ def _can_ignore_effort_cooldown(
     now: datetime,
     budget: EffortBudget,
 ) -> bool:
-    if manifest.status not in ("ready", "in-progress"):
-        return False
-    if manifest.awaiting_human_review or not has_executable_phase(manifest):
+    if not _is_phase_candidate(manifest):
         return False
     if manifest.cooldown_until is None:
         return False
@@ -146,6 +146,14 @@ def _can_ignore_effort_cooldown(
     return (
         phase.required_effort is not None
         and not effort_exceeds(phase.required_effort, budget.max_allowed_effort)
+    )
+
+
+def _is_phase_candidate(manifest: MigrationManifest) -> bool:
+    return (
+        manifest.status in ("ready", "in-progress")
+        and not manifest.awaiting_human_review
+        and has_executable_phase(manifest)
     )
 
 

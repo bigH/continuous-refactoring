@@ -1,13 +1,38 @@
 # continuous-refactoring
 
+[![GitHub repo](https://img.shields.io/badge/github-repo-green)](https://github.com/bigH/continuous-refactoring)
+[![PyPI](https://img.shields.io/pypi/v/continuous-refactoring.svg)](https://pypi.org/project/continuous-refactoring/)
+[![Tests](https://github.com/bigH/continuous-refactoring/actions/workflows/test.yml/badge.svg)](https://github.com/bigH/continuous-refactoring/actions/workflows/test.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](https://github.com/bigH/continuous-refactoring/blob/main/LICENSE)
+
 Small, test-gated cleanup commits by an AI coding agent.
 
 Think of it as a supervised janitor loop: the agent proposes a cleanup, your tests decide if it stays.
 
 ## Install
 
+Try it without installing:
+
+```bash
+uvx continuous-refactoring --help
+```
+
+Or install it with [uv](https://docs.astral.sh/uv/guides/tools/):
+
 ```bash
 uv tool install continuous-refactoring
+```
+
+Or with [pipx](https://pypa.github.io/pipx/):
+
+```bash
+pipx install continuous-refactoring
+```
+
+Or with pip:
+
+```bash
+pip install continuous-refactoring
 ```
 
 For a checkout:

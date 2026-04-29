@@ -20,7 +20,8 @@ Treat `AGENTS.md` as part of the codebase's invariants, not documentation. A dri
 - Test one: `uv run pytest tests/test_x.py::test_name`
 - Entry: `continuous-refactoring --help` (or `python -m continuous_refactoring`)
 
-No lint, no typecheck, no formatter, no CI, no pre-commit. **Pytest is the only gate.**
+No lint, no typecheck, no formatter, no pre-commit. GitHub Actions `Test`
+runs `uv run pytest`. **Pytest is the only gate.**
 
 ## 4. Layout
 

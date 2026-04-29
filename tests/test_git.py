@@ -8,6 +8,12 @@ import continuous_refactoring
 
 from conftest import init_repo
 
+_FAILING_COMMAND = [
+    "python",
+    "-c",
+    "import sys\nprint('out')\nprint('err', file=sys.stderr)\nraise SystemExit(1)",
+]
+
 
 def test_discard_workspace_changes_restores_tracked_files_and_removes_untracked(
     tmp_path: Path,
@@ -26,6 +32,30 @@ def test_discard_workspace_changes_restores_tracked_files_and_removes_untracked(
     assert not (repo / "scratch.txt").exists()
     assert continuous_refactoring.current_branch(repo) == starting_branch
     assert continuous_refactoring.workspace_status_lines(repo) == []
+
+
+def test_repo_change_helpers_track_workspace_status(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+
+    assert continuous_refactoring.repo_change_count(repo) == 0
+    assert not continuous_refactoring.repo_has_changes(repo)
+
+    (repo / "README.md").write_text("changed\n", encoding="utf-8")
+    (repo / "scratch.txt").write_text("scratch\n", encoding="utf-8")
+
+    assert continuous_refactoring.repo_change_count(repo) == 2
+    assert continuous_refactoring.repo_has_changes(repo)
+
+
+def test_git_commit_rejects_clean_worktree(tmp_path: Path) -> None:
+    repo = tmp_path / "repo"
+    init_repo(repo)
+
+    with pytest.raises(continuous_refactoring.ContinuousRefactorError) as exc:
+        continuous_refactoring.git_commit(repo, "no-op")
+
+    assert str(exc.value) == "No changes to commit."
 
 
 def test_revert_to_restores_requested_head_and_removes_untracked(
@@ -55,25 +85,13 @@ def test_revert_to_restores_requested_head_and_removes_untracked(
 
 
 def test_run_command_checked_failure_raises_git_command_error(tmp_path: Path) -> None:
-    command = [
-        "python",
-        "-c",
-        "import sys\nprint('out')\nprint('err', file=sys.stderr)\nraise SystemExit(1)",
-    ]
-
     with pytest.raises(continuous_refactoring.GitCommandError):
-        continuous_refactoring.run_command(command, cwd=tmp_path)
+        continuous_refactoring.run_command(_FAILING_COMMAND, cwd=tmp_path)
 
 
 def test_run_command_checked_failure_includes_cause_and_payload(tmp_path: Path) -> None:
-    command = [
-        "python",
-        "-c",
-        "import sys\nprint('out')\nprint('err', file=sys.stderr)\nraise SystemExit(1)",
-    ]
-
     with pytest.raises(continuous_refactoring.GitCommandError) as exc:
-        continuous_refactoring.run_command(command, cwd=tmp_path)
+        continuous_refactoring.run_command(_FAILING_COMMAND, cwd=tmp_path)
 
     error = exc.value
     assert isinstance(error.__cause__, subprocess.CalledProcessError)
@@ -98,14 +116,8 @@ def test_run_command_missing_command_raises_git_command_error(
 
 
 def test_run_command_unchecked_returns_completed_process(tmp_path: Path) -> None:
-    command = [
-        "python",
-        "-c",
-        "import sys\nprint('out')\nprint('err', file=sys.stderr)\nraise SystemExit(1)",
-    ]
-
     result = continuous_refactoring.run_command(
-        command,
+        _FAILING_COMMAND,
         cwd=tmp_path,
         check=False,
     )

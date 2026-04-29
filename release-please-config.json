@@ -1,0 +1,13 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "bootstrap-sha": "7e7ebe3e6477e8fde6497d6b290ae09c677eb519",
+  "include-component-in-tag": false,
+  "include-v-in-tag": true,
+  "pull-request-title-pattern": "chore: Release ${version}",
+  "packages": {
+    ".": {
+      "package-name": "continuous-refactoring",
+      "release-type": "python"
+    }
+  }
+}

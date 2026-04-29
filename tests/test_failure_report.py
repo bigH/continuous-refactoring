@@ -48,6 +48,26 @@ def _record(**overrides: object) -> DecisionRecord:
     return DecisionRecord(**values)
 
 
+def assert_attempt_decision(
+    artifacts: RunArtifacts,
+    *,
+    attempt: int,
+    retry: int,
+    record: DecisionRecord,
+    reason_doc_path: str | None,
+) -> None:
+    stats = artifacts.attempts[attempt]
+    assert stats.target == record.target
+    assert stats.retry == retry
+    assert stats.call_role == record.call_role
+    assert stats.phase_reached == record.phase_reached
+    assert stats.decision == record.decision
+    assert stats.retry_recommendation == record.retry_recommendation
+    assert stats.failure_kind == record.failure_kind
+    assert stats.failure_summary == record.summary
+    assert stats.reason_doc_path == reason_doc_path
+
+
 def test_effective_record_abandons_after_max_attempts() -> None:
     record = _record(
         summary="Still red",
@@ -230,10 +250,13 @@ def test_persist_decision_records_commit_without_failure_snapshot(tmp_path: Path
 
     assert result is None
     assert failure_snapshot_calls == 0
-    stats = artifacts.attempts[1]
-    assert stats.decision == "commit"
-    assert stats.retry == 2
-    assert stats.reason_doc_path is None
+    assert_attempt_decision(
+        artifacts,
+        attempt=1,
+        retry=2,
+        record=record,
+        reason_doc_path=None,
+    )
     assert not artifacts.events_path.exists()
 
 
@@ -258,9 +281,13 @@ def test_persist_decision_records_non_commit_snapshot(
 
     assert result is not None
     assert result.exists()
-    stats = artifacts.attempts[1]
-    assert stats.decision == "retry"
-    assert stats.reason_doc_path == str(result)
+    assert_attempt_decision(
+        artifacts,
+        attempt=1,
+        retry=1,
+        record=record,
+        reason_doc_path=str(result),
+    )
     events = artifacts.events_path.read_text(encoding="utf-8")
     assert '"event": "failure_doc_written"' in events
     assert '"event": "target_transition"' in events

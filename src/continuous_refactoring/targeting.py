@@ -45,10 +45,6 @@ def _warn_skip(message: str) -> None:
     print(f"warning: target line has {message}, skipping", file=sys.stderr)
 
 
-class _InvalidTargetFieldError(ValueError):
-    """Raised when a JSONL target line contains an invalid optional field."""
-
-
 def parse_extensions(raw: str) -> tuple[str, ...]:
     """Convert comma-separated extensions to glob patterns.
 
@@ -80,25 +76,27 @@ def parse_paths_arg(raw_paths: str | None) -> tuple[str, ...] | None:
     return parsed or None
 
 
-def _optional_str(data: dict[str, object], key: str) -> str | None:
+def _optional_str(data: dict[str, object], key: str) -> tuple[bool, str | None]:
     value = data.get(key)
     if value is None:
-        return None
+        return True, None
     if isinstance(value, str) and value.strip():
-        return value
+        return True, value
     _warn_skip(f"non-string or empty {key}")
-    raise _InvalidTargetFieldError(key)
+    return False, None
 
 
-def _optional_effort_override(data: dict[str, object]) -> str | None:
-    value = _optional_str(data, "effort-override")
+def _optional_effort_override(data: dict[str, object]) -> tuple[bool, str | None]:
+    valid, value = _optional_str(data, "effort-override")
+    if not valid:
+        return False, None
     if value is None:
-        return None
+        return True, None
     try:
-        return require_effort_tier(value, field="effort-override")
+        return True, require_effort_tier(value, field="effort-override")
     except ContinuousRefactorError:
         _warn_skip("invalid effort-override")
-        raise _InvalidTargetFieldError("effort-override")
+        return False, None
 
 
 def validate_target_line(data: object) -> Target | None:
@@ -120,11 +118,10 @@ def validate_target_line(data: object) -> Target | None:
         _warn_skip("invalid file entries")
         return None
 
-    try:
-        scoping = _optional_str(data, "scoping")
-        model_override = _optional_str(data, "model-override")
-        effort_override = _optional_effort_override(data)
-    except _InvalidTargetFieldError:
+    valid_scoping, scoping = _optional_str(data, "scoping")
+    valid_model_override, model_override = _optional_str(data, "model-override")
+    valid_effort_override, effort_override = _optional_effort_override(data)
+    if not (valid_scoping and valid_model_override and valid_effort_override):
         return None
 
     return Target(

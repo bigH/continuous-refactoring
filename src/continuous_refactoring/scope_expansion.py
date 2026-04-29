@@ -64,6 +64,20 @@ def _parse_selection_line(line: str) -> tuple[ScopeCandidateKind, str] | None:
     return None
 
 
+def _require_unique_candidate_kinds(
+    candidate_kinds: tuple[ScopeCandidateKind, ...],
+) -> tuple[ScopeCandidateKind, ...]:
+    duplicates = tuple(
+        kind for kind in _KNOWN_SCOPE_SELECTION_KINDS if candidate_kinds.count(kind) > 1
+    )
+    if duplicates:
+        quoted = ", ".join(repr(kind) for kind in duplicates)
+        raise ContinuousRefactorError(
+            f"Scope selection requires unique candidate kinds, got duplicates: {quoted}"
+        )
+    return candidate_kinds
+
+
 def scope_expansion_bypass_reason(target: Target) -> str | None:
     if len(target.files) == 0:
         return "scope expansion requires a seed file"
@@ -78,6 +92,7 @@ def parse_scope_selection(
     stdout: str,
     candidate_kinds: tuple[ScopeCandidateKind, ...],
 ) -> ScopeSelection:
+    candidate_kinds = _require_unique_candidate_kinds(candidate_kinds)
     non_blank = [line.strip() for line in stdout.splitlines() if line.strip()]
     if not non_blank:
         raise ContinuousRefactorError("Scope selection produced no output")
@@ -115,6 +130,9 @@ def select_scope_candidate(
     retry: int = 1,
     effort_metadata: dict[str, object] | None = None,
 ) -> ScopeSelection:
+    candidate_kinds = _require_unique_candidate_kinds(
+        tuple(candidate.kind for candidate in candidates)
+    )
     selection_dir = artifacts.root / "scope-expansion"
     selection_dir.mkdir(parents=True, exist_ok=True)
     selection_stdout_path = selection_dir / "selection.stdout.log"
@@ -178,7 +196,6 @@ def select_scope_candidate(
         raise ContinuousRefactorError(
             f"Scope selection agent failed with exit code {result.returncode}"
         )
-    candidate_kinds = tuple(candidate.kind for candidate in candidates)
     try:
         selection = parse_scope_selection(result.stdout, candidate_kinds)
     except ContinuousRefactorError as error:

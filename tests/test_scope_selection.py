@@ -66,3 +66,11 @@ def test_selection_parser_rejects_kind_outside_available_candidates() -> None:
             "selected-candidate: cross-cluster\n",
             ("seed", "local-cluster"),
         )
+
+
+def test_selection_parser_rejects_duplicate_candidate_kinds() -> None:
+    with pytest.raises(ContinuousRefactorError, match="requires unique candidate kinds"):
+        parse_scope_selection(
+            "selected-candidate: local-cluster\n",
+            ("seed", "local-cluster", "local-cluster"),
+        )

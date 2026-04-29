@@ -237,6 +237,28 @@ def test_select_scope_candidate_surfaces_parser_boundary_errors(
     assert failed["call_status"] == "failed"
 
 
+def test_select_scope_candidate_rejects_duplicate_candidate_kinds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target = Target(description="clean up", files=("README.md",), provenance="globs")
+    candidates = (_candidate("local-cluster"), _candidate("local-cluster"))
+    artifacts = _make_artifacts(tmp_path, monkeypatch)
+
+    with pytest.raises(ContinuousRefactorError, match="requires unique candidate kinds"):
+        select_scope_candidate(
+            target,
+            candidates,
+            "taste",
+            tmp_path,
+            artifacts,
+            agent="codex",
+            model="gpt-5.5",
+            effort="low",
+            timeout=None,
+        )
+
+
 def test_select_scope_candidate_multi_candidate_logs_call_events_with_effort(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,

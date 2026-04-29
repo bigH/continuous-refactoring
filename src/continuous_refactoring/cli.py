@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Callable
 from importlib.metadata import version as metadata_version
 from pathlib import Path
+from typing import Literal
 
 __all__ = [
     "build_parser",
@@ -318,36 +319,20 @@ def _handle_init(args: argparse.Namespace) -> None:
 
     try:
         if in_repo_taste_arg is not None:
-            repo_taste_resolved = (path / in_repo_taste_arg).resolve()
-            if not repo_taste_resolved.is_relative_to(path):
-                print(
-                    f"Error: --in-repo-taste must be inside the repo: {in_repo_taste_arg}",
-                    file=sys.stderr,
-                )
-                raise SystemExit(2)
-            if repo_taste_resolved.exists() and not repo_taste_resolved.is_file():
-                print(
-                    f"Error: --in-repo-taste must point to a file: {in_repo_taste_arg}",
-                    file=sys.stderr,
-                )
-                raise SystemExit(2)
-            repo_taste_relative = str(repo_taste_resolved.relative_to(path))
+            repo_taste_resolved, repo_taste_relative = _resolve_repo_relative_arg(
+                repo_root=path,
+                value=in_repo_taste_arg,
+                flag="--in-repo-taste",
+                expected_kind="file",
+            )
 
         if live_dir_arg is not None:
-            resolved_live = (path / live_dir_arg).resolve()
-            if not resolved_live.is_relative_to(path):
-                print(
-                    f"Error: --live-migrations-dir must be inside the repo: {live_dir_arg}",
-                    file=sys.stderr,
-                )
-                raise SystemExit(2)
-            if resolved_live.exists() and not resolved_live.is_dir():
-                print(
-                    f"Error: --live-migrations-dir must point to a directory: {live_dir_arg}",
-                    file=sys.stderr,
-                )
-                raise SystemExit(2)
-            live_dir_relative = str(resolved_live.relative_to(path))
+            resolved_live, live_dir_relative = _resolve_repo_relative_arg(
+                repo_root=path,
+                value=live_dir_arg,
+                flag="--live-migrations-dir",
+                expected_kind="directory",
+            )
 
         project = register_project(path)
         if repo_taste_relative is not None:
@@ -384,6 +369,36 @@ def _handle_init(args: argparse.Namespace) -> None:
     if live_dir_arg is not None:
         assert resolved_live is not None
         print(f"Live migrations dir: {resolved_live}")
+
+
+def _resolve_repo_relative_arg(
+    *,
+    repo_root: Path,
+    value: Path,
+    flag: str,
+    expected_kind: Literal["file", "directory"],
+) -> tuple[Path, str]:
+    resolved = (repo_root / value).resolve()
+    if not resolved.is_relative_to(repo_root):
+        print(
+            f"Error: {flag} must be inside the repo: {value}",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    if resolved.exists():
+        if expected_kind == "file" and not resolved.is_file():
+            print(
+                f"Error: {flag} must point to a file: {value}",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        if expected_kind == "directory" and not resolved.is_dir():
+            print(
+                f"Error: {flag} must point to a directory: {value}",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+    return resolved, str(resolved.relative_to(repo_root))
 
 
 def _configure_repo_taste(

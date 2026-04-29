@@ -282,51 +282,78 @@ def test_init_in_repo_taste_conflict_force_replaces_with_old_taste(
     assert not source.exists()
 
 
-def test_init_in_repo_taste_rejects_outside_repo(
+@pytest.mark.parametrize(
+    ("args", "expected_message"),
+    [
+        (
+            make_init_args(Path("unused"), in_repo_taste=Path("../taste.md")),
+            "--in-repo-taste must be inside the repo",
+        ),
+        (
+            make_init_args(Path("unused"), live_migrations_dir=Path("../outside")),
+            "--live-migrations-dir must be inside the repo",
+        ),
+    ],
+    ids=["in-repo-taste", "live-migrations-dir"],
+)
+def test_init_rejects_outside_repo(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    args: argparse.Namespace,
+    expected_message: str,
 ) -> None:
     repo = init_repo_with_temp_home(tmp_path, monkeypatch)
-
-    args = argparse.Namespace(
-        path=repo,
-        in_repo_taste=Path("../taste.md"),
-        live_migrations_dir=None,
-    )
+    args.path = repo
     with pytest.raises(SystemExit) as exc_info:
         _handle_init(args)
 
     assert exc_info.value.code == 2
     err = capsys.readouterr().err
-    assert "--in-repo-taste must be inside the repo" in err
+    assert expected_message in err
 
 
 @pytest.mark.parametrize(
-    "taste_arg",
-    [Path("."), Path("existing-dir")],
-    ids=["repo-root", "existing-dir"],
+    ("args", "setup_name", "expected_message"),
+    [
+        (
+            make_init_args(Path("unused"), in_repo_taste=Path(".")),
+            "existing-dir",
+            "--in-repo-taste must point to a file",
+        ),
+        (
+            make_init_args(Path("unused"), in_repo_taste=Path("existing-dir")),
+            "existing-dir",
+            "--in-repo-taste must point to a file",
+        ),
+        (
+            make_init_args(Path("unused"), live_migrations_dir=Path("existing-file")),
+            "existing-file",
+            "--live-migrations-dir must point to a directory",
+        ),
+    ],
+    ids=["taste-repo-root", "taste-existing-dir", "live-migrations-existing-file"],
 )
-def test_init_in_repo_taste_rejects_directories(
+def test_init_rejects_wrong_existing_path_kind(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    taste_arg: Path,
+    args: argparse.Namespace,
+    setup_name: str,
+    expected_message: str,
 ) -> None:
     repo = init_repo_with_temp_home(tmp_path, monkeypatch)
-    (repo / "existing-dir").mkdir()
-
-    args = argparse.Namespace(
-        path=repo,
-        in_repo_taste=taste_arg,
-        live_migrations_dir=None,
-    )
+    args.path = repo
+    if setup_name == "existing-dir":
+        (repo / setup_name).mkdir()
+    else:
+        (repo / setup_name).write_text("not a directory\n", encoding="utf-8")
     with pytest.raises(SystemExit) as exc_info:
         _handle_init(args)
 
     assert exc_info.value.code == 2
     err = capsys.readouterr().err
-    assert "--in-repo-taste must point to a file" in err
+    assert expected_message in err
 
 
 def test_init_idempotent(
@@ -526,22 +553,6 @@ def test_init_live_migrations_dir_conflict_force_replaces_destination(
     )
     assert not destination_file.exists()
     assert not (repo / ".migrations").exists()
-
-
-def test_init_live_migrations_dir_rejects_outside_repo(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
-
-    args = argparse.Namespace(path=repo, live_migrations_dir=Path("../outside"))
-    with pytest.raises(SystemExit) as exc_info:
-        _handle_init(args)
-
-    assert exc_info.value.code == 2
-    err = capsys.readouterr().err
-    assert "must be inside the repo" in err
 
 
 def test_init_exits_cleanly_on_malformed_manifest(

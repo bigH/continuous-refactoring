@@ -97,6 +97,10 @@ def assert_single_run_final_status(repo_root: Path, expected_status: str) -> Non
     assert summary["final_status"] == expected_status
 
 
+def fail_if_taste_agent_runs(*_args: object, **_kwargs: object) -> int:
+    pytest.fail("taste agent should not be invoked")
+
+
 def make_taste_agent_writer(
     *,
     content: str | None = None,

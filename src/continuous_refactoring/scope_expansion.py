@@ -41,7 +41,7 @@ def _scope_selection_line(selection: ScopeSelection) -> str:
     return f"selected-candidate: {selection.kind} — {selection.reason}\n"
 
 
-def _write_selection_logs(selection_dir: Path, selection: ScopeSelection) -> None:
+def write_scope_selection_logs(selection_dir: Path, selection: ScopeSelection) -> None:
     line = _scope_selection_line(selection)
     (selection_dir / "selection.stdout.log").write_text(line, encoding="utf-8")
     (selection_dir / "selection-last-message.md").write_text(line, encoding="utf-8")
@@ -111,7 +111,7 @@ def select_scope_candidate(
             kind=candidates[0].kind,
             reason="only viable candidate",
         )
-        _write_selection_logs(selection_dir, selection)
+        write_scope_selection_logs(selection_dir, selection)
         return selection
 
     call_role = "scope-expansion"

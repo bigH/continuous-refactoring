@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import continuous_refactoring.routing_pipeline as routing_pipeline
 import continuous_refactoring.scope_expansion as scope_expansion
 from continuous_refactoring.artifacts import (
     CommandCapture,
@@ -152,6 +153,54 @@ def test_write_scope_expansion_artifacts_records_payload(tmp_path: Path) -> None
         "validation_surfaces": ["README.md"],
     }
     assert payload["selection"] == {"kind": "local-cluster", "reason": "clustered evidence"}
+
+
+def test_expand_target_bypass_writes_scope_artifacts_and_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target = Target(
+        description="explicit paths",
+        files=("src/foo.py", "src/bar.py"),
+        provenance="paths",
+    )
+    artifacts = _make_artifacts(tmp_path, monkeypatch)
+
+    selected_target, planning_context = routing_pipeline.expand_target_for_classification(
+        target,
+        "taste",
+        tmp_path,
+        artifacts,
+        agent="codex",
+        model="gpt-5.5",
+        effort="low",
+        timeout=None,
+    )
+
+    scope_dir = artifacts.root / "scope-expansion"
+    payload = json.loads((scope_dir / "variants.json").read_text(encoding="utf-8"))
+
+    assert selected_target == target
+    assert planning_context == (
+        "Scope expansion bypassed: scope expansion bypassed for explicit multi-file target\n"
+        "Files:\n"
+        "- src/foo.py\n"
+        "- src/bar.py"
+    )
+    assert payload == {
+        "bypass_reason": "scope expansion bypassed for explicit multi-file target",
+        "candidates": [],
+        "target": {
+            "description": "explicit paths",
+            "files": ["src/foo.py", "src/bar.py"],
+            "provenance": "paths",
+        },
+    }
+    expected = (
+        "selected-candidate: seed — scope expansion bypassed for explicit multi-file target\n"
+    )
+    assert (scope_dir / "selection.stdout.log").read_text(encoding="utf-8") == expected
+    assert (scope_dir / "selection-last-message.md").read_text(encoding="utf-8") == expected
 
 
 def test_select_scope_candidate_surfaces_parser_boundary_errors(

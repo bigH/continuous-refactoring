@@ -35,9 +35,11 @@ from continuous_refactoring.planning import run_planning
 from continuous_refactoring.prompts import describe_scope_candidate
 from continuous_refactoring.routing import classify_target
 from continuous_refactoring.scope_expansion import (
+    ScopeSelection,
     scope_candidate_to_target,
     scope_expansion_bypass_reason,
     select_scope_candidate,
+    write_scope_selection_logs,
     write_scope_expansion_artifacts,
 )
 from continuous_refactoring.scope_candidates import build_scope_candidates
@@ -90,11 +92,9 @@ def expand_target_for_classification(
             (),
             bypass_reason=bypass_reason,
         )
-        bypass_line = f"selected-candidate: seed — {bypass_reason}\n"
-        (scope_dir / "selection.stdout.log").write_text(bypass_line, encoding="utf-8")
-        (scope_dir / "selection-last-message.md").write_text(
-            bypass_line,
-            encoding="utf-8",
+        write_scope_selection_logs(
+            scope_dir,
+            ScopeSelection(kind="seed", reason=bypass_reason),
         )
         return target, _scope_bypass_context(target, bypass_reason)
 

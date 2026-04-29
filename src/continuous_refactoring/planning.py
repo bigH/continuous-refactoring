@@ -48,6 +48,13 @@ class PlanningOutcome:
 
 
 @dataclass(frozen=True)
+class _PhaseMetadata:
+    precondition: str
+    required_effort: str | None
+    effort_reason: str | None
+
+
+@dataclass(frozen=True)
 class _PlanningStageSpec:
     prompt_stage: PlanningStage
     stage_label: str
@@ -119,36 +126,75 @@ def _phase_section_text(content: str, heading: str) -> str | None:
     return normalized or None
 
 
-def _phase_precondition(content: str, phase_file: str) -> str:
-    section = _phase_section_text(content, "Precondition")
+def _phase_field(
+    content: str,
+    *,
+    heading: str,
+    line_re: re.Pattern[str],
+) -> str | None:
+    section = _phase_section_text(content, heading)
     if section is not None:
         return section
-    match = _PRECONDITION_LINE_RE.search(content)
-    if match:
-        return match.group(1).strip()
-    return f"prerequisites in {phase_file} are met"
-
-
-def _phase_required_effort(content: str, phase_file: str) -> str | None:
-    raw = _phase_section_text(content, "Required Effort")
-    if raw is None:
-        match = _REQUIRED_EFFORT_LINE_RE.search(content)
-        raw = match.group(1).strip() if match else None
-    if raw is None:
-        return None
-    candidate = raw.strip().strip("`").split()[0].strip("`.,;:")
-    return require_effort_tier(candidate, field=f"{phase_file} required_effort")
-
-
-def _phase_effort_reason(content: str) -> str | None:
-    section = _phase_section_text(content, "Effort Reason")
-    if section is not None:
-        return section
-    match = _EFFORT_REASON_LINE_RE.search(content)
+    match = line_re.search(content)
     if match:
         return match.group(1).strip()
     return None
 
+
+def _parse_phase_metadata(content: str, phase_file: str) -> _PhaseMetadata:
+    precondition = _phase_field(
+        content,
+        heading="Precondition",
+        line_re=_PRECONDITION_LINE_RE,
+    )
+    raw_required_effort = _phase_field(
+        content,
+        heading="Required Effort",
+        line_re=_REQUIRED_EFFORT_LINE_RE,
+    )
+    effort_reason = _phase_field(
+        content,
+        heading="Effort Reason",
+        line_re=_EFFORT_REASON_LINE_RE,
+    )
+    required_effort = None
+    if raw_required_effort is not None:
+        candidate = raw_required_effort.strip().strip("`").split()[0].strip("`.,;:")
+        required_effort = require_effort_tier(
+            candidate,
+            field=f"{phase_file} required_effort",
+        )
+    return _PhaseMetadata(
+        precondition=precondition or f"prerequisites in {phase_file} are met",
+        required_effort=required_effort,
+        effort_reason=effort_reason,
+    )
+
+
+def _phase_precondition(content: str, phase_file: str) -> str:
+    return _parse_phase_metadata(content, phase_file).precondition
+
+
+def _phase_required_effort(content: str, phase_file: str) -> str | None:
+    return _parse_phase_metadata(content, phase_file).required_effort
+
+
+def _phase_effort_reason(content: str) -> str | None:
+    return _parse_phase_metadata(content, "<phase>").effort_reason
+
+
+def _phase_spec_from_file(phase_file: Path) -> PhaseSpec:
+    content = phase_file.read_text(encoding="utf-8")
+    metadata = _parse_phase_metadata(content, phase_file.name)
+    name = phase_file.stem.split("-", 2)[2]
+    return PhaseSpec(
+        name=name,
+        file=phase_file.name,
+        done=False,
+        precondition=metadata.precondition,
+        required_effort=metadata.required_effort,
+        effort_reason=metadata.effort_reason,
+    )
 
 def _discover_phase_files(mig_root: Path) -> tuple[PhaseSpec, ...]:
     phase_files: list[tuple[int, Path]] = []
@@ -169,17 +215,7 @@ def _discover_phase_files(mig_root: Path) -> tuple[PhaseSpec, ...]:
                 f"Duplicate phase names are not allowed in {mig_root.name}: {name}"
             )
         seen_names.add(name)
-        content = pf.read_text(encoding="utf-8")
-        phases.append(
-            PhaseSpec(
-                name=name,
-                file=pf.name,
-                done=False,
-                precondition=_phase_precondition(content, pf.name),
-                required_effort=_phase_required_effort(content, pf.name),
-                effort_reason=_phase_effort_reason(content),
-            )
-        )
+        phases.append(_phase_spec_from_file(pf))
     return tuple(phases)
 
 

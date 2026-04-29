@@ -546,6 +546,33 @@ def test_discover_phase_files_reads_optional_effort_metadata(tmp_path: Path) -> 
     assert phases[0].effort_reason == "touches routing and planning"
 
 
+def test_discover_phase_files_prefers_section_metadata_over_legacy_lines(
+    tmp_path: Path,
+) -> None:
+    mig_root = tmp_path / "live" / "section-precedence"
+    mig_root.mkdir(parents=True)
+
+    (mig_root / "phase-1-risky.md").write_text(
+        (
+            "precondition: legacy precondition\n"
+            "required_effort: low\n"
+            "effort_reason: legacy reason\n\n"
+            "## Precondition\n\nsection precondition\n\n"
+            "## Required Effort\n\nhigh with extra context\n\n"
+            "## Effort Reason\n\nsection reason wins\n\n"
+            "## Definition of Done\n\nDone.\n"
+        ),
+        encoding="utf-8",
+    )
+
+    phases = _discover_phase_files(mig_root)
+
+    assert len(phases) == 1
+    assert phases[0].precondition == "section precondition"
+    assert phases[0].required_effort == "high"
+    assert phases[0].effort_reason == "section reason wins"
+
+
 def test_discover_phase_files_rejects_invalid_required_effort(tmp_path: Path) -> None:
     mig_root = tmp_path / "live" / "bad-effort"
     mig_root.mkdir(parents=True)

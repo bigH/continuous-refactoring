@@ -28,6 +28,7 @@ from conftest import (
     noop_tests,
     read_single_run_events as _read_single_run_events,
     read_single_run_summary as _read_single_run_summary,
+    write_targets_file,
 )
 
 
@@ -57,18 +58,6 @@ def _write_live_manifest(
     migration_dir = live_dir / name
     migration_dir.mkdir(parents=True, exist_ok=True)
     save_manifest(manifest, migration_dir / "manifest.json")
-
-
-def _write_targets_file(tmp_path: Path, count: int) -> Path:
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        "\n".join(
-            json.dumps({"description": f"target-{index}", "files": [f"file{index}.py"]})
-            for index in range(count)
-        ),
-        encoding="utf-8",
-    )
-    return targets_file
 
 
 def _migration_record(
@@ -375,14 +364,7 @@ def test_run_sleeps_only_between_targets(
     sleep_calls: list[float] = []
     monkeypatch.setattr("continuous_refactoring.loop.time.sleep", sleep_calls.append)
 
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        "\n".join(
-            json.dumps({"description": f"target-{index}", "files": [f"file{index}.py"]})
-            for index in range(3)
-        ),
-        encoding="utf-8",
-    )
+    targets_file = write_targets_file(tmp_path, count=3)
 
     args = make_run_loop_args(
         repo_root,
@@ -472,14 +454,7 @@ def test_run_does_not_sleep_between_retries(
     sleep_calls: list[float] = []
     monkeypatch.setattr("continuous_refactoring.loop.time.sleep", sleep_calls.append)
 
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        "\n".join(
-            json.dumps({"description": f"target-{index}", "files": [f"file{index}.py"]})
-            for index in range(2)
-        ),
-        encoding="utf-8",
-    )
+    targets_file = write_targets_file(tmp_path, count=2)
 
     args = make_run_loop_args(
         repo_root,
@@ -627,14 +602,7 @@ def test_run_stops_after_max_consecutive_failures(
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
     # Write a JSONL with 5 targets so we have enough attempts
-    targets_file = tmp_path / "targets.jsonl"
-    lines = []
-    for i in range(5):
-        lines.append(json.dumps({
-            "description": f"target-{i}",
-            "files": [f"file{i}.py"],
-        }))
-    targets_file.write_text("\n".join(lines), encoding="utf-8")
+    targets_file = write_targets_file(tmp_path, count=5)
 
     args = make_run_loop_args(
         repo_root,
@@ -671,14 +639,7 @@ def test_run_resets_consecutive_counter_on_success(
     _patch_run_loop_agent(monkeypatch, alternating_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    targets_file = tmp_path / "targets.jsonl"
-    lines = []
-    for i in range(6):
-        lines.append(json.dumps({
-            "description": f"target-{i}",
-            "files": [f"file{i}.py"],
-        }))
-    targets_file.write_text("\n".join(lines), encoding="utf-8")
+    targets_file = write_targets_file(tmp_path, count=6)
 
     args = make_run_loop_args(
         repo_root,
@@ -709,14 +670,15 @@ def test_run_target_overrides(
     _patch_run_loop_agent(monkeypatch, model_capturing_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        json.dumps({
-            "description": "override target",
-            "files": ["foo.py"],
-            "model-override": "special-model",
-        }),
-        encoding="utf-8",
+    targets_file = write_targets_file(
+        tmp_path,
+        targets=[
+            {
+                "description": "override target",
+                "files": ["foo.py"],
+                "model-override": "special-model",
+            }
+        ],
     )
 
     args = make_run_loop_args(
@@ -746,14 +708,15 @@ def test_run_target_effort_override_caps_to_max_and_is_audited(
     _patch_run_loop_agent(monkeypatch, effort_capturing_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        json.dumps({
-            "description": "override effort target",
-            "files": ["foo.py"],
-            "effort-override": "xhigh",
-        }),
-        encoding="utf-8",
+    targets_file = write_targets_file(
+        tmp_path,
+        targets=[
+            {
+                "description": "override effort target",
+                "files": ["foo.py"],
+                "effort-override": "xhigh",
+            }
+        ],
     )
 
     args = make_run_loop_args(
@@ -1080,10 +1043,9 @@ def test_run_targets_precedence_over_other_selectors(
     _patch_run_loop_agent(monkeypatch, capture_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        json.dumps({"description": "jsonl wins", "files": ["from-targets.py"]}) + "\n",
-        encoding="utf-8",
+    targets_file = write_targets_file(
+        tmp_path,
+        targets=[{"description": "jsonl wins", "files": ["from-targets.py"]}],
     )
 
     args = make_run_loop_args(
@@ -1227,10 +1189,9 @@ def test_cli_run_allows_targets_without_max_refactors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        json.dumps({"description": "target", "files": ["file.py"]}),
-        encoding="utf-8",
+    targets_file = write_targets_file(
+        tmp_path,
+        targets=[{"description": "target", "files": ["file.py"]}],
     )
     args = make_run_loop_args(
         run_loop_env,
@@ -1404,14 +1365,7 @@ def test_run_samples_targets_when_max_refactors_lt_total(
     _patch_run_loop_agent(monkeypatch, counting_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    targets_file = tmp_path / "targets.jsonl"
-    lines = []
-    for i in range(10):
-        lines.append(json.dumps({
-            "description": f"target-{i}",
-            "files": [f"file{i}.py"],
-        }))
-    targets_file.write_text("\n".join(lines), encoding="utf-8")
+    targets_file = write_targets_file(tmp_path, count=10)
 
     args = make_run_loop_args(
         repo_root,
@@ -1677,15 +1631,12 @@ def test_run_records_retry_and_abandon_transitions_with_failure_docs(
     _patch_run_loop_agent(monkeypatch, touching_agent)
     _patch_run_loop_tests(monkeypatch, fail_twice_then_pass)
 
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        "\n".join(
-            [
-                json.dumps({"description": "target-a", "files": ["a.py"]}),
-                json.dumps({"description": "target-b", "files": ["b.py"]}),
-            ]
-        ),
-        encoding="utf-8",
+    targets_file = write_targets_file(
+        tmp_path,
+        targets=[
+            {"description": "target-a", "files": ["a.py"]},
+            {"description": "target-b", "files": ["b.py"]},
+        ],
     )
 
     args = make_run_loop_args(
@@ -2005,7 +1956,7 @@ def test_run_non_runnable_migration_does_not_consume_max_refactors(
         ["git", "commit", "-m", "add live migration"],
         cwd=repo_root,
     )
-    targets_file = _write_targets_file(tmp_path, 2)
+    targets_file = write_targets_file(tmp_path, count=2)
     monkeypatch.setattr(
         "continuous_refactoring.loop._resolve_live_migrations_dir",
         lambda _repo_root: live_dir,
@@ -2101,7 +2052,7 @@ def test_run_preserves_non_runnable_migration_state_across_source_retry(
         ["git", "commit", "-m", "add live migration"],
         cwd=repo_root,
     )
-    targets_file = _write_targets_file(tmp_path, 2)
+    targets_file = write_targets_file(tmp_path, count=2)
     monkeypatch.setattr(
         "continuous_refactoring.loop._resolve_live_migrations_dir",
         lambda _repo_root: live_dir,
@@ -2199,7 +2150,7 @@ def test_run_runnable_migration_counts_as_one_action(
     live_dir = tmp_path / "live-migrations"
     live_dir.mkdir()
     _write_live_manifest(live_dir)
-    targets_file = _write_targets_file(tmp_path, 1)
+    targets_file = write_targets_file(tmp_path, count=1)
     monkeypatch.setattr(
         "continuous_refactoring.loop._resolve_live_migrations_dir",
         lambda _repo_root: live_dir,

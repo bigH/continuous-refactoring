@@ -165,6 +165,28 @@ class RegisteredProjectLayout:
     taste_path: Path
 
 
+def write_targets_file(
+    tmp_path: Path,
+    *,
+    count: int | None = None,
+    targets: list[dict[str, object]] | None = None,
+) -> Path:
+    if (count is None) == (targets is None):
+        raise AssertionError("provide exactly one of count or targets")
+    if targets is None:
+        assert count is not None
+        targets = [
+            {"description": f"target-{index}", "files": [f"file{index}.py"]}
+            for index in range(count)
+        ]
+    targets_file = tmp_path / "targets.jsonl"
+    targets_file.write_text(
+        "\n".join(json.dumps(target) for target in targets),
+        encoding="utf-8",
+    )
+    return targets_file
+
+
 def init_repo(path: Path) -> None:
     path.mkdir(parents=True, exist_ok=True)
     continuous_refactoring.run_command(["git", "init", "-b", "main"], cwd=path)

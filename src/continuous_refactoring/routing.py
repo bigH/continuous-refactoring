@@ -21,6 +21,29 @@ _DECISION_RE = re.compile(
 )
 
 
+def _log_failed_classification(
+    artifacts: RunArtifacts,
+    target: Target,
+    *,
+    attempt: int,
+    retry: int,
+    summary: str,
+    effort_metadata: dict[str, object] | None,
+    returncode: int | None = None,
+) -> None:
+    artifacts.log_call_finished(
+        attempt=attempt,
+        retry=retry,
+        target=target.description,
+        call_role="classify",
+        status="failed",
+        level="WARN",
+        returncode=returncode,
+        summary=summary,
+        effort=effort_metadata,
+    )
+
+
 def _parse_decision(stdout: str) -> ClassifierDecision:
     non_empty = [line.strip() for line in stdout.splitlines() if line.strip()]
     if not non_empty:
@@ -77,29 +100,25 @@ def classify_target(
             timeout=timeout,
         )
     except ContinuousRefactorError as error:
-        artifacts.log_call_finished(
+        _log_failed_classification(
+            artifacts,
+            target,
             attempt=attempt,
             retry=retry,
-            target=target.description,
-            call_role=call_role,
-            status="failed",
-            level="WARN",
             summary=str(error),
-            effort=effort_metadata,
+            effort_metadata=effort_metadata,
         )
         raise
 
     if result.returncode != 0:
-        artifacts.log_call_finished(
+        _log_failed_classification(
+            artifacts,
+            target,
             attempt=attempt,
             retry=retry,
-            target=target.description,
-            call_role=call_role,
-            status="failed",
-            level="WARN",
-            returncode=result.returncode,
             summary=f"{agent} exited with code {result.returncode}",
-            effort=effort_metadata,
+            effort_metadata=effort_metadata,
+            returncode=result.returncode,
         )
         raise ContinuousRefactorError(
             f"Classifier agent failed with exit code {result.returncode}"
@@ -108,16 +127,14 @@ def classify_target(
     try:
         decision = _parse_decision(result.stdout)
     except ContinuousRefactorError as error:
-        artifacts.log_call_finished(
+        _log_failed_classification(
+            artifacts,
+            target,
             attempt=attempt,
             retry=retry,
-            target=target.description,
-            call_role=call_role,
-            status="failed",
-            level="WARN",
-            returncode=result.returncode,
             summary=str(error),
-            effort=effort_metadata,
+            effort_metadata=effort_metadata,
+            returncode=result.returncode,
         )
         raise
 

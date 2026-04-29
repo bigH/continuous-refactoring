@@ -101,6 +101,7 @@ active phase explicitly names `loop.py` in scope.
 - **Taste injection** — every prompt includes a `## Taste` section. `tests/test_prompts.py` enforces this via `_TASTE_INJECTED_PROMPTS`. Do not drop it.
 - **Taste read boundary** (`config.py`, `cli.py`, `loop.py`) — `load_taste()` translates unreadable project/global taste reads into `ContinuousRefactorError`; CLI stale-taste checks and loop taste loading must treat that boundary failure as non-fatal and skip/fall back instead of leaking raw `OSError`/`PermissionError`.
 - **Repo-local taste routing** (`config.py`, `cli.py`) — `ProjectEntry.repo_taste_path` is stored repo-relative in the XDG manifest and resolved through `resolve_project_taste_path()`. Keep `init`, `taste`, stale warnings, and run prompt loading on that helper so the active taste path does not drift.
+- **Init reconfiguration moves state** (`cli.py`) — re-running `init` with `--in-repo-taste` or `--live-migrations-dir` moves existing taste/live migration state before updating manifest pointers; destination conflicts require `--force`.
 
 ## 11. Surprising CLI semantics
 

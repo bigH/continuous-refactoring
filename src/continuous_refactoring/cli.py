@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 
@@ -132,6 +134,11 @@ def _add_init_parser(subparsers: argparse._SubParsersAction) -> None:
             "Store this project's taste file in the repo. "
             f"Defaults to {DEFAULT_REPO_TASTE_PATH}."
         ),
+    )
+    init_parser.add_argument(
+        "--force",
+        action="store_true",
+        help="Replace destination state when reconfiguring taste or live migrations.",
     )
 
 
@@ -287,6 +294,7 @@ def _handle_init(args: argparse.Namespace) -> None:
     from continuous_refactoring.config import (
         ensure_taste_file,
         register_project,
+        resolve_live_migrations_dir,
         resolve_project,
         resolve_project_taste_path,
         set_live_migrations_dir,
@@ -296,6 +304,7 @@ def _handle_init(args: argparse.Namespace) -> None:
     path = (args.path or Path.cwd()).resolve()
     in_repo_taste_arg: Path | None = getattr(args, "in_repo_taste", None)
     live_dir_arg: Path | None = getattr(args, "live_migrations_dir", None)
+    force = bool(getattr(args, "force", False))
     repo_taste_relative: str | None = None
     repo_taste_resolved: Path | None = None
     resolved_live: Path | None = None
@@ -326,10 +335,23 @@ def _handle_init(args: argparse.Namespace) -> None:
                     file=sys.stderr,
                 )
                 raise SystemExit(2)
+            if resolved_live.exists() and not resolved_live.is_dir():
+                print(
+                    f"Error: --live-migrations-dir must point to a directory: {live_dir_arg}",
+                    file=sys.stderr,
+                )
+                raise SystemExit(2)
             live_dir_relative = str(resolved_live.relative_to(path))
 
         project = register_project(path)
         if repo_taste_relative is not None:
+            assert repo_taste_resolved is not None
+            _configure_repo_taste(
+                current=resolve_project_taste_path(project),
+                destination=repo_taste_resolved,
+                force=force,
+                ensure_taste_file=ensure_taste_file,
+            )
             set_repo_taste_path(project.entry.uuid, repo_taste_relative)
             project = resolve_project(path)
 
@@ -339,8 +361,13 @@ def _handle_init(args: argparse.Namespace) -> None:
         if live_dir_arg is not None:
             assert resolved_live is not None
             assert live_dir_relative is not None
-            resolved_live.mkdir(parents=True, exist_ok=True)
+            _configure_live_migrations_dir(
+                current=resolve_live_migrations_dir(project),
+                destination=resolved_live,
+                force=force,
+            )
             set_live_migrations_dir(project.entry.uuid, live_dir_relative)
+            project = resolve_project(path)
     except ContinuousRefactorError as error:
         print(f"Error: {error}", file=sys.stderr)
         raise SystemExit(1) from error
@@ -351,6 +378,100 @@ def _handle_init(args: argparse.Namespace) -> None:
     if live_dir_arg is not None:
         assert resolved_live is not None
         print(f"Live migrations dir: {resolved_live}")
+
+
+def _configure_repo_taste(
+    *,
+    current: Path,
+    destination: Path,
+    force: bool,
+    ensure_taste_file: Callable[[Path], Path],
+) -> None:
+    if not current.exists():
+        ensure_taste_file(destination)
+        return
+    if current.resolve() == destination.resolve():
+        return
+    if not current.is_file():
+        raise ContinuousRefactorError(
+            f"Configured taste path is not a file: {current}"
+        )
+    if destination.exists() and not force:
+        raise ContinuousRefactorError(
+            "Taste destination already exists: "
+            f"{destination}. Re-run init with --force to replace it."
+        )
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.move(str(current), str(destination))
+    except OSError as exc:
+        raise ContinuousRefactorError(
+            f"Could not move taste file from {current} to {destination}."
+        ) from exc
+
+
+def _configure_live_migrations_dir(
+    *,
+    current: Path | None,
+    destination: Path,
+    force: bool,
+) -> None:
+    if current is None or not current.exists():
+        destination.mkdir(parents=True, exist_ok=True)
+        return
+    if not current.is_dir():
+        raise ContinuousRefactorError(
+            f"Configured live migrations path is not a directory: {current}"
+        )
+    if current.resolve() == destination.resolve():
+        return
+    if (
+        destination.resolve().is_relative_to(current.resolve())
+        or current.resolve().is_relative_to(destination.resolve())
+    ):
+        raise ContinuousRefactorError(
+            "Live migrations directory cannot be moved into itself or one of "
+            f"its parents: {current} -> {destination}"
+        )
+
+    backup_destination: Path | None = None
+    removed_empty_destination = False
+    if destination.exists():
+        if not destination.is_dir():
+            raise ContinuousRefactorError(
+                f"Live migrations destination is not a directory: {destination}"
+            )
+        if any(destination.iterdir()) and not force:
+            raise ContinuousRefactorError(
+                "Live migrations destination already exists and is not empty: "
+                f"{destination}. Re-run init with --force to replace it."
+            )
+        if force:
+            backup_name = (
+                f".{destination.name}."
+                f"continuous-refactoring-replaced-{uuid.uuid4().hex}"
+            )
+            backup_destination = destination.with_name(backup_name)
+            destination.rename(backup_destination)
+        else:
+            destination.rmdir()
+            removed_empty_destination = True
+
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        shutil.move(str(current), str(destination))
+    except OSError as exc:
+        if backup_destination is not None and not destination.exists():
+            backup_destination.rename(destination)
+        elif removed_empty_destination:
+            destination.mkdir(parents=True, exist_ok=True)
+        raise ContinuousRefactorError(
+            "Could not move live migrations directory from "
+            f"{current} to {destination}."
+        ) from exc
+    if backup_destination is not None:
+        shutil.rmtree(backup_destination, ignore_errors=True)
 
 
 def _resolve_taste_path(global_: bool) -> Path:

@@ -15,3 +15,7 @@ taste-scoping-version: 1
 - Do introduce interfaces when there is more than one implementation, or clear intent for more than one soon. Avoid speculative interfaces for single concrete behavior.
 - Do choose tests by code shape: property-based for pure, fast, bounded functions; example-based for integration-heavy behavior. Avoid tests that assert calls instead of outcomes.
 - Do prefer real collaborators in tests where feasible. Avoid mocks unless boundary isolation is genuinely necessary.
+- Do work off `main` and land changes by PR. Avoid direct pushes to `main`.
+- Do title PRs as Release Please-compatible Conventional Commits, e.g. `feat: Add Thing`, `fix(scope): Preserve Thing`, or `feat!: Replace Thing`. Avoid uppercase prefixes or manual release markers.
+- Do let Release Please own versions, changelog, tags, and GitHub releases. Avoid hand-editing release versions outside bootstrap or emergency repair.
+- Do use `feat:` for minor release-driving work and `fix:` for patch release-driving work. Use `chore:` or `refactor:` for cleanup that should not drive a release.

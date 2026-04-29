@@ -18,10 +18,12 @@ Treat `AGENTS.md` as part of the codebase's invariants, not documentation. A dri
 - Install: `uv sync && uv pip install -e .`
 - Test all: `uv run pytest`
 - Test one: `uv run pytest tests/test_x.py::test_name`
-- Entry: `continuous-refactoring --help` (or `python -m continuous_refactoring`)
+- Entry: `continuous-refactoring --help` / `continuous-refactoring --version`
+  (or `python -m continuous_refactoring`)
 
 No lint, no typecheck, no formatter, no pre-commit. GitHub Actions `Test`
-runs `uv run pytest`. **Pytest is the only gate.**
+runs `uv run pytest`. **Pytest is the only code gate.** GitHub Actions
+`PR Title` gates pull request title policy.
 
 ## 4. Layout
 
@@ -114,8 +116,20 @@ active phase explicitly names `loop.py` in scope.
 - Durable: `~/.local/share/continuous-refactoring/manifest.json`, `projects/<uuid>/taste.md` unless repo-local taste is configured, `…/failures/<snapshot>.md`, `global/taste.md`.
 - Per-run (ephemeral): `$TMPDIR/continuous-refactoring/<run-id>/summary.json`, `events.jsonl`, `run.log`.
 
-## 13. Commit conventions
+## 13. Branches, PRs, and releases
 
+- All work happens off `main`.
+- Changes land by PR. Do not push directly to `main`.
+- PR titles must match:
+  `<type>(optional-scope)!: Capitalized Title Text`, where type is
+  `feat|chore|fix|refactor|migration` and scope/`!` are optional.
+- Prefixes and scopes are lowercase. Title text starts capitalized.
+- Release Please owns version bumps, `CHANGELOG.md`, tags, and GitHub releases.
+- Release-driving commits follow Conventional Commits: `feat:` is minor,
+  `fix:` is patch, and breaking changes require `!` or a `BREAKING CHANGE:`
+  footer.
+- Non-release cleanup uses `chore:` or `refactor:` unless it truly changes user
+  behavior.
 - Commit subject prefix: `continuous refactor: <path>` (dominant pattern).
 - Driver-generated commit bodies include a concise `Why:` section and validation
   context when available.
@@ -130,6 +144,8 @@ active phase explicitly names `loop.py` in scope.
 - Do not structurally refactor `loop.py` without an active migration plan.
 - Do not amend commits in the driver path (driver uses `git reset --soft`).
 - Driver never creates, switches, or deletes branches. The user controls branching.
+- Do not hand-edit release versions except for Release Please bootstrap or
+  emergency repair.
 
 ## 15. Read-first pointers
 

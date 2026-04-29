@@ -5,6 +5,7 @@ import shutil
 import sys
 import uuid
 from collections.abc import Callable
+from importlib.metadata import version as metadata_version
 from pathlib import Path
 
 __all__ = [
@@ -273,6 +274,11 @@ def _add_review_parser(subparsers: argparse._SubParsersAction) -> None:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Continuous refactoring CLI for AI coding agents.",
+    )
+    parser.add_argument(
+        "--version",
+        action="version",
+        version=f"continuous-refactoring {metadata_version('continuous-refactoring')}",
     )
     subparsers = parser.add_subparsers(dest="command")
 

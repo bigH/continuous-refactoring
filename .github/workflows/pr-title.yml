@@ -1,0 +1,48 @@
+name: PR Title
+
+on:
+  pull_request:
+    types: [opened, edited, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate title
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+
+          title = os.environ["PR_TITLE"]
+          release_please_title = re.compile(
+              r"^(feat|chore|fix|refactor|migration)"
+              r"(\([a-z0-9._/-]+\))?"
+              r"!?: "
+              r"[A-Z][^\n]*$"
+          )
+
+          if re.search(r" \[[^\]]+\]$", title):
+              print("Invalid PR title:", title)
+              print("Release markers belong in Conventional Commit syntax, not a suffix.")
+              raise SystemExit(1)
+
+          if release_please_title.fullmatch(title):
+              raise SystemExit(0)
+
+          print("Invalid PR title:", title)
+          print(
+              "Expected: lowercase prefix "
+              "(feat|chore|fix|refactor|migration), optional lowercase scope, "
+              "optional ! for breaking changes, and capitalized title text."
+          )
+          print("Example: feat: Add Release Automation")
+          print("Release Please PR example: chore: Release v0.2.1")
+          raise SystemExit(1)
+          PY

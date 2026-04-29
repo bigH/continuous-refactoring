@@ -102,6 +102,8 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
 
 
 def _add_init_parser(subparsers: argparse._SubParsersAction) -> None:
+    from continuous_refactoring.config import DEFAULT_REPO_TASTE_PATH
+
     init_parser = subparsers.add_parser(
         "init",
         help="Register a project for continuous refactoring.",
@@ -118,6 +120,18 @@ def _add_init_parser(subparsers: argparse._SubParsersAction) -> None:
         type=Path,
         default=None,
         help="Directory for live migration artifacts (repo-relative path).",
+    )
+    init_parser.add_argument(
+        "--in-repo-taste",
+        type=Path,
+        nargs="?",
+        const=Path(DEFAULT_REPO_TASTE_PATH),
+        default=None,
+        metavar="PATH",
+        help=(
+            "Store this project's taste file in the repo. "
+            f"Defaults to {DEFAULT_REPO_TASTE_PATH}."
+        ),
     )
 
 
@@ -273,16 +287,37 @@ def _handle_init(args: argparse.Namespace) -> None:
     from continuous_refactoring.config import (
         ensure_taste_file,
         register_project,
+        resolve_project,
+        resolve_project_taste_path,
         set_live_migrations_dir,
+        set_repo_taste_path,
     )
 
     path = (args.path or Path.cwd()).resolve()
-    try:
-        project = register_project(path)
-        taste_path = project.project_dir / "taste.md"
-        ensure_taste_file(taste_path)
+    in_repo_taste_arg: Path | None = getattr(args, "in_repo_taste", None)
+    live_dir_arg: Path | None = getattr(args, "live_migrations_dir", None)
+    repo_taste_relative: str | None = None
+    repo_taste_resolved: Path | None = None
+    resolved_live: Path | None = None
+    live_dir_relative: str | None = None
 
-        live_dir_arg: Path | None = getattr(args, "live_migrations_dir", None)
+    try:
+        if in_repo_taste_arg is not None:
+            repo_taste_resolved = (path / in_repo_taste_arg).resolve()
+            if not repo_taste_resolved.is_relative_to(path):
+                print(
+                    f"Error: --in-repo-taste must be inside the repo: {in_repo_taste_arg}",
+                    file=sys.stderr,
+                )
+                raise SystemExit(2)
+            if repo_taste_resolved.exists() and not repo_taste_resolved.is_file():
+                print(
+                    f"Error: --in-repo-taste must point to a file: {in_repo_taste_arg}",
+                    file=sys.stderr,
+                )
+                raise SystemExit(2)
+            repo_taste_relative = str(repo_taste_resolved.relative_to(path))
+
         if live_dir_arg is not None:
             resolved_live = (path / live_dir_arg).resolve()
             if not resolved_live.is_relative_to(path):
@@ -291,9 +326,21 @@ def _handle_init(args: argparse.Namespace) -> None:
                     file=sys.stderr,
                 )
                 raise SystemExit(2)
-            relative = str(resolved_live.relative_to(path))
+            live_dir_relative = str(resolved_live.relative_to(path))
+
+        project = register_project(path)
+        if repo_taste_relative is not None:
+            set_repo_taste_path(project.entry.uuid, repo_taste_relative)
+            project = resolve_project(path)
+
+        taste_path = resolve_project_taste_path(project)
+        ensure_taste_file(taste_path)
+
+        if live_dir_arg is not None:
+            assert resolved_live is not None
+            assert live_dir_relative is not None
             resolved_live.mkdir(parents=True, exist_ok=True)
-            set_live_migrations_dir(project.entry.uuid, relative)
+            set_live_migrations_dir(project.entry.uuid, live_dir_relative)
     except ContinuousRefactorError as error:
         print(f"Error: {error}", file=sys.stderr)
         raise SystemExit(1) from error
@@ -302,11 +349,16 @@ def _handle_init(args: argparse.Namespace) -> None:
     print(f"Data directory: {project.project_dir}")
     print(f"Taste file: {taste_path}")
     if live_dir_arg is not None:
+        assert resolved_live is not None
         print(f"Live migrations dir: {resolved_live}")
 
 
 def _resolve_taste_path(global_: bool) -> Path:
-    from continuous_refactoring.config import global_dir, resolve_project
+    from continuous_refactoring.config import (
+        global_dir,
+        resolve_project,
+        resolve_project_taste_path,
+    )
 
     if global_:
         path = global_dir() / "taste.md"
@@ -323,7 +375,7 @@ def _resolve_taste_path(global_: bool) -> Path:
             file=sys.stderr,
         )
         raise SystemExit(1) from error
-    return project.project_dir / "taste.md"
+    return resolve_project_taste_path(project)
 
 
 def _taste_settle_path(path: Path) -> Path:

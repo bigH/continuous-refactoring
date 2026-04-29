@@ -34,7 +34,7 @@ runs `uv run pytest`. **Pytest is the only gate.**
 ## 5. Project vocabulary
 
 - **Target** — a source path the driver is working on this iteration.
-- **Taste** — project or global prose that shapes every prompt (see XDG paths below).
+- **Taste** — project or global prose that shapes every prompt. Project taste is XDG by default, or a repo-relative path stored as `repo_taste_path` after `init --in-repo-taste [PATH]`.
 - **Scope expansion** — deciding the set of files edited together with the target (`scope_expansion.py`).
 - **Classifier / routing** — picks which agent handles a target (`routing.py`).
 - **Migration** — a multi-phase plan living under `migrations/<slug>/`.
@@ -100,6 +100,7 @@ active phase explicitly names `loop.py` in scope.
 - **Effort budgeting** (`effort.py`, `loop.py`, `migration_tick.py`, `planning.py`) — `run` / `run-once` default to `--default-effort low` and `--max-allowed-effort xhigh`; there is no `--effort` alias on those commands. Target `effort-override` changes that target's default but is still capped. Migration `required_effort` above the cap defers the phase without failing the run.
 - **Taste injection** — every prompt includes a `## Taste` section. `tests/test_prompts.py` enforces this via `_TASTE_INJECTED_PROMPTS`. Do not drop it.
 - **Taste read boundary** (`config.py`, `cli.py`, `loop.py`) — `load_taste()` translates unreadable project/global taste reads into `ContinuousRefactorError`; CLI stale-taste checks and loop taste loading must treat that boundary failure as non-fatal and skip/fall back instead of leaking raw `OSError`/`PermissionError`.
+- **Repo-local taste routing** (`config.py`, `cli.py`) — `ProjectEntry.repo_taste_path` is stored repo-relative in the XDG manifest and resolved through `resolve_project_taste_path()`. Keep `init`, `taste`, stale warnings, and run prompt loading on that helper so the active taste path does not drift.
 
 ## 11. Surprising CLI semantics
 
@@ -109,7 +110,7 @@ active phase explicitly names `loop.py` in scope.
 
 ## 12. XDG + artifacts
 
-- Durable: `~/.local/share/continuous-refactoring/manifest.json`, `projects/<uuid>/taste.md`, `…/failures/<snapshot>.md`, `global/taste.md`.
+- Durable: `~/.local/share/continuous-refactoring/manifest.json`, `projects/<uuid>/taste.md` unless repo-local taste is configured, `…/failures/<snapshot>.md`, `global/taste.md`.
 - Per-run (ephemeral): `$TMPDIR/continuous-refactoring/<run-id>/summary.json`, `events.jsonl`, `run.log`.
 
 ## 13. Commit conventions

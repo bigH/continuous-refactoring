@@ -12,6 +12,7 @@ import continuous_refactoring.config as config
 
 from continuous_refactoring.artifacts import ContinuousRefactorError
 from continuous_refactoring.config import (
+    DEFAULT_REPO_TASTE_PATH,
     TASTE_CURRENT_VERSION,
     app_data_dir,
     default_taste_text,
@@ -25,6 +26,7 @@ from continuous_refactoring.config import (
     parse_taste_version,
     register_project,
     resolve_live_migrations_dir,
+    resolve_project_taste_path,
     resolve_project,
     save_manifest,
     taste_is_stale,
@@ -32,6 +34,7 @@ from continuous_refactoring.config import (
     ProjectEntry,
     ResolvedProject,
     set_live_migrations_dir,
+    set_repo_taste_path,
 )
 
 
@@ -184,6 +187,33 @@ def test_load_taste_wraps_project_read_fault(
     assert exc_info.value.__cause__ is io_error
 
 
+def test_load_taste_wraps_repo_taste_read_fault(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    _init_repo(repo)
+    registered = register_project(repo)
+    set_repo_taste_path(registered.entry.uuid, DEFAULT_REPO_TASTE_PATH)
+    project = resolve_project(repo)
+    taste_path = (repo / DEFAULT_REPO_TASTE_PATH).resolve()
+    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path.write_text(default_taste_text(), encoding="utf-8")
+    io_error = OSError("mock read error")
+    original_read_text = Path.read_text
+
+    def broken_read_text(self: Path, *args: object, **kwargs: object) -> str:
+        if self == taste_path:
+            raise io_error
+        return original_read_text(self, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "read_text", broken_read_text)
+
+    with pytest.raises(ContinuousRefactorError) as exc_info:
+        load_taste(project)
+
+    assert exc_info.value.__cause__ is io_error
+
+
 def test_load_taste_wraps_global_read_fault(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -276,7 +306,10 @@ def test_load_manifest_rejects_project_entry_uuid_mismatch(
         load_manifest()
 
 
-@pytest.mark.parametrize("field_name", ["git_remote", "live_migrations_dir"])
+@pytest.mark.parametrize(
+    "field_name",
+    ["git_remote", "live_migrations_dir", "repo_taste_path"],
+)
 def test_load_manifest_rejects_non_string_optional_project_fields(
     tmp_path: Path,
     field_name: str,
@@ -489,6 +522,59 @@ def test_load_taste_project_level(
     assert load_taste(resolved) == taste_content
 
 
+def test_load_taste_repo_path_overrides_global(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_path = tmp_path / "taste-repo"
+    _init_repo(project_path)
+
+    registered = register_project(project_path)
+    set_repo_taste_path(registered.entry.uuid, DEFAULT_REPO_TASTE_PATH)
+    resolved = resolve_project(project_path)
+
+    repo_taste = "- Repo-local wins.\n"
+    repo_taste_path = project_path / DEFAULT_REPO_TASTE_PATH
+    repo_taste_path.parent.mkdir(parents=True, exist_ok=True)
+    repo_taste_path.write_text(repo_taste, encoding="utf-8")
+
+    gdir = global_dir()
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "taste.md").write_text("- Global loses.\n", encoding="utf-8")
+
+    assert load_taste(resolved) == repo_taste
+
+
+def test_load_taste_missing_repo_path_falls_back_to_global(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_path = tmp_path / "taste-repo-missing"
+    _init_repo(project_path)
+
+    registered = register_project(project_path)
+    set_repo_taste_path(registered.entry.uuid, DEFAULT_REPO_TASTE_PATH)
+    resolved = resolve_project(project_path)
+
+    global_taste = "- Global fallback.\n"
+    gdir = global_dir()
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "taste.md").write_text(global_taste, encoding="utf-8")
+
+    assert load_taste(resolved) == global_taste
+
+
+def test_load_taste_missing_repo_path_falls_back_to_builtin_default(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    project_path = tmp_path / "taste-repo-default"
+    _init_repo(project_path)
+
+    registered = register_project(project_path)
+    set_repo_taste_path(registered.entry.uuid, DEFAULT_REPO_TASTE_PATH)
+    resolved = resolve_project(project_path)
+
+    assert load_taste(resolved) == default_taste_text()
+
+
 def test_load_taste_global_fallback(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -559,6 +645,16 @@ def test_ensure_taste_file_preserves_existing(
     assert target.read_text(encoding="utf-8") == custom
 
 
+def test_ensure_taste_file_rejects_existing_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    target = tmp_path / "xdg" / "continuous-refactoring" / "global" / "taste.md"
+    target.mkdir(parents=True)
+
+    with pytest.raises(ContinuousRefactorError, match="not a file"):
+        ensure_taste_file(target)
+
+
 # ---------------------------------------------------------------------------
 # Property-based: manifest roundtrip
 # ---------------------------------------------------------------------------
@@ -613,6 +709,23 @@ def test_entry_roundtrip_with_live_migrations_dir(
     assert loaded[entry.uuid].live_migrations_dir == ".migrations"
 
 
+def test_entry_roundtrip_with_repo_taste_path(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+
+    entry = ProjectEntry(
+        uuid=str(uuid.uuid4()),
+        path="/tmp/proj",
+        git_remote=None,
+        created_at="2025-01-01T00:00:00.000+00:00",
+        repo_taste_path=DEFAULT_REPO_TASTE_PATH,
+    )
+    save_manifest({entry.uuid: entry})
+    loaded = load_manifest()
+    assert loaded[entry.uuid] == entry
+    assert loaded[entry.uuid].repo_taste_path == DEFAULT_REPO_TASTE_PATH
+
+
 def test_entry_roundtrip_without_live_migrations_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -627,6 +740,7 @@ def test_entry_roundtrip_without_live_migrations_dir(
     loaded = load_manifest()
     assert loaded[entry.uuid] == entry
     assert loaded[entry.uuid].live_migrations_dir is None
+    assert loaded[entry.uuid].repo_taste_path is None
 
 
 def test_legacy_manifest_without_live_migrations_dir(
@@ -652,6 +766,7 @@ def test_legacy_manifest_without_live_migrations_dir(
     loaded = load_manifest()
     assert uid in loaded
     assert loaded[uid].live_migrations_dir is None
+    assert loaded[uid].repo_taste_path is None
 
 
 def test_set_live_migrations_dir_rejects_unknown_project(
@@ -660,6 +775,14 @@ def test_set_live_migrations_dir_rejects_unknown_project(
 
     with pytest.raises(ContinuousRefactorError, match="Project not registered"):
         set_live_migrations_dir("missing", ".migrations")
+
+
+def test_set_repo_taste_path_rejects_unknown_project(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+
+    with pytest.raises(ContinuousRefactorError, match="Project not registered"):
+        set_repo_taste_path("missing", DEFAULT_REPO_TASTE_PATH)
 
 
 def test_resolve_live_migrations_dir_none_when_unset(
@@ -703,6 +826,50 @@ def test_resolve_live_migrations_dir_rejects_escape(
     project = ResolvedProject(entry=entry, project_dir=tmp_path / "data")
     with pytest.raises(ContinuousRefactorError, match="escapes repo"):
         resolve_live_migrations_dir(project)
+
+
+def test_resolve_project_taste_path_uses_xdg_when_unset(
+    tmp_path: Path,
+) -> None:
+    entry = ProjectEntry(
+        uuid="abc",
+        path=str(tmp_path),
+        git_remote=None,
+        created_at="2025-01-01T00:00:00.000+00:00",
+    )
+    project = ResolvedProject(entry=entry, project_dir=tmp_path / "data")
+    assert resolve_project_taste_path(project) == tmp_path / "data" / "taste.md"
+
+
+def test_resolve_project_taste_path_uses_repo_path(
+    tmp_path: Path,
+) -> None:
+    entry = ProjectEntry(
+        uuid="abc",
+        path=str(tmp_path),
+        git_remote=None,
+        created_at="2025-01-01T00:00:00.000+00:00",
+        repo_taste_path=DEFAULT_REPO_TASTE_PATH,
+    )
+    project = ResolvedProject(entry=entry, project_dir=tmp_path / "data")
+    assert resolve_project_taste_path(project) == (
+        tmp_path / DEFAULT_REPO_TASTE_PATH
+    )
+
+
+def test_resolve_project_taste_path_rejects_escape(
+    tmp_path: Path,
+) -> None:
+    entry = ProjectEntry(
+        uuid="abc",
+        path=str(tmp_path),
+        git_remote=None,
+        created_at="2025-01-01T00:00:00.000+00:00",
+        repo_taste_path="../taste.md",
+    )
+    project = ResolvedProject(entry=entry, project_dir=tmp_path / "data")
+    with pytest.raises(ContinuousRefactorError, match="escapes repo"):
+        resolve_project_taste_path(project)
 
 
 # ---------------------------------------------------------------------------

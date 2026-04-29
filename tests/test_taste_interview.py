@@ -7,6 +7,7 @@ import pytest
 from conftest import (
     extract_settle_path,
     init_repo,
+    init_repo_with_temp_home,
     init_taste_project,
     make_taste_args,
     make_taste_agent_writer,
@@ -14,9 +15,11 @@ from conftest import (
 
 from continuous_refactoring.cli import _handle_taste, build_parser
 from continuous_refactoring.config import (
+    DEFAULT_REPO_TASTE_PATH,
     default_taste_text,
     global_dir,
     register_project,
+    set_repo_taste_path,
 )
 
 _AGENT_RUNNER_PATH = "continuous_refactoring.cli.run_agent_interactive_until_settled"
@@ -107,6 +110,34 @@ def test_interview_writes_taste_project_level(
 
     assert taste_path.read_text(encoding="utf-8") == "- custom rule\n"
     assert not taste_path.with_name("taste.md.done").exists()
+    out = capsys.readouterr().out.strip()
+    assert out == str(taste_path)
+
+
+def test_interview_writes_configured_repo_taste(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
+    monkeypatch.chdir(repo)
+    project = register_project(repo)
+    set_repo_taste_path(project.entry.uuid, DEFAULT_REPO_TASTE_PATH)
+    taste_path = (repo / DEFAULT_REPO_TASTE_PATH).resolve()
+
+    captured: dict[str, str] = {}
+    monkeypatch.setattr(
+        _AGENT_RUNNER_PATH,
+        make_taste_agent_writer(
+            content="- repo custom rule\n",
+            captured=captured,
+        ),
+    )
+    _handle_taste(_interview_args())
+
+    assert taste_path.read_text(encoding="utf-8") == "- repo custom rule\n"
+    assert captured["content_path"] == str(taste_path)
+    assert captured["settle_path"] == str(taste_path.with_name("taste.md.done"))
     out = capsys.readouterr().out.strip()
     assert out == str(taste_path)
 

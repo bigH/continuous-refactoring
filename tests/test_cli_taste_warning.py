@@ -7,7 +7,13 @@ from pathlib import Path
 import pytest
 
 import continuous_refactoring.cli as cli
-from continuous_refactoring.config import default_taste_text
+from conftest import init_repo
+from continuous_refactoring.config import (
+    DEFAULT_REPO_TASTE_PATH,
+    default_taste_text,
+    register_project,
+    set_repo_taste_path,
+)
 
 _LEGACY_TASTE = "- Old taste without version header.\n"
 
@@ -109,6 +115,56 @@ def test_taste_warning_behavior(
         assert err.count(cli._TASTE_WARNING) == 1
     else:
         assert cli._TASTE_WARNING not in err
+
+
+def test_taste_warning_uses_configured_repo_taste(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    xdg_root: Path,
+) -> None:
+    _write_current_taste(xdg_root)
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    monkeypatch.chdir(repo)
+
+    project = register_project(repo)
+    set_repo_taste_path(project.entry.uuid, DEFAULT_REPO_TASTE_PATH)
+    taste_path = repo / DEFAULT_REPO_TASTE_PATH
+    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path.write_text(_LEGACY_TASTE, encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["cr", "upgrade"])
+    monkeypatch.setattr(cli, "_handle_upgrade", lambda _: None)
+    cli.cli_main()
+
+    err = capsys.readouterr().err
+    assert err.count(cli._TASTE_WARNING) == 1
+
+
+def test_current_repo_taste_suppresses_stale_global_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    tmp_path: Path,
+    xdg_root: Path,
+) -> None:
+    _write_stale_taste(xdg_root)
+    repo = tmp_path / "repo"
+    init_repo(repo)
+    monkeypatch.chdir(repo)
+
+    project = register_project(repo)
+    set_repo_taste_path(project.entry.uuid, DEFAULT_REPO_TASTE_PATH)
+    taste_path = repo / DEFAULT_REPO_TASTE_PATH
+    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path.write_text(default_taste_text(), encoding="utf-8")
+
+    monkeypatch.setattr(sys, "argv", ["cr", "upgrade"])
+    monkeypatch.setattr(cli, "_handle_upgrade", lambda _: None)
+    cli.cli_main()
+
+    err = capsys.readouterr().err
+    assert cli._TASTE_WARNING not in err
 
 
 # ---------------------------------------------------------------------------

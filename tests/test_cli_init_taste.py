@@ -8,10 +8,12 @@ import pytest
 
 from conftest import init_repo, init_repo_with_temp_home, load_single_registered_project
 
-from continuous_refactoring.cli import _handle_init, _handle_taste
+from continuous_refactoring.cli import _handle_init, _handle_taste, build_parser
 from continuous_refactoring.config import (
+    DEFAULT_REPO_TASTE_PATH,
     app_data_dir,
     default_taste_text,
+    resolve_project_taste_path,
     register_project,
 )
 
@@ -56,6 +58,163 @@ def test_init_creates_taste_template(
     project = load_single_registered_project()
     assert project.taste_path.exists()
     assert project.taste_path.read_text(encoding="utf-8") == default_taste_text()
+
+
+def test_init_in_repo_taste_default_creates_and_stores(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
+
+    args = argparse.Namespace(
+        path=repo,
+        in_repo_taste=Path(DEFAULT_REPO_TASTE_PATH),
+        live_migrations_dir=None,
+    )
+    _handle_init(args)
+
+    project = load_single_registered_project()
+    taste_path = (repo / DEFAULT_REPO_TASTE_PATH).resolve()
+    assert project.entry.repo_taste_path == DEFAULT_REPO_TASTE_PATH
+    assert taste_path.exists()
+    assert taste_path.read_text(encoding="utf-8") == default_taste_text()
+    assert not project.taste_path.exists()
+    assert resolve_project_taste_path(project) == taste_path
+
+    out = capsys.readouterr().out
+    assert f"Taste file: {taste_path}" in out
+
+
+def test_init_in_repo_taste_custom_creates_and_stores(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
+
+    args = argparse.Namespace(
+        path=repo,
+        in_repo_taste=Path("config/refactor-taste.md"),
+        live_migrations_dir=None,
+    )
+    _handle_init(args)
+
+    project = load_single_registered_project()
+    taste_path = repo / "config" / "refactor-taste.md"
+    assert project.entry.repo_taste_path == "config/refactor-taste.md"
+    assert taste_path.exists()
+    assert taste_path.read_text(encoding="utf-8") == default_taste_text()
+
+
+def test_init_in_repo_taste_preserves_existing_content(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
+    taste_path = repo / DEFAULT_REPO_TASTE_PATH
+    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path.write_text("- Existing repo taste.\n", encoding="utf-8")
+
+    _handle_init(
+        argparse.Namespace(
+            path=repo,
+            in_repo_taste=Path(DEFAULT_REPO_TASTE_PATH),
+            live_migrations_dir=None,
+        )
+    )
+
+    assert taste_path.read_text(encoding="utf-8") == "- Existing repo taste.\n"
+
+
+def test_init_without_in_repo_taste_preserves_existing_choice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
+    _handle_init(
+        argparse.Namespace(
+            path=repo,
+            in_repo_taste=Path(DEFAULT_REPO_TASTE_PATH),
+            live_migrations_dir=None,
+        )
+    )
+
+    _handle_init(argparse.Namespace(path=repo))
+
+    project = load_single_registered_project()
+    assert project.entry.repo_taste_path == DEFAULT_REPO_TASTE_PATH
+    assert resolve_project_taste_path(project) == (
+        repo / DEFAULT_REPO_TASTE_PATH
+    ).resolve()
+
+
+def test_init_in_repo_taste_reinitializes_choice(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
+    _handle_init(
+        argparse.Namespace(
+            path=repo,
+            in_repo_taste=Path(DEFAULT_REPO_TASTE_PATH),
+            live_migrations_dir=None,
+        )
+    )
+
+    _handle_init(
+        argparse.Namespace(
+            path=repo,
+            in_repo_taste=Path("taste/refactoring.md"),
+            live_migrations_dir=None,
+        )
+    )
+
+    project = load_single_registered_project()
+    assert project.entry.repo_taste_path == "taste/refactoring.md"
+    assert (repo / "taste" / "refactoring.md").exists()
+
+
+def test_init_in_repo_taste_rejects_outside_repo(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
+
+    args = argparse.Namespace(
+        path=repo,
+        in_repo_taste=Path("../taste.md"),
+        live_migrations_dir=None,
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_init(args)
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "--in-repo-taste must be inside the repo" in err
+
+
+@pytest.mark.parametrize(
+    "taste_arg",
+    [Path("."), Path("existing-dir")],
+    ids=["repo-root", "existing-dir"],
+)
+def test_init_in_repo_taste_rejects_directories(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    taste_arg: Path,
+) -> None:
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
+    (repo / "existing-dir").mkdir()
+
+    args = argparse.Namespace(
+        path=repo,
+        in_repo_taste=taste_arg,
+        live_migrations_dir=None,
+    )
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_init(args)
+
+    assert exc_info.value.code == 2
+    err = capsys.readouterr().err
+    assert "--in-repo-taste must point to a file" in err
 
 
 def test_init_idempotent(
@@ -115,6 +274,16 @@ def test_init_detects_git_remote(
     assert (tmp_path / "xdg").is_dir()
     project = load_single_registered_project()
     assert project.entry.git_remote == remote_url
+
+
+def test_init_subparser_accepts_in_repo_taste_optional_path() -> None:
+    parser = build_parser()
+
+    default_args = parser.parse_args(["init", "--in-repo-taste"])
+    custom_args = parser.parse_args(["init", "--in-repo-taste", "config/taste.md"])
+
+    assert default_args.in_repo_taste == Path(DEFAULT_REPO_TASTE_PATH)
+    assert custom_args.in_repo_taste == Path("config/taste.md")
 
 
 def test_init_live_migrations_dir_creates_and_stores(
@@ -200,6 +369,30 @@ def test_taste_prints_project_path(
     out = capsys.readouterr().out.strip()
     assert out.endswith("taste.md")
     assert Path(out).exists()
+
+
+def test_taste_prints_configured_repo_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo = init_repo_with_temp_home(tmp_path, monkeypatch)
+    _handle_init(
+        argparse.Namespace(
+            path=repo,
+            in_repo_taste=Path(DEFAULT_REPO_TASTE_PATH),
+            live_migrations_dir=None,
+        )
+    )
+    monkeypatch.chdir(repo)
+    capsys.readouterr()
+
+    _handle_taste(argparse.Namespace(global_=False))
+
+    out = capsys.readouterr().out.strip()
+    expected = (repo / DEFAULT_REPO_TASTE_PATH).resolve()
+    assert out == str(expected)
+    assert expected.exists()
 
 
 def test_taste_creates_file_if_missing(

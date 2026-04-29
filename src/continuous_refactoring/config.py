@@ -14,6 +14,7 @@ from continuous_refactoring.artifacts import ContinuousRefactorError
 
 __all__ = [
     "CONFIG_CURRENT_VERSION",
+    "DEFAULT_REPO_TASTE_PATH",
     "ProjectEntry",
     "ResolvedProject",
     "TASTE_CURRENT_VERSION",
@@ -31,15 +32,18 @@ __all__ = [
     "parse_taste_version",
     "register_project",
     "resolve_live_migrations_dir",
+    "resolve_project_taste_path",
     "resolve_project",
     "save_manifest",
     "set_live_migrations_dir",
+    "set_repo_taste_path",
     "taste_is_stale",
     "xdg_data_home",
 ]
 
 CONFIG_CURRENT_VERSION = 1
 TASTE_CURRENT_VERSION = 1
+DEFAULT_REPO_TASTE_PATH = ".continuous-refactoring/taste.md"
 
 _DEFAULT_TASTE = """\
 taste-scoping-version: 1
@@ -69,6 +73,7 @@ class ProjectEntry:
     git_remote: str | None
     created_at: str
     live_migrations_dir: str | None = None
+    repo_taste_path: str | None = None
 
 
 @dataclass(frozen=True)
@@ -179,6 +184,12 @@ def _entry_from_object(uid: str, data: object) -> ProjectEntry:
         live_migrations_dir=_string_field(
             data,
             "live_migrations_dir",
+            project_id=uid,
+            required=False,
+        ),
+        repo_taste_path=_string_field(
+            data,
+            "repo_taste_path",
             project_id=uid,
             required=False,
         ),
@@ -310,6 +321,18 @@ def resolve_live_migrations_dir(project: ResolvedProject) -> Path | None:
     return resolved
 
 
+def resolve_project_taste_path(project: ResolvedProject) -> Path:
+    if project.entry.repo_taste_path is None:
+        return project.project_dir / "taste.md"
+    repo_root = Path(project.entry.path).resolve()
+    resolved = (repo_root / project.entry.repo_taste_path).resolve()
+    if not resolved.is_relative_to(repo_root):
+        raise ContinuousRefactorError(
+            f"repo_taste_path escapes repo: {project.entry.repo_taste_path}"
+        )
+    return resolved
+
+
 def _get_project(manifest: dict[str, ProjectEntry], project_uuid: str) -> ProjectEntry:
     project = manifest.get(project_uuid)
     if project is None:
@@ -321,6 +344,13 @@ def set_live_migrations_dir(project_uuid: str, relative_dir: str) -> None:
     manifest = load_manifest()
     old = _get_project(manifest, project_uuid)
     manifest[project_uuid] = replace(old, live_migrations_dir=relative_dir)
+    save_manifest(manifest)
+
+
+def set_repo_taste_path(project_uuid: str, relative_path: str) -> None:
+    manifest = load_manifest()
+    old = _get_project(manifest, project_uuid)
+    manifest[project_uuid] = replace(old, repo_taste_path=relative_path)
     save_manifest(manifest)
 
 
@@ -349,6 +379,8 @@ def default_taste_text() -> str:
 
 
 def ensure_taste_file(path: Path) -> Path:
+    if path.exists() and not path.is_file():
+        raise ContinuousRefactorError(f"Taste path is not a file: {path}")
     if not path.exists():
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(_DEFAULT_TASTE, encoding="utf-8")
@@ -366,7 +398,7 @@ def _read_taste_text(path: Path) -> str:
 
 def load_taste(project: ResolvedProject | None) -> str:
     if project is not None:
-        project_taste = project.project_dir / "taste.md"
+        project_taste = resolve_project_taste_path(project)
         if project_taste.exists():
             return _read_taste_text(project_taste)
 

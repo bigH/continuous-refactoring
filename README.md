@@ -91,6 +91,8 @@ That keeps sweeping targets until it runs out, hits your caps, or starts failing
 ```bash
 # 1. Register the repo (creates a project dir under ~/.local/share/continuous-refactoring)
 continuous-refactoring init
+# Or keep project taste in the repo:
+continuous-refactoring init --in-repo-taste
 
 # 2. (Optional) Write your refactoring taste — either edit the file, have an agent interview you,
 #    or refine an existing draft collaboratively
@@ -115,7 +117,7 @@ continuous-refactoring run \
 
 | Command | What it does |
 |---|---|
-| `init` | Registers this directory as a project, creates a default `taste.md`, and can store `--live-migrations-dir`. |
+| `init` | Registers this directory as a project, creates a default `taste.md`, and can store `--live-migrations-dir` or `--in-repo-taste`. |
 | `taste` | Prints the active taste file path. Add `--interview` to have an agent author it, `--refine` to iteratively improve an existing taste doc, `--upgrade` to refresh stale taste dimensions, `--global` for the shared file, and `--force` to let `--interview` overwrite custom content after writing a `.bak`. |
 | `run-once` | Single pass on one resolved target. No retry. If there is a diff and validation passes, it commits locally and prints the diffstat. |
 | `run` | The loop. Iterates targets, retries on failure, and commits successful targets locally. |
@@ -143,6 +145,7 @@ If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`, the
 ### Migrations & taste flags
 
 - `init --live-migrations-dir PATH` — enables the larger-refactoring workflow for this project. The path is stored repo-relative in the project registry and created if missing.
+- `init --in-repo-taste [PATH]` — stores this project's taste file in the repo and remembers the repo-relative path. Defaults to `.continuous-refactoring/taste.md`; re-run `init --in-repo-taste ...` to choose a different path.
 - `taste --refine` — opens a collaborative editing session for the taste file. The agent keeps refining until you tell it to write, then the session ends automatically after the settled write.
 - `taste --upgrade` — re-interviews for taste dimensions added since your last version. No-op when already current; use `taste --refine` if you want to rework the doc anyway.
 - `taste --force` — only applies to `--interview`; it allows a customized taste file to be overwritten after backing it up to `taste.md.bak`.
@@ -193,10 +196,10 @@ The path prints at startup. Grep it when something goes sideways.
 
 The taste file is a short bullet list of your refactoring preferences. It gets injected into every agent prompt.
 
-- Project taste: `~/.local/share/continuous-refactoring/projects/<uuid>/taste.md`
+- Project taste: `~/.local/share/continuous-refactoring/projects/<uuid>/taste.md`, or the repo-local path chosen with `init --in-repo-taste [PATH]`
 - Global taste: `~/.local/share/continuous-refactoring/global/taste.md`
 
-Project taste wins over global. Use `taste --interview` to bootstrap one, `taste --refine` to rework it with an agent, or edit the file directly any time.
+Project taste wins over global. Use `taste` to print the active path, `taste --interview` to bootstrap one, `taste --refine` to rework it with an agent, or edit the file directly any time.
 
 ## Larger refactorings
 

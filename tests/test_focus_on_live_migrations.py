@@ -182,40 +182,19 @@ def test_focused_loop_eligibility_rechecks_effort_deferred_phase_when_cap_rises(
 # ---------------------------------------------------------------------------
 
 
-def _make_handle_run_args(
-    repo_root: Path, *, focus: bool,
-) -> argparse.Namespace:
-    return argparse.Namespace(
+def test_handle_run_without_focus_requires_targeting(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    args = make_run_loop_args(
+        repo_root,
         agent="claude",
         model="opus",
         effort="medium",
         validation_command="uv run pytest",
-        extensions=None,
-        globs=None,
-        targets=None,
-        paths=None,
         scope_instruction=None,
-        timeout=None,
-        refactoring_prompt=None,
-        fix_prompt=None,
-        show_agent_logs=False,
-        show_command_logs=False,
-        repo_root=repo_root,
-        max_attempts=None,
-        max_refactors=None,
-        commit_message_prefix="continuous refactor",
-        max_consecutive_failures=3,
-        sleep=0.0,
-        focus_on_live_migrations=focus,
     )
-
-
-def test_handle_run_without_focus_requires_targeting(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    args = _make_handle_run_args(repo_root, focus=False)
 
     from continuous_refactoring.cli import _handle_run
 
@@ -229,7 +208,15 @@ def test_handle_run_with_focus_bypasses_targeting_and_max_refactors(
 ) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    args = _make_handle_run_args(repo_root, focus=True)
+    args = make_run_loop_args(
+        repo_root,
+        agent="claude",
+        model="opus",
+        effort="medium",
+        validation_command="uv run pytest",
+        scope_instruction=None,
+        focus_on_live_migrations=True,
+    )
 
     calls: list[argparse.Namespace] = []
 

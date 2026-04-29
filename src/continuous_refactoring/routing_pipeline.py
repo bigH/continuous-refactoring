@@ -61,6 +61,60 @@ class RouteResult:
     decision_record: DecisionRecord | None = None
 
 
+def _sanitized_summary(text: str, repo_root: Path) -> str:
+    return sanitize_text(text, repo_root) or text
+
+
+def _abandon_result(
+    *,
+    target: Target,
+    planning_context: str,
+    repo_root: Path,
+    error: ContinuousRefactorError,
+    call_role: str,
+) -> RouteResult:
+    summary = _sanitized_summary(str(error), repo_root)
+    return RouteResult(
+        outcome="abandon",
+        target=target,
+        planning_context=planning_context,
+        decision_record=DecisionRecord(
+            decision="abandon",
+            retry_recommendation="new-target",
+            target=target.description,
+            call_role=call_role,
+            phase_reached=call_role,
+            failure_kind=error_failure_kind(str(error)),
+            summary=summary,
+        ),
+    )
+
+
+def _planning_result(
+    *,
+    outcome: RouteOutcome,
+    target: Target,
+    planning_context: str,
+    repo_root: Path,
+    reason: str,
+) -> RouteResult:
+    summary = _sanitized_summary(reason, repo_root)
+    return RouteResult(
+        outcome=outcome,
+        target=target,
+        planning_context=planning_context,
+        decision_record=DecisionRecord(
+            decision=outcome,
+            retry_recommendation="none" if outcome == "commit" else "new-target",
+            target=target.description,
+            call_role="planning.final-review",
+            phase_reached="planning.final-review",
+            failure_kind="none" if outcome == "commit" else "planning-rejected",
+            summary=summary,
+        ),
+    )
+
+
 def _scope_bypass_context(target: Target, reason: str) -> str:
     lines = [
         f"Scope expansion bypassed: {reason}",
@@ -196,20 +250,12 @@ def route_and_run(
             timeout=timeout,
         )
     except ContinuousRefactorError as error:
-        summary = sanitize_text(str(error), repo_root) or str(error)
-        return RouteResult(
-            outcome="abandon",
+        return _abandon_result(
             target=target,
             planning_context=planning_context,
-            decision_record=DecisionRecord(
-                decision="abandon",
-                retry_recommendation="new-target",
-                target=target.description,
-                call_role="classify",
-                phase_reached="classify",
-                failure_kind=error_failure_kind(str(error)),
-                summary=summary,
-            ),
+            repo_root=repo_root,
+            error=error,
+            call_role="classify",
         )
     print(f"Classification: {decision} — {target.description}")
 
@@ -241,24 +287,16 @@ def route_and_run(
             extra_context=planning_context,
         )
     except ContinuousRefactorError as error:
-        summary = sanitize_text(str(error), repo_root) or str(error)
         call_role = "planning.final-review"
         match = re.match(r"^(planning\.[a-z0-9-]+)\s+failed:", str(error))
         if match:
             call_role = match.group(1)
-        return RouteResult(
-            outcome="abandon",
+        return _abandon_result(
             target=target,
             planning_context=planning_context,
-            decision_record=DecisionRecord(
-                decision="abandon",
-                retry_recommendation="new-target",
-                target=target.description,
-                call_role=call_role,
-                phase_reached=call_role,
-                failure_kind=error_failure_kind(str(error)),
-                summary=summary,
-            ),
+            repo_root=repo_root,
+            error=error,
+            call_role=call_role,
         )
 
     finalize_commit(
@@ -275,33 +313,19 @@ def route_and_run(
 
     print(f"Planning: {describe_planning_outcome(outcome.status)} — {outcome.reason}")
     if outcome.status == "skipped":
-        return RouteResult(
+        return _planning_result(
             outcome="abandon",
             target=target,
             planning_context=planning_context,
-            decision_record=DecisionRecord(
-                decision="abandon",
-                retry_recommendation="new-target",
-                target=target.description,
-                call_role="planning.final-review",
-                phase_reached="planning.final-review",
-                failure_kind="planning-rejected",
-                summary=sanitize_text(outcome.reason, repo_root) or outcome.reason,
-            ),
+            repo_root=repo_root,
+            reason=outcome.reason,
         )
-    return RouteResult(
+    return _planning_result(
         outcome="commit",
         target=target,
         planning_context=planning_context,
-        decision_record=DecisionRecord(
-            decision="commit",
-            retry_recommendation="none",
-            target=target.description,
-            call_role="planning.final-review",
-            phase_reached="planning.final-review",
-            failure_kind="none",
-            summary=sanitize_text(outcome.reason, repo_root) or outcome.reason,
-        ),
+        repo_root=repo_root,
+        reason=outcome.reason,
     )
 
 

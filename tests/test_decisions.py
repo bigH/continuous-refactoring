@@ -13,6 +13,7 @@ from continuous_refactoring.decisions import (
     error_failure_kind,
     parse_status_block,
     sanitize_text,
+    sanitized_text_or,
 )
 from continuous_refactoring.prompts import (
     CONTINUOUS_REFACTORING_STATUS_BEGIN,
@@ -193,6 +194,22 @@ def test_sanitize_text_is_idempotent() -> None:
 
     assert once is not None
     assert sanitize_text(once, repo_root) == once
+
+
+def test_sanitized_text_or_prefers_sanitized_text() -> None:
+    repo_root = Path("/repo")
+
+    assert (
+        sanitized_text_or(" touched /repo/src/file.py ", repo_root, "fallback")
+        == "touched <repo>/src/file.py"
+    )
+
+
+def test_sanitized_text_or_uses_fallback_when_sanitized_text_is_empty() -> None:
+    assert (
+        sanitized_text_or("codex exec --help", Path("/repo"), "fallback")
+        == "fallback"
+    )
 
 
 @pytest.mark.parametrize(

@@ -24,6 +24,7 @@ from continuous_refactoring.decisions import (
     RouteOutcome,
     error_failure_kind,
     sanitize_text,
+    sanitized_text_or,
 )
 from continuous_refactoring.effort import (
     EffortBudget,
@@ -269,7 +270,7 @@ def try_migration_tick(
                     build_commit_message(
                         f"{commit_message_prefix}: migration/{manifest.name}"
                         f"/{phase_file_reference(phase)}",
-                        why=sanitize_text(outcome.reason, repo_root) or outcome.reason,
+                        why=sanitized_text_or(outcome.reason, repo_root, outcome.reason),
                         validation=validation_command,
                     ),
                     artifacts=artifacts,
@@ -369,7 +370,7 @@ def _log_phase_effort_deferred(
 def _ready_check_failure_record(
     error: ContinuousRefactorError, repo_root: Path, target_label: str,
 ) -> DecisionRecord:
-    summary = sanitize_text(str(error), repo_root) or str(error)
+    summary = sanitized_text_or(str(error), repo_root, str(error))
     return DecisionRecord(
         decision="abandon",
         retry_recommendation="new-target",
@@ -391,7 +392,7 @@ def _phase_failure_record(
         call_role=outcome.call_role or "phase.execute",
         phase_reached=outcome.phase_reached or "phase.execute",
         failure_kind=outcome.failure_kind or "phase-failed",
-        summary=sanitize_text(outcome.reason, repo_root) or outcome.reason,
+        summary=sanitized_text_or(outcome.reason, repo_root, outcome.reason),
         retry_used=outcome.retry,
     )
 
@@ -408,7 +409,7 @@ def _phase_commit_record(
         call_role="phase.execute",
         phase_reached="phase.execute",
         failure_kind="none",
-        summary=sanitize_text(outcome.reason, repo_root) or outcome.reason,
+        summary=sanitized_text_or(outcome.reason, repo_root, outcome.reason),
     )
 
 
@@ -438,7 +439,7 @@ def _defer_manifest(
 def _human_review_record(
     reason: str, repo_root: Path, target_label: str,
 ) -> DecisionRecord:
-    summary = sanitize_text(reason, repo_root) or "Phase requires human review"
+    summary = sanitized_text_or(reason, repo_root, "Phase requires human review")
     return DecisionRecord(
         decision="blocked",
         retry_recommendation="human-review",
@@ -458,7 +459,7 @@ def _deferred_record(reason: str, repo_root: Path, target_label: str) -> Decisio
         call_role="phase.ready-check",
         phase_reached="phase.ready-check",
         failure_kind="phase-ready-no",
-        summary=sanitize_text(reason, repo_root) or "Migration phase not ready",
+        summary=sanitized_text_or(reason, repo_root, "Migration phase not ready"),
     )
 
 
@@ -472,5 +473,9 @@ def _effort_deferred_record(
         call_role="phase.effort-budget",
         phase_reached="phase.effort-budget",
         failure_kind="phase-effort-over-budget",
-        summary=sanitize_text(reason, repo_root) or "Migration phase over effort budget",
+        summary=sanitized_text_or(
+            reason,
+            repo_root,
+            "Migration phase over effort budget",
+        ),
     )

@@ -159,13 +159,17 @@ def sanitize_text(text: str | None, repo_root: Path) -> str | None:
     return " ".join(lines)[:240]
 
 
+def sanitized_text_or(text: str | None, repo_root: Path, fallback: str) -> str:
+    return sanitize_text(text, repo_root) or fallback
+
+
 def status_summary(
     status: AgentStatus | None,
     *,
     fallback: str,
     repo_root: Path,
 ) -> tuple[str, str | None]:
-    summary = sanitize_text(status.summary if status else None, repo_root) or fallback
+    summary = sanitized_text_or(status.summary if status else None, repo_root, fallback)
     focus = sanitize_text(status.next_retry_focus if status else None, repo_root)
     return summary, focus
 

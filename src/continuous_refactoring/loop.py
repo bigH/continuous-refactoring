@@ -50,7 +50,7 @@ from continuous_refactoring.effort import (
     EffortBudget,
     EffortResolution,
     resolve_effort_budget,
-    resolve_requested_effort,
+    resolve_target_effort_budget,
 )
 from continuous_refactoring.failure_report import effective_record, persist_decision
 from continuous_refactoring.git import (
@@ -123,30 +123,6 @@ def _effort_budget_from_args(args: argparse.Namespace) -> EffortBudget:
     default_effort = getattr(args, "default_effort", getattr(args, "effort", None))
     max_allowed_effort = getattr(args, "max_allowed_effort", None)
     return resolve_effort_budget(default_effort, max_allowed_effort)
-
-
-def _target_effort_budget(
-    budget: EffortBudget,
-    target: Target,
-) -> tuple[EffortBudget, EffortResolution]:
-    has_override = target.effort_override is not None
-    resolution = resolve_requested_effort(
-        budget,
-        target.effort_override,
-        source="target-override" if has_override else "default",
-        reason=(
-            "target effort override capped by run budget"
-            if has_override
-            else "run default effort"
-        ),
-    )
-    return (
-        EffortBudget(
-            default_effort=resolution.effective_effort,
-            max_allowed_effort=budget.max_allowed_effort,
-        ),
-        resolution,
-    )
 
 
 def _log_effort_budget(artifacts: RunArtifacts, budget: EffortBudget) -> None:
@@ -382,9 +358,9 @@ def run_once(args: argparse.Namespace) -> int:
 
     base_prompt = _resolve_base_prompt(args)
     model = target.model_override or args.model
-    target_effort_budget, effort_resolution = _target_effort_budget(
+    target_effort_budget, effort_resolution = resolve_target_effort_budget(
         base_effort_budget,
-        target,
+        target.effort_override,
     )
     effort = target_effort_budget.default_effort
 
@@ -745,9 +721,9 @@ def run_loop(args: argparse.Namespace) -> int:
             source_index += 1
             artifacts.mark_attempt_started(action_index)
             model = target.model_override or args.model
-            target_effort_budget, effort_resolution = _target_effort_budget(
+            target_effort_budget, effort_resolution = resolve_target_effort_budget(
                 base_effort_budget,
-                target,
+                target.effort_override,
             )
             effort = target_effort_budget.default_effort
             effort_metadata = effort_resolution.event_fields()

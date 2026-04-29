@@ -21,6 +21,7 @@ __all__ = [
     "resolve_effort_budget",
     "resolve_phase_effort",
     "resolve_requested_effort",
+    "resolve_target_effort_budget",
 ]
 
 EffortTier = Literal["low", "medium", "high", "xhigh"]
@@ -146,6 +147,30 @@ def resolve_requested_effort(
         requested_effort=requested,
         max_allowed_effort=budget.max_allowed_effort,
         reason=reason,
+    )
+
+
+def resolve_target_effort_budget(
+    budget: EffortBudget,
+    requested_effort: object | None,
+) -> tuple[EffortBudget, EffortResolution]:
+    has_override = requested_effort is not None
+    resolution = resolve_requested_effort(
+        budget,
+        requested_effort,
+        source="target-override" if has_override else "default",
+        reason=(
+            "target effort override capped by run budget"
+            if has_override
+            else "run default effort"
+        ),
+    )
+    return (
+        EffortBudget(
+            default_effort=resolution.effective_effort,
+            max_allowed_effort=budget.max_allowed_effort,
+        ),
+        resolution,
     )
 
 

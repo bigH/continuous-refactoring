@@ -10,6 +10,7 @@ from continuous_refactoring.effort import (
     resolve_effort_budget,
     resolve_phase_effort,
     resolve_requested_effort,
+    resolve_target_effort_budget,
 )
 
 
@@ -53,6 +54,33 @@ def test_target_override_requests_default_then_caps_to_max() -> None:
     assert resolution.effective_effort == "medium"
     assert resolution.max_allowed_effort == "medium"
     assert resolution.capped is True
+
+
+def test_target_effort_budget_uses_run_default_without_override() -> None:
+    budget = resolve_effort_budget("medium", "xhigh")
+
+    target_budget, resolution = resolve_target_effort_budget(budget, None)
+
+    assert target_budget.default_effort == "medium"
+    assert target_budget.max_allowed_effort == "xhigh"
+    assert resolution.source == "default"
+    assert resolution.requested_effort == "medium"
+    assert resolution.effective_effort == "medium"
+    assert resolution.reason == "run default effort"
+
+
+def test_target_effort_budget_caps_override_and_updates_default() -> None:
+    budget = resolve_effort_budget("low", "medium")
+
+    target_budget, resolution = resolve_target_effort_budget(budget, "xhigh")
+
+    assert target_budget.default_effort == "medium"
+    assert target_budget.max_allowed_effort == "medium"
+    assert resolution.source == "target-override"
+    assert resolution.requested_effort == "xhigh"
+    assert resolution.effective_effort == "medium"
+    assert resolution.capped is True
+    assert resolution.reason == "target effort override capped by run budget"
 
 
 def test_phase_effort_uses_default_when_no_requirement() -> None:

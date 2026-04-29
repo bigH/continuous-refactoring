@@ -12,7 +12,6 @@ if TYPE_CHECKING:
 import continuous_refactoring
 import continuous_refactoring.loop
 from continuous_refactoring.artifacts import (
-    CommandCapture,
     ContinuousRefactorError,
     create_run_artifacts,
 )
@@ -35,8 +34,6 @@ from continuous_refactoring.migration_tick import (
 
 from conftest import (
     make_run_once_args,
-    noop_agent,
-    noop_tests,
     patch_classifier_trap,
 )
 
@@ -213,18 +210,6 @@ def _patch_execute_phase_trap(monkeypatch: pytest.MonkeyPatch) -> None:
         raise AssertionError("execute_phase must not be called")
 
     monkeypatch.setattr("continuous_refactoring.migration_tick.execute_phase", trap)
-
-
-def _patch_one_shot(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    prompts: list[str] = []
-
-    def capture(**kwargs: object) -> CommandCapture:
-        prompts.append(str(kwargs.get("prompt", "")))
-        return noop_agent(**kwargs)
-
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
-    return prompts
 
 
 def _tick(
@@ -1074,7 +1059,7 @@ def test_unverifiable_human_approval_uncertainty_still_blocks_for_review(
 
 
 def test_eligible_ready_migration_advances_phase(
-    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, prompt_capture: list[str],
 ) -> None:
     now = _utc_now()
     live_dir, _, manifest_path = _seed_manifest(
@@ -1091,7 +1076,6 @@ def test_eligible_ready_migration_advances_phase(
     )
     check_calls = _patch_check_ready(monkeypatch, "yes")
     exec_calls = _patch_execute_phase(monkeypatch, status="done")
-    _patch_one_shot(monkeypatch)
 
     exit_code = _run_once(run_once_env)
 
@@ -1108,6 +1092,7 @@ def test_eligible_ready_migration_advances_phase(
 def test_migration_labels_use_phase_file_not_numeric_cursor(
     run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,
+    prompt_capture: list[str],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     now = _utc_now()
@@ -1127,7 +1112,6 @@ def test_migration_labels_use_phase_file_not_numeric_cursor(
     )
     _patch_check_ready(monkeypatch, "yes")
     _patch_execute_phase(monkeypatch, status="done")
-    _patch_one_shot(monkeypatch)
     monkeypatch.setattr(
         "continuous_refactoring.loop._finalize_commit",
         lambda _repo_root, _head_before, message, **_kwargs: commit_messages.append(message),
@@ -1144,7 +1128,7 @@ def test_migration_labels_use_phase_file_not_numeric_cursor(
 
 
 def test_phase_ready_check_receives_runtime_taste(
-    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, prompt_capture: list[str],
 ) -> None:
     now = _utc_now()
     live_dir, _, _ = _seed_manifest(
@@ -1174,7 +1158,6 @@ def test_phase_ready_check_receives_runtime_taste(
         fake_check_ready,
     )
     _patch_execute_phase_trap(monkeypatch)
-    _patch_one_shot(monkeypatch)
 
     exit_code = _run_once(run_once_env)
 
@@ -1188,18 +1171,16 @@ def test_phase_ready_check_receives_runtime_taste(
 
 
 def test_no_eligible_migrations_falls_through(
-    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, prompt_capture: list[str],
 ) -> None:
     live_dir = _migrations_dir(run_once_env)
 
     _patch_live_dir(monkeypatch, live_dir)
     classifier_calls = _patch_classifier_cohesive(monkeypatch)
-    prompts = _patch_one_shot(monkeypatch)
-
     exit_code = _run_once(run_once_env)
 
     assert exit_code == 0
-    _assert_fell_through(classifier_calls, prompts)
+    _assert_fell_through(classifier_calls, prompt_capture)
 
 
 # ---------------------------------------------------------------------------
@@ -1208,7 +1189,7 @@ def test_no_eligible_migrations_falls_through(
 
 
 def test_eligible_not_ready_bumps_wake_up_on(
-    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, prompt_capture: list[str],
 ) -> None:
     now = _utc_now()
     live_dir, _, manifest_path = _seed_manifest(
@@ -1223,8 +1204,6 @@ def test_eligible_not_ready_bumps_wake_up_on(
     classifier_calls = _patch_classifier_cohesive(monkeypatch)
     _patch_check_ready(monkeypatch, "no", "prerequisites not met")
     _patch_execute_phase_trap(monkeypatch)
-    prompts = _patch_one_shot(monkeypatch)
-
     exit_code = _run_once(run_once_env)
 
     assert exit_code == 0
@@ -1236,7 +1215,7 @@ def test_eligible_not_ready_bumps_wake_up_on(
     assert reloaded.current_phase == "setup"
     assert eligible_now(reloaded, _utc_now()) is False
 
-    _assert_fell_through(classifier_calls, prompts)
+    _assert_fell_through(classifier_calls, prompt_capture)
 
 
 # ---------------------------------------------------------------------------
@@ -1245,7 +1224,7 @@ def test_eligible_not_ready_bumps_wake_up_on(
 
 
 def test_future_wake_up_blocks_execution(
-    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, prompt_capture: list[str],
 ) -> None:
     now = _utc_now()
     live_dir, manifest, _ = _seed_manifest(
@@ -1261,16 +1240,14 @@ def test_future_wake_up_blocks_execution(
     _patch_live_dir(monkeypatch, live_dir)
     classifier_calls = _patch_classifier_cohesive(monkeypatch)
     _patch_execute_phase_trap(monkeypatch)
-    prompts = _patch_one_shot(monkeypatch)
-
     exit_code = _run_once(run_once_env)
 
     assert exit_code == 0
-    _assert_fell_through(classifier_calls, prompts)
+    _assert_fell_through(classifier_calls, prompt_capture)
 
 
 def test_unverifiable_phase_stores_human_review_reason(
-    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, prompt_capture: list[str],
 ) -> None:
     import pytest
 
@@ -1287,7 +1264,6 @@ def test_unverifiable_phase_stores_human_review_reason(
     _patch_classifier_cohesive(monkeypatch)
     _patch_check_ready(monkeypatch, "unverifiable", reason)
     _patch_execute_phase_trap(monkeypatch)
-    _patch_one_shot(monkeypatch)
 
     with pytest.raises(ContinuousRefactorError, match="external dependency"):
         _run_once(run_once_env)
@@ -1298,7 +1274,7 @@ def test_unverifiable_phase_stores_human_review_reason(
 
 
 def test_empty_current_phase_skips_migration_path(
-    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, prompt_capture: list[str],
 ) -> None:
     now = _utc_now()
     live_dir, manifest, manifest_path = _seed_manifest(
@@ -1315,13 +1291,11 @@ def test_empty_current_phase_skips_migration_path(
     check_calls = _patch_check_ready(monkeypatch, "yes")
     _patch_execute_phase_trap(monkeypatch)
     classifier_calls = _patch_classifier_cohesive(monkeypatch)
-    prompts = _patch_one_shot(monkeypatch)
-
     exit_code = _run_once(run_once_env)
 
     assert exit_code == 0
     assert check_calls == []
-    _assert_fell_through(classifier_calls, prompts)
+    _assert_fell_through(classifier_calls, prompt_capture)
 
     reloaded = load_manifest(manifest_path)
     assert reloaded.current_phase == ""

@@ -32,11 +32,16 @@ from continuous_refactoring.loop import (
 )
 from continuous_refactoring.review_cli import handle_review
 
+_PACKAGE_DISTRIBUTION = "continuous-refactoring"
 _TASTE_WARNING = "warning: taste out of date — run `continuous-refactoring taste --upgrade`"
 _GLOBAL_TASTE_WARNING = (
     "warning: global taste is out of date — "
     "run 'continuous-refactoring taste --upgrade' to update."
 )
+
+
+def _version_banner() -> str:
+    return f"{_PACKAGE_DISTRIBUTION} {metadata_version(_PACKAGE_DISTRIBUTION)}"
 
 
 def parse_max_attempts(value: str) -> int:
@@ -279,7 +284,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"continuous-refactoring {metadata_version('continuous-refactoring')}",
+        version=_version_banner(),
     )
     subparsers = parser.add_subparsers(dest="command")
 

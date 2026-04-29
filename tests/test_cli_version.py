@@ -1,13 +1,14 @@
 from __future__ import annotations
 
+import sys
+
 import pytest
 
 from continuous_refactoring import cli
 
 
-def test_global_version_uses_installed_package_metadata(
+def test_build_parser_uses_installed_package_metadata_for_version_banner(
     monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
 ) -> None:
     package_names: list[str] = []
 
@@ -17,10 +18,22 @@ def test_global_version_uses_installed_package_metadata(
 
     monkeypatch.setattr(cli, "metadata_version", fake_metadata_version)
 
-    parser = cli.build_parser()
-    with pytest.raises(SystemExit) as exc_info:
-        parser.parse_args(["--version"])
+    cli.build_parser()
 
+    assert package_names == [cli._PACKAGE_DISTRIBUTION]
+
+
+def test_cli_main_version_prints_banner_without_stale_taste_warning(
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(cli, "metadata_version", lambda _: "9.8.7")
+    monkeypatch.setattr(sys, "argv", ["continuous-refactoring", "--version"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        cli.cli_main()
+
+    captured = capsys.readouterr()
     assert exc_info.value.code == 0
-    assert package_names == ["continuous-refactoring"]
-    assert capsys.readouterr().out == "continuous-refactoring 9.8.7\n"
+    assert captured.out == "continuous-refactoring 9.8.7\n"
+    assert captured.err == ""

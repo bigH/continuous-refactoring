@@ -4,6 +4,23 @@ Small, test-gated cleanup commits by an AI coding agent.
 
 Think of it as a supervised janitor loop: the agent proposes a cleanup, your tests decide if it stays.
 
+## Install
+
+```bash
+uv tool install continuous-refactoring
+```
+
+For a checkout:
+
+```bash
+uv sync
+uv pip install -e .
+```
+
+That gives you the `continuous-refactoring` command.
+
+Maintainers: see the [release checklist](https://github.com/bigH/continuous-refactoring/blob/main/docs/release.md).
+
 ## Fastest way to get one refactor
 
 Once installed:
@@ -43,15 +60,6 @@ That keeps sweeping targets until it runs out, hits your caps, or starts failing
 - [uv](https://github.com/astral-sh/uv)
 - `codex` or `claude` CLI on your `PATH` (whichever backend you pick)
 - A git repo with a clean worktree
-
-## Install
-
-```bash
-uv sync
-uv pip install -e .
-```
-
-That gives you the `continuous-refactoring` command.
 
 ## Quickstart
 

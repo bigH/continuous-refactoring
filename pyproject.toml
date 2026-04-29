@@ -4,17 +4,60 @@ version = "0.1.0"
 description = "Continuous refactoring loop for AI coding agents"
 readme = "README.md"
 requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE*"]
+authors = [{ name = "Hiren Hiranandani" }]
+maintainers = [{ name = "Hiren Hiranandani" }]
+keywords = ["ai", "refactoring", "codex", "claude", "automation"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.10",
+  "Topic :: Software Development",
+  "Topic :: Software Development :: Quality Assurance",
+]
 dependencies = []
+
+[project.urls]
+Repository = "https://github.com/bigH/continuous-refactoring"
+Issues = "https://github.com/bigH/continuous-refactoring/issues"
+Changelog = "https://github.com/bigH/continuous-refactoring/releases"
 
 [project.scripts]
 continuous-refactoring = "continuous_refactoring:cli_main"
 
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling >= 1.27"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/continuous_refactoring"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/pyproject.toml",
+  "/README.md",
+  "/LICENSE*",
+  "/src/continuous_refactoring/**",
+  "/tests/**",
+]
+exclude = [
+  "/.hiren",
+  "/.scratchpad",
+  "/.pytest_cache",
+  "/.venv",
+  "/dist",
+  "/build",
+  "/approaches",
+  "/migrations",
+  "/AGENTS.md",
+  "/CLAUDE.md",
+  "/.python-version",
+  "/uv.lock",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

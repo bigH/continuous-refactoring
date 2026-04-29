@@ -8,5 +8,10 @@ __pycache__/
 # Default venv for uv
 .venv/
 
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
 # C extensions
 *.so

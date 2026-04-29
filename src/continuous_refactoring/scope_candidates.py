@@ -357,20 +357,6 @@ def _rank_paths(
     return [path for _score, path in ranked]
 
 
-def _include_local(same_dir: bool, support_kinds: tuple[_SupportKind, ...]) -> bool:
-    has_pairing = "source-test-pairing" in support_kinds
-    has_non_cochange = any(kind != "git-cochange" for kind in support_kinds)
-    return has_pairing or (same_dir and has_non_cochange)
-
-
-def _include_cross(same_dir: bool, support_kinds: tuple[_SupportKind, ...]) -> bool:
-    return not (
-        same_dir
-        and support_kinds
-        and all(kind == "git-cochange" for kind in support_kinds)
-    )
-
-
 def build_scope_candidates(
     target: Target,
     repo_root: Path,
@@ -394,8 +380,23 @@ def build_scope_candidates(
     )
     candidates = [_build_seed_candidate(seed_file)]
 
+    def include_local(same_dir: bool, support_kinds: tuple[_SupportKind, ...]) -> bool:
+        return "source-test-pairing" in support_kinds or (
+            same_dir and any(kind != "git-cochange" for kind in support_kinds)
+        )
+
+    def include_cross(same_dir: bool, support_kinds: tuple[_SupportKind, ...]) -> bool:
+        return not (
+            same_dir
+            and support_kinds
+            and all(kind == "git-cochange" for kind in support_kinds)
+        )
+
     local_ranked = _rank_paths(
-        support.scores, support.support_kinds, seed_file, _include_local,
+        support.scores,
+        support.support_kinds,
+        seed_file,
+        include_local,
     )
     local_extras = tuple(local_ranked[: max_files - 1])
     if local_extras:
@@ -407,7 +408,10 @@ def build_scope_candidates(
         )
 
     cross_ranked = _rank_paths(
-        support.scores, support.support_kinds, seed_file, _include_cross,
+        support.scores,
+        support.support_kinds,
+        seed_file,
+        include_cross,
     )
     cross_extras = tuple(cross_ranked[: max_files - 1])
     if cross_extras:

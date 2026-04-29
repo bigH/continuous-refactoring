@@ -6,8 +6,6 @@ import continuous_refactoring
 
 from conftest import init_repo
 from continuous_refactoring.scope_candidates import (
-    _include_cross,
-    _include_local,
     build_scope_candidates,
 )
 from continuous_refactoring.targeting import Target
@@ -112,16 +110,26 @@ def test_local_git_cochange_alone_does_not_add_noisy_local_sibling(
     assert [candidate.kind for candidate in candidates] == ["seed"]
 
 
-def test_local_scope_inclusion_uses_structured_support_kinds() -> None:
-    assert _include_local(True, ("direct-reference",))
-    assert _include_local(False, ("source-test-pairing",))
-    assert not _include_local(True, ("git-cochange",))
+def test_cross_cluster_excludes_same_dir_git_only_noise(
+    tmp_path: Path,
+) -> None:
+    init_repo(tmp_path)
+    _write(tmp_path, "src/foo.py", "VALUE = 0\n")
+    _write(tmp_path, "src/helpers.py", "VALUE = 0\n")
+    _write(tmp_path, "cross/a.py", "VALUE = 0\n")
+    _commit_all(tmp_path, "seed files")
 
+    _write(tmp_path, "src/foo.py", "VALUE = 1\n")
+    _write(tmp_path, "src/helpers.py", "VALUE = 1\n")
+    _write(tmp_path, "cross/a.py", "VALUE = 1\n")
+    _commit_all(tmp_path, "mixed cochange")
 
-def test_cross_scope_inclusion_filters_same_dir_git_only_support() -> None:
-    assert not _include_cross(True, ("git-cochange",))
-    assert _include_cross(True, ("git-cochange", "reverse-reference"))
-    assert _include_cross(False, ("git-cochange",))
+    candidates = build_scope_candidates(_seed_target("src/foo.py"), tmp_path)
+
+    cross_cluster = next(
+        candidate for candidate in candidates if candidate.kind == "cross-cluster"
+    )
+    assert cross_cluster.files == ("src/foo.py", "cross/a.py")
 
 
 def test_git_cochange_neighbors_are_capped_and_deterministic(tmp_path: Path) -> None:

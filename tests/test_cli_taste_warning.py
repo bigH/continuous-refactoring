@@ -18,16 +18,34 @@ from continuous_refactoring.config import (
 _LEGACY_TASTE = "- Old taste without version header.\n"
 
 
-def _write_stale_taste(xdg_root: Path) -> None:
+def _write_global_taste(xdg_root: Path, text: str) -> None:
     taste_dir = xdg_root / "continuous-refactoring" / "global"
     taste_dir.mkdir(parents=True, exist_ok=True)
-    (taste_dir / "taste.md").write_text(_LEGACY_TASTE, encoding="utf-8")
+    (taste_dir / "taste.md").write_text(text, encoding="utf-8")
+
+
+def _write_stale_taste(xdg_root: Path) -> None:
+    _write_global_taste(xdg_root, _LEGACY_TASTE)
 
 
 def _write_current_taste(xdg_root: Path) -> None:
-    taste_dir = xdg_root / "continuous-refactoring" / "global"
-    taste_dir.mkdir(parents=True, exist_ok=True)
-    (taste_dir / "taste.md").write_text(default_taste_text(), encoding="utf-8")
+    _write_global_taste(xdg_root, default_taste_text())
+
+
+def _register_repo_with_taste(
+    *,
+    repo: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    taste_text: str,
+) -> None:
+    init_repo(repo)
+    monkeypatch.chdir(repo)
+
+    project = register_project(repo)
+    set_repo_taste_path(project.entry.uuid, DEFAULT_REPO_TASTE_PATH)
+    taste_path = repo / DEFAULT_REPO_TASTE_PATH
+    taste_path.parent.mkdir(parents=True, exist_ok=True)
+    taste_path.write_text(taste_text, encoding="utf-8")
 
 
 _SUBCOMMANDS: list[tuple[list[str], str]] = [
@@ -125,14 +143,11 @@ def test_taste_warning_uses_configured_repo_taste(
 ) -> None:
     _write_current_taste(xdg_root)
     repo = tmp_path / "repo"
-    init_repo(repo)
-    monkeypatch.chdir(repo)
-
-    project = register_project(repo)
-    set_repo_taste_path(project.entry.uuid, DEFAULT_REPO_TASTE_PATH)
-    taste_path = repo / DEFAULT_REPO_TASTE_PATH
-    taste_path.parent.mkdir(parents=True, exist_ok=True)
-    taste_path.write_text(_LEGACY_TASTE, encoding="utf-8")
+    _register_repo_with_taste(
+        repo=repo,
+        monkeypatch=monkeypatch,
+        taste_text=_LEGACY_TASTE,
+    )
 
     monkeypatch.setattr(sys, "argv", ["cr", "upgrade"])
     monkeypatch.setattr(cli, "_handle_upgrade", lambda _: None)
@@ -150,14 +165,11 @@ def test_current_repo_taste_suppresses_stale_global_warning(
 ) -> None:
     _write_stale_taste(xdg_root)
     repo = tmp_path / "repo"
-    init_repo(repo)
-    monkeypatch.chdir(repo)
-
-    project = register_project(repo)
-    set_repo_taste_path(project.entry.uuid, DEFAULT_REPO_TASTE_PATH)
-    taste_path = repo / DEFAULT_REPO_TASTE_PATH
-    taste_path.parent.mkdir(parents=True, exist_ok=True)
-    taste_path.write_text(default_taste_text(), encoding="utf-8")
+    _register_repo_with_taste(
+        repo=repo,
+        monkeypatch=monkeypatch,
+        taste_text=default_taste_text(),
+    )
 
     monkeypatch.setattr(sys, "argv", ["cr", "upgrade"])
     monkeypatch.setattr(cli, "_handle_upgrade", lambda _: None)

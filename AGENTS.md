@@ -20,6 +20,14 @@ Treat `AGENTS.md` as part of the codebase's invariants, not documentation. A dri
 - Test one: `uv run pytest tests/test_x.py::test_name`
 - Entry: `continuous-refactoring --help` / `continuous-refactoring --version`
   (or `python -m continuous_refactoring`)
+- Inspect migrations: `continuous-refactoring migration list` /
+  `continuous-refactoring migration doctor <slug-or-path>` /
+  `continuous-refactoring migration doctor --all`
+- Review migrations: `continuous-refactoring migration review <slug-or-path>`
+  (top-level `review perform <slug>` remains a compatibility wrapper)
+- Refine migration planning: `continuous-refactoring migration refine <slug-or-path>
+  (--message <text>|--file <path>) --with codex|claude --model <model>
+  --effort <low|medium|high|xhigh>`
 
 No lint, no typecheck, no formatter, no pre-commit. GitHub Actions `Test`
 runs `uv run pytest`. **Pytest is the only code gate.** GitHub Actions
@@ -40,6 +48,12 @@ runs `uv run pytest`. **Pytest is the only code gate.** GitHub Actions
 - **Scope expansion** — deciding the set of files edited together with the target (`scope_expansion.py`).
 - **Classifier / routing** — picks which agent handles a target (`routing.py`).
 - **Migration** — a multi-phase plan living under `migrations/<slug>/`.
+- **Visible migration directory** — direct child migration dir that is not hidden, dotted, symlinked, or internal/transactional; enumerate through `iter_visible_migration_dirs()`.
+- **Consistency finding** — structured migration integrity result with shared `info | warning | error` severity and `planning-snapshot | ready-publish | execution-gate | doctor` mode.
+- **Planning state** — durable resume/audit cursor at `<migration>/.planning/state.json`; it records accepted planning steps and their repo-relative stage outputs.
+- **Planning stage output** — accepted planning stdout stored under `<migration>/.planning/stages/<step>.stdout.md`; repeated accepted steps use suffixed refs such as `<step>-2.stdout.md`. Failed current-step output stays in run artifacts only.
+- **Planning feedback** — explicit user refinement feedback recorded in `.planning/state.json`; it reuses the `revise` planning step and is published only through staged planning/refine transactions.
+- **Planning workspace** — off-live candidate migration snapshot built under project state, then copied to a live-dir transaction before publish.
 - **Phase** — one step of a migration; state transitions in `phases.py`.
 - **Precondition** — what must already be true before a phase may execute; stored on each manifest phase as `precondition`.
 - **Definition of Done** — what must be true for a phase to count as completed; written in each phase markdown doc under `## Definition of Done`.
@@ -48,7 +62,7 @@ runs `uv run pytest`. **Pytest is the only code gate.** GitHub Actions
 - **Eligibility cooldown** — `manifest.cooldown_until` gates re-checks after a migration was deferred or blocked; `last_touch` records activity only.
 - **Settle protocol** — `<file>.done` + sha256 handshake confirming an interactive agent is finished.
 - **Status block** — the driver's end-of-attempt summary written to artifacts.
-- **Call role** — `classifier | planner | editor | reviewer` slot filled in a prompt.
+- **Call role** — prompt slot recorded in artifacts, including `classifier`, `editor`, dotted planning roles such as `planning.<step>`, `planning.state`, `planning.publish`, and phase roles such as `phase.ready-check` or `phase.execute`.
 - **Effort budget** — shared nominal tiers `low < medium < high < xhigh`; `--default-effort` is the normal call effort, `--max-allowed-effort` caps target overrides and phase escalation.
 - **Failure snapshot** — per-attempt failure record at `…/projects/<uuid>/failures/<run_id>-attempt-NNN-retry-NN-<role>.md`. One file per failed attempt; sort to find the latest.
 
@@ -93,9 +107,15 @@ active phase explicitly names `loop.py` in scope.
 - **Driver owns commits** (`refactor_attempts.py:_finalize_commit()`, called from `loop.py`) — if an agent commits mid-attempt, driver does `git reset --soft head_before` and re-commits with its own message.
 - **Migration scheduling split** (`migrations.py`, `loop.py`, `phases.py`) — `last_touch` is activity bookkeeping, not the 6-hour retry gate. Deferred/blocked migrations set `cooldown_until`; successful phase completion clears deferral markers so the next ready phase can run immediately.
 - **Migration tick deferral writes** (`migration_tick.py`) — ready-check deferrals are queued while scanning candidates and saved only when the tick finds no executable phase or blocks for human review. Do not save a deferred manifest before checking later candidates; that dirties the worktree and can make ready-checks reject runnable phases.
+- **Migration visibility + consistency gate** (`migration_consistency.py`, `migration_tick.py`, `loop.py`, `review_cli.py`) — candidate scans use `iter_visible_migration_dirs()` so hidden/dotted/internal/symlink dirs are invisible to tick/review list. Before ready-check, `execution-gate` consistency errors block phase execution; `info`/`warning` never block.
 - **Manifest codec boundary** (`migration_manifest_codec.py`, `migrations.py`) — codec owns legacy `ready_when`, legacy integer `current_phase`, duplicate phase-name rejection, and saved JSON formatting. `load_manifest()` / `save_manifest()` own filesystem and JSON boundary errors.
-- **Review CLI boundary** (`cli.py`, `review_cli.py`) — `cli.py` owns parser wiring and run dispatch; migration review internals live in `review_cli.py`, which stays internal and out of package-root `_SUBMODULES`.
-- **Human-review gating** (`planning.py`, `migration_tick.py`, `review_cli.py`) — migrations with `awaiting_human_review=true` must be invisible to automated migration ticks/ready-checks until `review perform` clears the flag.
+- **Planning state codec boundary** (`planning_state.py`, `planning.py`) — `.planning/state.json` is valid only when completed steps replay through the branching planning graph to `next_step`; recorded outputs must be repo-relative files inside the migration directory. User refinement feedback is durable state, and `revision_base_step_count` is the replay marker that lets an unexecuted ready migration reuse `revise` after a terminal ready decision. Persist accepted step stdout after the step is validated; do not add durable fields for failed current-step output.
+- **Planning publish transaction** (`planning_publish.py`) — publish copies the complete workspace snapshot to `__transactions__/<token>/staged`, validates it, checks same-device and `base_snapshot_id`, moves live to `rollback`, moves staged live, validates live, then deletes rollback. On post-rollback failure, move bad live to `failed` before restoring rollback. Transaction directories are invisible to scheduling/list candidates but visible to `migration doctor --all`. Do not bypass the lock or dirty-live check.
+- **One-step planning engine** (`planning.py`) — product planning entry points call `run_next_planning_step()` so one action runs exactly `PlanningState.next_step`, records accepted stdout/state in an off-live workspace, and publishes through `planning_publish.py`. Failed current-step output is never durable resume input. `run_planning` is intentionally not package-exported.
+- **Planning resume scheduling** (`migration_tick.py`, `loop.py`, `routing_pipeline.py`) — normal automation runs one eligible `status: planning` step before ready/in-progress phase ticks and before source-target routing. Missing or invalid `.planning/state.json` blocks automation with planning failure evidence; `status: planning` must never enter phase ready-check or phase execution.
+- **Review CLI boundary** (`cli.py`, `review_cli.py`) — `cli.py` owns parser wiring; staged migration review internals live in `review_cli.py`, publish only through `planning_publish.py`, and stay internal/out of package-root `_SUBMODULES`. Top-level `review perform` is only a compatibility wrapper around this path.
+- **Migration CLI boundary** (`cli.py`, `migration_cli.py`) — `cli.py` owns parser wiring only; `migration_cli.py` owns namespace dispatch, read-only list/doctor behavior, and the contained slug/path resolver used by mutation commands. Mutating subcommands delegate their internals to focused modules such as `review_cli.py` or the planning refine entry point. Resolver targets must stay direct visible children of the configured live migrations root and reject symlink, outside, parent-traversal, and ambiguous paths.
+- **Human-review gating** (`planning.py`, `migration_tick.py`, `review_cli.py`) — migrations with `awaiting_human_review=true` must be invisible to automated migration ticks/ready-checks until canonical `migration review` clears the flag through staged publish; top-level `review perform` routes to the same compatibility path. `migration refine` may reopen an unexecuted ready migration to planning, but it is user feedback, not review approval.
 - **Migration terminology split** (`migrations.py`, `planning.py`, `prompts.py`) — manifest `precondition` gates phase start; phase markdown `## Definition of Done` governs completion.
 - **Run-level baseline validation** (`loop.py`) — `run-once`, `run`, and `--focus-on-live-migrations` run the configured validation command after the clean-worktree check and before routing/refactoring. A red baseline stops as `baseline_failed`, not migration human review.
 - **Phase execution validation gate** (`phases.py`, `prompts.py`, `loop.py`) — a migration phase is complete only after host-side full validation passes. `execute_phase()` retries validation-red attempts from `head_before` up to the effective `--max-attempts` budget, and the phase prompt must include the literal configured validation command plus the phase file's Definition of Done as the completion contract.

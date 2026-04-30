@@ -291,3 +291,45 @@ def test_persist_decision_records_non_commit_snapshot(
     events = artifacts.events_path.read_text(encoding="utf-8")
     assert '"event": "failure_doc_written"' in events
     assert '"event": "target_transition"' in events
+
+
+def test_planning_step_failure_snapshot_names_step_and_resume_behavior(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    artifacts = _artifacts(tmp_path / "artifacts")
+    record = _record(
+        decision="abandon",
+        retry_recommendation="new-target",
+        target="auth-cleanup",
+        call_role="planning.review-2",
+        phase_reached="planning.review-2",
+        failure_kind="planning-step-failed",
+        summary="Revised plan still has findings",
+        next_retry_focus=None,
+    )
+
+    result = persist_decision(
+        repo_root,
+        artifacts,
+        attempt=1,
+        retry=1,
+        validation_command="uv run pytest",
+        record=record,
+    )
+
+    assert result is not None
+    content = result.read_text(encoding="utf-8")
+    assert 'call_role: "planning.review-2"' in content
+    assert "planning step `review-2`" in content
+    assert ".planning/state.json" in content
+    assert "failed current-step output" in content
+    assert "not resume input" in content
+
+    events = artifacts.events_path.read_text(encoding="utf-8")
+    assert '"event": "planning_step_failure_doc_written"' in events
+    assert '"planning_step": "review-2"' in events
+    assert '"event": "failure_doc_written"' not in events

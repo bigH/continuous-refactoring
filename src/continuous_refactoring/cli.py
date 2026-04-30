@@ -30,6 +30,8 @@ from continuous_refactoring.loop import (
     run_migrations_focused_loop,
     run_once,
 )
+from continuous_refactoring.migration_cli import handle_migration
+from continuous_refactoring.migrations import MIGRATION_STATUSES
 from continuous_refactoring.review_cli import handle_review
 
 _PACKAGE_DISTRIBUTION = "continuous-refactoring"
@@ -277,6 +279,81 @@ def _add_review_parser(subparsers: argparse._SubParsersAction) -> None:
     perform_parser.add_argument("--effort", required=True, help="Effort level.")
 
 
+def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
+    migration_parser = subparsers.add_parser(
+        "migration",
+        help="Inspect live migrations.",
+    )
+    migration_parser.set_defaults(handler=handle_migration)
+    migration_sub = migration_parser.add_subparsers(dest="migration_command")
+
+    list_parser = migration_sub.add_parser(
+        "list",
+        help="List visible migrations.",
+    )
+    list_parser.add_argument(
+        "--status",
+        choices=MIGRATION_STATUSES,
+        default=None,
+        help="Only show migrations with this status.",
+    )
+    list_parser.add_argument(
+        "--awaiting-review",
+        action="store_true",
+        help="Only show migrations awaiting human review.",
+    )
+
+    doctor_parser = migration_sub.add_parser(
+        "doctor",
+        help="Validate migration consistency.",
+    )
+    doctor_parser.add_argument(
+        "target",
+        nargs="?",
+        help="Migration slug or contained path.",
+    )
+    doctor_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Validate every visible migration and transaction state.",
+    )
+
+    review_parser = migration_sub.add_parser(
+        "review",
+        help="Perform staged review on a flagged migration.",
+    )
+    review_parser.add_argument("target", help="Migration slug or contained path.")
+    review_parser.add_argument(
+        "--with", dest="agent", choices=("codex", "claude"), required=True,
+        help="Agent backend.",
+    )
+    review_parser.add_argument("--model", required=True, help="Model name.")
+    review_parser.add_argument(
+        "--effort", choices=EFFORT_TIERS, required=True, help="Effort level."
+    )
+
+    refine_parser = migration_sub.add_parser(
+        "refine",
+        help="Refine a planning migration with user feedback.",
+    )
+    refine_parser.add_argument("target", help="Migration slug or contained path.")
+    feedback_group = refine_parser.add_mutually_exclusive_group(required=True)
+    feedback_group.add_argument("--message", help="Refinement feedback text.")
+    feedback_group.add_argument(
+        "--file",
+        type=Path,
+        help="Path to a UTF-8 file containing refinement feedback.",
+    )
+    refine_parser.add_argument(
+        "--with", dest="agent", choices=("codex", "claude"), required=True,
+        help="Agent backend.",
+    )
+    refine_parser.add_argument("--model", required=True, help="Model name.")
+    refine_parser.add_argument(
+        "--effort", choices=EFFORT_TIERS, required=True, help="Effort level."
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Continuous refactoring CLI for AI coding agents.",
@@ -297,6 +374,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Verify and upgrade global configuration.",
     )
     upgrade_parser.set_defaults(handler=_handle_upgrade)
+    _add_migration_parser(subparsers)
     _add_review_parser(subparsers)
 
     return parser

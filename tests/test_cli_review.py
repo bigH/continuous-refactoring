@@ -117,6 +117,11 @@ def _make_perform_args(migration: str) -> argparse.Namespace:
     )
 
 
+def _commit_all(repo: Path, message: str = "test state") -> None:
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True, capture_output=True)
+    subprocess.run(["git", "commit", "-m", message], cwd=repo, check=True, capture_output=True)
+
+
 def _init_review_project(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[Path, Path]:
@@ -245,6 +250,45 @@ def test_review_list_filters_flagged_migrations(
     ]
 
 
+def test_review_list_ignores_hidden_and_transaction_dirs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _, live_dir = _init_review_project(tmp_path, monkeypatch)
+    save_migration(
+        _make_manifest(
+            "visible-review",
+            awaiting_human_review=True,
+            human_review_reason="visible",
+        ),
+        live_dir / "visible-review" / "manifest.json",
+    )
+    save_migration(
+        _make_manifest(
+            "hidden-review",
+            awaiting_human_review=True,
+            human_review_reason="hidden",
+        ),
+        live_dir / ".hidden-review" / "manifest.json",
+    )
+    save_migration(
+        _make_manifest(
+            "transaction-review",
+            awaiting_human_review=True,
+            human_review_reason="transaction",
+        ),
+        live_dir / "__transactions__" / "manifest.json",
+    )
+
+    handle_review_list()
+
+    out = capsys.readouterr().out
+    assert "visible-review\tready" in out
+    assert "hidden-review" not in out
+    assert "transaction-review" not in out
+
+
 @pytest.mark.parametrize(
     ("handler", "error_code", "setup", "expected_message"),
     [
@@ -341,6 +385,16 @@ def _setup_review_project(
         ),
         live_dir / "my-mig" / "manifest.json",
     )
+    (live_dir / "my-mig" / "plan.md").write_text("# Plan\n", encoding="utf-8")
+    for phase in _PHASES:
+        (live_dir / "my-mig" / phase.file).write_text(
+            "# Phase\n\n"
+            "## Precondition\n\n"
+            "Ready.\n\n"
+            "## Definition of Done\n\n"
+            "Done.\n",
+            encoding="utf-8",
+        )
     return repo, live_dir
 
 
@@ -348,11 +402,12 @@ def test_review_perform_happy_path(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _, live_dir = _setup_review_project(
+    repo, live_dir = _setup_review_project(
         tmp_path, monkeypatch,
         awaiting=True,
         human_review_reason="needs security audit",
     )
+    _commit_all(repo)
     manifest_path = live_dir / "my-mig" / "manifest.json"
     captured_prompt: dict[str, str] = {}
 
@@ -361,10 +416,14 @@ def test_review_perform_happy_path(
     ) -> int:
         captured_prompt["prompt"] = prompt
         captured_prompt["repo_root"] = str(repo_root)
-        manifest = load_migration_manifest(manifest_path)
+        manifest = load_migration_manifest(repo_root / "manifest.json")
         from dataclasses import replace
-        updated = replace(manifest, awaiting_human_review=False)
-        save_migration(updated, manifest_path)
+        updated = replace(
+            manifest,
+            awaiting_human_review=False,
+            human_review_reason=None,
+        )
+        save_migration(updated, repo_root / "manifest.json")
         return 0
 
     monkeypatch.setattr(
@@ -376,7 +435,8 @@ def test_review_perform_happy_path(
     assert "needs security audit" in captured_prompt["prompt"]
     assert "phase-2-review-target.md" in captured_prompt["prompt"]
     assert "Name: review-target" in captured_prompt["prompt"]
-    assert captured_prompt["repo_root"] == str(Path.cwd().resolve())
+    assert captured_prompt["repo_root"] != str(Path.cwd().resolve())
+    assert captured_prompt["repo_root"].endswith("/work/my-mig")
 
     reloaded = load_migration_manifest(manifest_path)
     assert reloaded.awaiting_human_review is False
@@ -387,12 +447,13 @@ def test_review_perform_happy_path_without_current_phase(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _, live_dir = _setup_review_project(
+    repo, live_dir = _setup_review_project(
         tmp_path, monkeypatch,
         awaiting=True,
         current_phase="",
         human_review_reason="phase cursor cleared",
     )
+    _commit_all(repo)
     manifest_path = live_dir / "my-mig" / "manifest.json"
     captured_prompt: dict[str, str] = {}
 
@@ -400,10 +461,15 @@ def test_review_perform_happy_path_without_current_phase(
         agent: str, model: str, effort: str, prompt: str, repo_root: Path,
     ) -> int:
         captured_prompt["prompt"] = prompt
-        manifest = load_migration_manifest(manifest_path)
+        manifest = load_migration_manifest(repo_root / "manifest.json")
         from dataclasses import replace
-        updated = replace(manifest, awaiting_human_review=False)
-        save_migration(updated, manifest_path)
+        updated = replace(
+            manifest,
+            awaiting_human_review=False,
+            current_phase="review-target",
+            human_review_reason=None,
+        )
+        save_migration(updated, repo_root / "manifest.json")
         return 0
 
     monkeypatch.setattr(
@@ -423,6 +489,7 @@ def test_review_perform_exits_1_when_flag_not_cleared(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     repo, live_dir = _setup_review_project(tmp_path, monkeypatch, awaiting=True)
+    _commit_all(repo)
 
     def fake_interactive(
         agent: str, model: str, effort: str, prompt: str, repo_root: Path,
@@ -446,7 +513,8 @@ def test_review_perform_exits_with_agent_returncode(
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    _setup_review_project(tmp_path, monkeypatch, awaiting=True)
+    repo, _live_dir = _setup_review_project(tmp_path, monkeypatch, awaiting=True)
+    _commit_all(repo)
 
     def fake_interactive(
         agent: str, model: str, effort: str, prompt: str, repo_root: Path,
@@ -493,6 +561,41 @@ def test_review_perform_exits_2_when_not_flagged_for_review(
     assert exc_info.value.code == 2
     err = capsys.readouterr().err
     assert "not flagged" in err
+
+
+def test_top_level_review_perform_routes_to_migration_review_compatibility_path(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _repo, live_dir = _setup_review_project(
+        tmp_path,
+        monkeypatch,
+        awaiting=True,
+        human_review_reason="needs approval",
+    )
+    seen: dict[str, object] = {}
+
+    def fake_staged_review(request: object) -> None:
+        seen["slug"] = request.target.slug
+        seen["path"] = request.target.path
+        seen["agent"] = request.agent
+        seen["model"] = request.model
+        seen["effort"] = request.effort
+
+    monkeypatch.setattr(
+        "continuous_refactoring.review_cli.handle_staged_migration_review",
+        fake_staged_review,
+    )
+
+    handle_review_perform(_make_perform_args("my-mig"))
+
+    assert seen == {
+        "slug": "my-mig",
+        "path": live_dir / "my-mig",
+        "agent": "codex",
+        "model": "test-model",
+        "effort": "low",
+    }
 
 
 def test_review_dispatches_list_subcommand(

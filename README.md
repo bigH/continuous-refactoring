@@ -122,8 +122,13 @@ continuous-refactoring run \
 | `run-once` | Single pass on one resolved target. No retry. If there is a diff and validation passes, it commits locally and prints the diffstat. |
 | `run` | The loop. Iterates targets, retries on failure, and commits successful targets locally. |
 | `upgrade` | Checks that the global config manifest is current, rewrites it idempotently, and warns if the global taste file is stale. |
-| `review list` | Lists migrations flagged for human review (`awaiting_human_review`). |
-| `review perform <migration>` | Starts an interactive agent session to resolve a flagged migration's review. Requires `--with`, `--model`, and `--effort`. |
+| `migration list` | Lists visible migrations. Add `--status <status>` or `--awaiting-review` to filter. |
+| `migration doctor <slug-or-path>` | Validates one visible migration's consistency. |
+| `migration doctor --all` | Validates every visible migration plus internal transaction state. |
+| `migration review <slug-or-path>` | Starts staged review for a migration awaiting human review. Requires `--with`, `--model`, and `--effort`. |
+| `migration refine <slug-or-path>` | Records feedback for a planning or unexecuted ready migration and runs one staged planning revision. Requires `--message <text>` or `--file <path>`, plus `--with`, `--model`, and `--effort`. |
+
+Legacy `review list` and `review perform <migration>` remain compatibility aliases; prefer `migration list --awaiting-review` and `migration review`.
 
 ## Targeting / Useful flags
 
@@ -146,9 +151,26 @@ If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`, the
 
 - `init --live-migrations-dir PATH` — enables the larger-refactoring workflow for this project. The path is stored repo-relative in the project registry and created if missing.
 - `init --in-repo-taste [PATH]` — stores this project's taste file in the repo and remembers the repo-relative path. Defaults to `.continuous-refactoring/taste.md`; re-run `init --in-repo-taste ...` to choose a different path.
+- `migration list` — shows visible migrations; `--awaiting-review` narrows to human-review handoffs.
+- `migration doctor <slug-or-path>` / `migration doctor --all` — read-only consistency checks. Doctor reports problems; it does not repair them.
+- `migration review <slug-or-path> --with ... --model ... --effort ...` — resolves an `awaiting_human_review` migration through a staged workspace.
+- `migration refine <slug-or-path> (--message <text>|--file <path>) --with ... --model ... --effort ...` — adds user feedback to a planning or unexecuted ready migration and resumes planning through the `revise` step when reopening ready work.
 - `taste --refine` — opens a collaborative editing session for the taste file. The agent keeps refining until you tell it to write, then the session ends automatically after the settled write.
 - `taste --upgrade` — re-interviews for taste dimensions added since your last version. No-op when already current; use `taste --refine` if you want to rework the doc anyway.
 - `taste --force` — only applies to `--interview`; it allows a customized taste file to be overwritten after backing it up to `taste.md.bak`.
+
+Canonical migration commands:
+
+```bash
+continuous-refactoring migration list
+continuous-refactoring migration list --status planning
+continuous-refactoring migration list --awaiting-review
+continuous-refactoring migration doctor <slug-or-path>
+continuous-refactoring migration doctor --all
+continuous-refactoring migration review <slug-or-path> --with codex --model gpt-5 --effort high
+continuous-refactoring migration refine <slug-or-path> --message "split the risky phase" --with codex --model gpt-5 --effort high
+continuous-refactoring migration refine <slug-or-path> --file feedback.md --with codex --model gpt-5 --effort high
+```
 
 ### Shared `run` / `run-once` flags
 
@@ -218,7 +240,7 @@ This tells the CLI where to store migration artifacts. The path is repo-relative
 Each `run` / `run-once` tick now checks for eligible migration work before falling back to single-commit cleanups:
 
 1. **Classify** — a classifier agent reads the target and decides: `cohesive-cleanup` (one-shot path) or `needs-plan` (migration path).
-2. **Plan** — for `needs-plan` targets, a six-stage planning workflow runs: generate approaches → pick best → expand into phases → review → revise → final review. Artifacts land under `<live-migrations-dir>/<migration-name>/`.
+2. **Plan** — for `needs-plan` targets, each automation action runs exactly one planning step: approaches, pick-best, expand, review, optional revise/review-2, then final-review. Accepted steps update `.planning/state.json`, store stdout under `.planning/stages/`, and publish through a staged transaction. Failed current-step output stays in run artifacts and is not resume input.
 3. **Execute** — each phase is a self-contained unit of work. The tick picks the oldest eligible migration, checks whether its current phase precondition is satisfied, and executes it on the current branch. Phase completion is judged against the phase file's `## Definition of Done`; commit message identifies the migration as `migration/<name>/<phase-file>.md`.
 
 ### Migration directory layout
@@ -227,13 +249,19 @@ Each `run` / `run-once` tick now checks for eligible migration work before falli
 <live-migrations-dir>/
   <migration-name>/
     manifest.json          # status, phases, wake-up schedule
+    .planning/
+      state.json           # durable planning cursor and accepted step refs
+      stages/              # accepted planning stdout, suffixed on repeats
     plan.md                # the expanded plan
     approaches/            # candidate approaches considered during planning
     phase-1-<name>.md      # per-phase specification
     phase-2-<name>.md
     ...
+  __transactions__/        # internal staged publish state
   __intentional_skips__/   # migrations rejected at final review
 ```
+
+Do not edit `.planning/` or `__transactions__/` by hand. Use `migration doctor` when the shape looks wrong.
 
 ### Wake-up rules
 
@@ -268,7 +296,7 @@ Before executing a phase, a ready-check agent verifies that the current phase pr
 
 - **ready: yes** — phase executes; on green tests, the phase is marked done, any prior deferral markers are cleared, and the migration advances immediately to the next phase.
 - **ready: no** — manifest activity is bumped, a retry cooldown is started, and a future `wake_up_on` is recorded when needed; the tick moves on.
-- **ready: unverifiable** — the migration is flagged `awaiting_human_review` and put on cooldown. Automated migration ticks skip flagged migrations until review clears the flag. Use `review list` to find it and `review perform <migration> --with ... --model ... --effort ...` to resolve it interactively.
+- **ready: unverifiable** — the migration is flagged `awaiting_human_review` and put on cooldown. Automated migration ticks skip flagged migrations until review clears the flag. Use `migration list --awaiting-review` to find it and `migration review <slug-or-path> --with ... --model ... --effort ...` to resolve it interactively.
 
 Human-facing migration references use the relative phase spec path, for example `phase-2-failure-report.md`. The manifest cursor stores the phase `name`, not a numeric index.
 

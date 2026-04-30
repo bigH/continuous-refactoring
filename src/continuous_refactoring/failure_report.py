@@ -243,6 +243,13 @@ def write(
 
 
 def _next_step_text(record: DecisionRecord) -> str:
+    planning_step = _planning_step(record)
+    if planning_step is not None:
+        return (
+            f"Rerun planning step `{planning_step}` from the last published "
+            ".planning/state.json; failed current-step output and partial "
+            "work are artifact evidence only, not resume input."
+        )
     if record.decision == "retry":
         focus = f" Focus: {record.next_retry_focus}" if record.next_retry_focus else ""
         return f"Retry the same target on the next attempt.{focus}"
@@ -251,6 +258,16 @@ def _next_step_text(record: DecisionRecord) -> str:
     if record.decision == "blocked":
         return "Pause for human review before attempting more automated work."
     return "Commit the validated result and continue normally."
+
+
+def _planning_step(record: DecisionRecord) -> str | None:
+    if record.failure_kind != "planning-step-failed":
+        return None
+    prefix = "planning."
+    if not record.call_role.startswith(prefix):
+        return None
+    step = record.call_role.removeprefix(prefix)
+    return step or None
 
 
 def effective_record(
@@ -342,16 +359,25 @@ def persist_decision(
         validation_command=validation_command,
         record=record,
     )
+    planning_step = _planning_step(record)
+    log_fields: dict[str, object] = {}
+    if planning_step is not None:
+        log_fields["planning_step"] = planning_step
     artifacts.log(
         "WARN",
         f"failure snapshot written: {reason_doc}",
-        event="failure_doc_written",
+        event=(
+            "planning_step_failure_doc_written"
+            if planning_step is not None
+            else "failure_doc_written"
+        ),
         attempt=attempt,
         retry=retry,
         target=record.target,
         call_role=record.call_role,
         phase_reached=record.phase_reached,
         reason_doc_path=str(reason_doc),
+        **log_fields,
     )
     _log_transition_from_record(
         artifacts,

@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 import continuous_refactoring
-from continuous_refactoring.artifacts import ContinuousRefactorError
+from continuous_refactoring.artifacts import CommandCapture, ContinuousRefactorError
 from continuous_refactoring.cli import build_parser
 from continuous_refactoring.decisions import DecisionRecord, RouteOutcome
 from continuous_refactoring.effort import EffortBudget
@@ -18,6 +18,13 @@ from continuous_refactoring.migrations import (
     load_manifest,
     migration_root,
     save_manifest,
+)
+from continuous_refactoring.planning_state import (
+    complete_planning_step,
+    new_planning_state,
+    planning_stage_stdout_path,
+    planning_state_path,
+    save_planning_state,
 )
 
 from conftest import make_run_loop_args
@@ -63,8 +70,73 @@ def _seed_manifest(
     )
     root = migration_root(live_dir, name)
     root.mkdir(parents=True, exist_ok=True)
+    (root / "plan.md").write_text("# Plan\n", encoding="utf-8")
+    for phase in phases:
+        phase_path = root / phase.file
+        phase_path.parent.mkdir(parents=True, exist_ok=True)
+        phase_path.write_text(f"# {phase.name}\n", encoding="utf-8")
     path = root / "manifest.json"
     save_manifest(manifest, path)
+    return path
+
+
+def _seed_planning_manifest(live_dir: Path, name: str) -> Path:
+    manifest = MigrationManifest(
+        name=name,
+        created_at=(_utc_now() - timedelta(days=2)).isoformat(timespec="milliseconds"),
+        last_touch=(_utc_now() - timedelta(days=1)).isoformat(timespec="milliseconds"),
+        wake_up_on=None,
+        awaiting_human_review=False,
+        status="planning",
+        current_phase="",
+        phases=(),
+    )
+    root = migration_root(live_dir, name)
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / "manifest.json"
+    save_manifest(manifest, path)
+    return path
+
+
+def _seed_planning_manifest_at_final_review(
+    repo_root: Path,
+    live_dir: Path,
+    name: str,
+) -> Path:
+    path = _seed_planning_manifest(live_dir, name)
+    root = path.parent
+    (root / "plan.md").write_text("# Plan\n", encoding="utf-8")
+    (root / _PHASE.file).write_text(
+        "## Precondition\n\nalways\n\n"
+        "## Definition of Done\n\nSetup is complete.\n",
+        encoding="utf-8",
+    )
+    manifest = load_manifest(path)
+    save_manifest(
+        replace(manifest, current_phase=_PHASE.name, phases=(_PHASE,)),
+        path,
+    )
+    state = new_planning_state(
+        f"Finish {name}",
+        now="2026-04-29T12:00:00.000+00:00",
+    )
+    for step, outcome, stdout in (
+        ("approaches", "completed", "Generated approaches.\n"),
+        ("pick-best", "completed", "Chose incremental.\n"),
+        ("expand", "completed", "Expanded.\n"),
+        ("review", "clear", "no findings\n"),
+    ):
+        stdout_path = planning_stage_stdout_path(root, step)
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text(stdout, encoding="utf-8")
+        state = complete_planning_step(
+            state,
+            step,
+            outcome,
+            {"stdout": stdout_path.relative_to(repo_root).as_posix()},
+            completed_at="2026-04-29T12:00:00.000+00:00",
+        )
+    save_planning_state(state, planning_state_path(root), repo_root=repo_root)
     return path
 
 
@@ -77,6 +149,31 @@ def _mark_done(path: Path) -> None:
         last_touch=_utc_now().isoformat(timespec="milliseconds"),
     )
     save_manifest(updated, path)
+
+
+def _prompt_migration_dir(prompt: str, repo_root: Path) -> Path:
+    for line in prompt.splitlines():
+        if line.startswith("Migration directory:"):
+            path = Path(line.split(":", 1)[1].strip())
+            return path if path.is_absolute() else repo_root / path
+    raise AssertionError("Migration directory missing from prompt")
+
+
+def _planning_agent_result(kwargs: dict[str, object], stdout: str) -> CommandCapture:
+    stdout_path = Path(str(kwargs["stdout_path"]))
+    stderr_path = Path(str(kwargs["stderr_path"]))
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    stdout_path.write_text(stdout, encoding="utf-8")
+    stderr_path.parent.mkdir(parents=True, exist_ok=True)
+    stderr_path.write_text("", encoding="utf-8")
+    return CommandCapture(
+        command=("fake",),
+        returncode=0,
+        stdout=stdout,
+        stderr="",
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+    )
 
 
 def _flag_for_review(path: Path) -> None:
@@ -98,6 +195,30 @@ def _commit_ok(target: str) -> DecisionRecord:
         phase_reached="phase.execute",
         failure_kind="none",
         summary="ok",
+    )
+
+
+def _planning_commit_ok(target: str) -> DecisionRecord:
+    return DecisionRecord(
+        decision="commit",
+        retry_recommendation="none",
+        target=target,
+        call_role="planning.approaches",
+        phase_reached="planning.approaches",
+        failure_kind="none",
+        summary="ok",
+    )
+
+
+def _planning_blocked(target: str) -> DecisionRecord:
+    return DecisionRecord(
+        decision="blocked",
+        retry_recommendation="human-review",
+        target=target,
+        call_role="planning.state",
+        phase_reached="planning.state",
+        failure_kind="planning-state-missing",
+        summary="missing planning state",
     )
 
 
@@ -451,6 +572,109 @@ def test_focused_loop_advances_multiple_ready_phases_until_deferred(
     captured = capsys.readouterr()
     assert "Migration tick deferred all eligible migrations: wait for follow-up" in captured.out
 
+def test_e2e_focused_run_completes_planning_before_phase_execution(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = run_loop_env / "migrations"
+    live_dir.mkdir()
+    planning_path = _seed_planning_manifest_at_final_review(
+        run_loop_env,
+        live_dir,
+        "mid-planning",
+    )
+    ready_path = _seed_manifest(live_dir, "ready-phase")
+    continuous_refactoring.run_command(["git", "add", "migrations"], cwd=run_loop_env)
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "seed focused migrations"],
+        cwd=run_loop_env,
+    )
+    _install_focused_loop_env(run_loop_env, monkeypatch, live_dir)
+    calls: list[str] = []
+
+    def final_review_agent(**kwargs: object) -> CommandCapture:
+        stage_label = Path(str(kwargs["stdout_path"])).parent.name
+        assert stage_label == "final-review"
+        migration_dir = _prompt_migration_dir(
+            str(kwargs["prompt"]),
+            Path(str(kwargs["repo_root"])),
+        )
+        assert migration_dir.name == "mid-planning"
+        calls.append("planning:final-review")
+        return _planning_agent_result(
+            kwargs,
+            "final-decision: approve-auto - ready\n",
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.planning.maybe_run_agent",
+        final_review_agent,
+    )
+
+    executed: list[str] = []
+
+    def fake_ready(
+        phase: PhaseSpec,
+        manifest: MigrationManifest,
+        *_args: object,
+        **_kwargs: object,
+    ) -> tuple[str, str]:
+        calls.append(f"ready:{manifest.name}")
+        if executed:
+            return ("no", "stop after first phase")
+        return ("yes", "ready")
+
+    def fake_execute(
+        phase: PhaseSpec,
+        manifest: MigrationManifest,
+        *_args: object,
+        **_kwargs: object,
+    ) -> object:
+        calls.append(f"execute:{manifest.name}")
+        executed.append(manifest.name)
+        manifest_path = live_dir / manifest.name / "manifest.json"
+        _mark_done(manifest_path)
+        from continuous_refactoring.phases import ExecutePhaseOutcome
+
+        return ExecutePhaseOutcome(status="done", reason="ok")
+
+    monkeypatch.setattr("continuous_refactoring.migration_tick.check_phase_ready", fake_ready)
+    monkeypatch.setattr("continuous_refactoring.migration_tick.execute_phase", fake_execute)
+
+    args = make_run_loop_args(run_loop_env, focus_on_live_migrations=True)
+    assert continuous_refactoring.run_migrations_focused_loop(args) == 0
+    assert calls[0] == "planning:final-review"
+    assert len(executed) == 1
+    assert calls.index(f"execute:{executed[0]}") > calls.index("planning:final-review")
+    assert load_manifest(planning_path).status in {"ready", "done"}
+    assert load_manifest(ready_path).status in {"ready", "done"}
+
+
+def test_focused_loop_stops_when_only_blocked_planning_remains(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = tmp_path / "live-migrations"
+    live_dir.mkdir()
+    _seed_planning_manifest(live_dir, "blocked-planning")
+    _install_focused_loop_env(run_loop_env, monkeypatch, live_dir)
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_planning_tick",
+        lambda *_args, **_kwargs: ("blocked", _planning_blocked("blocked-planning")),
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_migration_tick",
+        lambda *_args, **_kwargs: pytest.fail("blocked planning must stop phase tick"),
+    )
+
+    args = make_run_loop_args(
+        run_loop_env,
+        focus_on_live_migrations=True,
+        max_consecutive_failures=1,
+    )
+    with pytest.raises(ContinuousRefactorError, match="1 consecutive failures"):
+        continuous_refactoring.run_migrations_focused_loop(args)
 
 
 def test_focused_loop_terminates_when_only_awaiting_human_review_remains(

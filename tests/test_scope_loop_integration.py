@@ -224,15 +224,21 @@ def test_needs_plan_receives_expanded_scope_context(
         lambda *_args, **_kwargs: "needs-plan",
     )
 
-    class StubPlanningOutcome:
-        status = "ready"
+    class StubPlanningStepResult:
+        status = "published"
+        step = "approaches"
+        next_step = "pick-best"
+        terminal_outcome = None
         reason = "stub"
 
-    def fake_run_planning(*_args: object, **kwargs: object) -> StubPlanningOutcome:
+    def fake_run_next_planning_step(*_args: object, **kwargs: object) -> StubPlanningStepResult:
         captured["extra_context"] = str(kwargs["extra_context"])
-        return StubPlanningOutcome()
+        return StubPlanningStepResult()
 
-    monkeypatch.setattr("continuous_refactoring.routing_pipeline.run_planning", fake_run_planning)
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.run_next_planning_step",
+        fake_run_next_planning_step,
+    )
 
     result = _invoke_route_and_run(
         repo_root,
@@ -288,7 +294,7 @@ def test_planning_failure_uses_stage_label_in_abandon_record(
         lambda *_args, **_kwargs: "needs-plan",
     )
     monkeypatch.setattr(
-        "continuous_refactoring.routing_pipeline.run_planning",
+        "continuous_refactoring.routing_pipeline.run_next_planning_step",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             ContinuousRefactorError(
                 "planning.review-2 failed: revised plan still has findings"

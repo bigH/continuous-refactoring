@@ -168,6 +168,9 @@ def _seed_live_manifest(live_dir: Path, name: str = "auto-migration") -> None:
     )
     migration_dir = live_dir / name
     migration_dir.mkdir(parents=True, exist_ok=True)
+    (migration_dir / "plan.md").write_text("# Plan\n", encoding="utf-8")
+    for phase in manifest.phases:
+        (migration_dir / phase.file).write_text(f"# {phase.name}\n", encoding="utf-8")
     save_manifest(manifest, migration_dir / "manifest.json")
 
 

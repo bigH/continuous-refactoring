@@ -9,6 +9,8 @@ Small, test-gated cleanup commits by an AI coding agent.
 
 Think of it as a supervised janitor loop: the agent proposes a cleanup, your tests decide if it stays.
 
+Here's [an article](https://artisincode.com/essays/how-i-use-unspent-tokens/) I wrote about it.
+
 ## Install
 
 Try it without installing:

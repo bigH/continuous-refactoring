@@ -13,6 +13,8 @@ import pytest
 
 import continuous_refactoring
 import continuous_refactoring.loop
+import continuous_refactoring.refactor_attempts
+import continuous_refactoring.targeting
 from continuous_refactoring.artifacts import CommandCapture
 from continuous_refactoring.config import (
     ProjectEntry,
@@ -95,6 +97,10 @@ def assert_single_run_final_status(repo_root: Path, expected_status: str) -> Non
     assert summary["final_status"] == expected_status
 
 
+def fail_if_taste_agent_runs(*_args: object, **_kwargs: object) -> int:
+    pytest.fail("taste agent should not be invoked")
+
+
 def make_taste_agent_writer(
     *,
     content: str | None = None,
@@ -157,6 +163,28 @@ class RegisteredProjectLayout:
     entry: ProjectEntry
     project_dir: Path
     taste_path: Path
+
+
+def write_targets_file(
+    tmp_path: Path,
+    *,
+    count: int | None = None,
+    targets: list[dict[str, object]] | None = None,
+) -> Path:
+    if (count is None) == (targets is None):
+        raise AssertionError("provide exactly one of count or targets")
+    if targets is None:
+        assert count is not None
+        targets = [
+            {"description": f"target-{index}", "files": [f"file{index}.py"]}
+            for index in range(count)
+        ]
+    targets_file = tmp_path / "targets.jsonl"
+    targets_file.write_text(
+        "\n".join(json.dumps(target) for target in targets),
+        encoding="utf-8",
+    )
+    return targets_file
 
 
 def init_repo(path: Path) -> None:
@@ -339,6 +367,23 @@ def failing_tests(
         stdout_path=stdout_path,
         stderr_path=stderr_path,
     )
+
+
+def install_run_command_spy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[str, ...]]:
+    captured: list[tuple[str, ...]] = []
+    real_run_command = continuous_refactoring.run_command
+
+    def spy(command, cwd, *args, **kwargs):  # type: ignore[no-untyped-def]
+        captured.append(tuple(command))
+        return real_run_command(command, cwd, *args, **kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.git.run_command", spy)
+    monkeypatch.setattr("continuous_refactoring.loop.run_command", spy)
+    monkeypatch.setattr("continuous_refactoring.refactor_attempts.run_command", spy)
+    monkeypatch.setattr("continuous_refactoring.targeting.run_command", spy)
+    return captured
 
 
 def _default_validation_command(repo_root: Path) -> str:

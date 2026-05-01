@@ -7,6 +7,7 @@ import uuid
 from collections.abc import Callable
 from importlib.metadata import version as metadata_version
 from pathlib import Path
+from typing import Literal
 
 __all__ = [
     "build_parser",
@@ -29,13 +30,20 @@ from continuous_refactoring.loop import (
     run_migrations_focused_loop,
     run_once,
 )
+from continuous_refactoring.migration_cli import handle_migration
+from continuous_refactoring.migrations import MIGRATION_STATUSES
 from continuous_refactoring.review_cli import handle_review
 
+_PACKAGE_DISTRIBUTION = "continuous-refactoring"
 _TASTE_WARNING = "warning: taste out of date — run `continuous-refactoring taste --upgrade`"
 _GLOBAL_TASTE_WARNING = (
     "warning: global taste is out of date — "
     "run 'continuous-refactoring taste --upgrade' to update."
 )
+
+
+def _version_banner() -> str:
+    return f"{_PACKAGE_DISTRIBUTION} {metadata_version(_PACKAGE_DISTRIBUTION)}"
 
 
 def parse_max_attempts(value: str) -> int:
@@ -271,6 +279,81 @@ def _add_review_parser(subparsers: argparse._SubParsersAction) -> None:
     perform_parser.add_argument("--effort", required=True, help="Effort level.")
 
 
+def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
+    migration_parser = subparsers.add_parser(
+        "migration",
+        help="Inspect live migrations.",
+    )
+    migration_parser.set_defaults(handler=handle_migration)
+    migration_sub = migration_parser.add_subparsers(dest="migration_command")
+
+    list_parser = migration_sub.add_parser(
+        "list",
+        help="List visible migrations.",
+    )
+    list_parser.add_argument(
+        "--status",
+        choices=MIGRATION_STATUSES,
+        default=None,
+        help="Only show migrations with this status.",
+    )
+    list_parser.add_argument(
+        "--awaiting-review",
+        action="store_true",
+        help="Only show migrations awaiting human review.",
+    )
+
+    doctor_parser = migration_sub.add_parser(
+        "doctor",
+        help="Validate migration consistency.",
+    )
+    doctor_parser.add_argument(
+        "target",
+        nargs="?",
+        help="Migration slug or contained path.",
+    )
+    doctor_parser.add_argument(
+        "--all",
+        action="store_true",
+        help="Validate every visible migration and transaction state.",
+    )
+
+    review_parser = migration_sub.add_parser(
+        "review",
+        help="Perform staged review on a flagged migration.",
+    )
+    review_parser.add_argument("target", help="Migration slug or contained path.")
+    review_parser.add_argument(
+        "--with", dest="agent", choices=("codex", "claude"), required=True,
+        help="Agent backend.",
+    )
+    review_parser.add_argument("--model", required=True, help="Model name.")
+    review_parser.add_argument(
+        "--effort", choices=EFFORT_TIERS, required=True, help="Effort level."
+    )
+
+    refine_parser = migration_sub.add_parser(
+        "refine",
+        help="Refine a planning migration with user feedback.",
+    )
+    refine_parser.add_argument("target", help="Migration slug or contained path.")
+    feedback_group = refine_parser.add_mutually_exclusive_group(required=True)
+    feedback_group.add_argument("--message", help="Refinement feedback text.")
+    feedback_group.add_argument(
+        "--file",
+        type=Path,
+        help="Path to a UTF-8 file containing refinement feedback.",
+    )
+    refine_parser.add_argument(
+        "--with", dest="agent", choices=("codex", "claude"), required=True,
+        help="Agent backend.",
+    )
+    refine_parser.add_argument("--model", required=True, help="Model name.")
+    refine_parser.add_argument(
+        "--effort", choices=EFFORT_TIERS, required=True, help="Effort level."
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Continuous refactoring CLI for AI coding agents.",
@@ -278,7 +361,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--version",
         action="version",
-        version=f"continuous-refactoring {metadata_version('continuous-refactoring')}",
+        version=_version_banner(),
     )
     subparsers = parser.add_subparsers(dest="command")
 
@@ -291,6 +374,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Verify and upgrade global configuration.",
     )
     upgrade_parser.set_defaults(handler=_handle_upgrade)
+    _add_migration_parser(subparsers)
     _add_review_parser(subparsers)
 
     return parser
@@ -318,36 +402,20 @@ def _handle_init(args: argparse.Namespace) -> None:
 
     try:
         if in_repo_taste_arg is not None:
-            repo_taste_resolved = (path / in_repo_taste_arg).resolve()
-            if not repo_taste_resolved.is_relative_to(path):
-                print(
-                    f"Error: --in-repo-taste must be inside the repo: {in_repo_taste_arg}",
-                    file=sys.stderr,
-                )
-                raise SystemExit(2)
-            if repo_taste_resolved.exists() and not repo_taste_resolved.is_file():
-                print(
-                    f"Error: --in-repo-taste must point to a file: {in_repo_taste_arg}",
-                    file=sys.stderr,
-                )
-                raise SystemExit(2)
-            repo_taste_relative = str(repo_taste_resolved.relative_to(path))
+            repo_taste_resolved, repo_taste_relative = _resolve_repo_relative_arg(
+                repo_root=path,
+                value=in_repo_taste_arg,
+                flag="--in-repo-taste",
+                expected_kind="file",
+            )
 
         if live_dir_arg is not None:
-            resolved_live = (path / live_dir_arg).resolve()
-            if not resolved_live.is_relative_to(path):
-                print(
-                    f"Error: --live-migrations-dir must be inside the repo: {live_dir_arg}",
-                    file=sys.stderr,
-                )
-                raise SystemExit(2)
-            if resolved_live.exists() and not resolved_live.is_dir():
-                print(
-                    f"Error: --live-migrations-dir must point to a directory: {live_dir_arg}",
-                    file=sys.stderr,
-                )
-                raise SystemExit(2)
-            live_dir_relative = str(resolved_live.relative_to(path))
+            resolved_live, live_dir_relative = _resolve_repo_relative_arg(
+                repo_root=path,
+                value=live_dir_arg,
+                flag="--live-migrations-dir",
+                expected_kind="directory",
+            )
 
         project = register_project(path)
         if repo_taste_relative is not None:
@@ -384,6 +452,36 @@ def _handle_init(args: argparse.Namespace) -> None:
     if live_dir_arg is not None:
         assert resolved_live is not None
         print(f"Live migrations dir: {resolved_live}")
+
+
+def _resolve_repo_relative_arg(
+    *,
+    repo_root: Path,
+    value: Path,
+    flag: str,
+    expected_kind: Literal["file", "directory"],
+) -> tuple[Path, str]:
+    resolved = (repo_root / value).resolve()
+    if not resolved.is_relative_to(repo_root):
+        print(
+            f"Error: {flag} must be inside the repo: {value}",
+            file=sys.stderr,
+        )
+        raise SystemExit(2)
+    if resolved.exists():
+        if expected_kind == "file" and not resolved.is_file():
+            print(
+                f"Error: {flag} must point to a file: {value}",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+        if expected_kind == "directory" and not resolved.is_dir():
+            print(
+                f"Error: {flag} must point to a directory: {value}",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
+    return resolved, str(resolved.relative_to(repo_root))
 
 
 def _configure_repo_taste(

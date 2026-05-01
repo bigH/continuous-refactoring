@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from conftest import (
     extract_settle_path,
+    fail_if_taste_agent_runs,
     init_repo,
     init_repo_with_temp_home,
     init_taste_project,
@@ -41,11 +42,6 @@ def _interview_args(
         model=model,
         effort=effort,
     )
-
-
-def _fail_if_taste_agent_runs(**_: object) -> int:
-    pytest.fail("taste agent should not be invoked")
-
 
 # ---------------------------------------------------------------------------
 # Flag validation
@@ -173,7 +169,7 @@ def test_interview_refuses_overwrite_without_force(
     taste_path = init_taste_project(tmp_path, monkeypatch)
     taste_path.write_text("- pre-existing custom\n", encoding="utf-8")
 
-    monkeypatch.setattr(_AGENT_RUNNER_PATH, _fail_if_taste_agent_runs)
+    monkeypatch.setattr(_AGENT_RUNNER_PATH, fail_if_taste_agent_runs)
     with pytest.raises(SystemExit) as exc_info:
         _handle_taste(_interview_args())
 
@@ -294,6 +290,11 @@ def test_interview_prompt_includes_existing_content(
     assert existing.strip() in prompt
     assert "Taste settle target" in prompt
     assert extract_settle_path(prompt) == taste_path.with_name("taste.md.done")
+
+
+def test_fail_if_taste_agent_runs_matches_real_runner_signature() -> None:
+    with pytest.raises(pytest.fail.Exception):
+        fail_if_taste_agent_runs("codex", "m", "high", "prompt", Path.cwd())
 
 
 # ---------------------------------------------------------------------------

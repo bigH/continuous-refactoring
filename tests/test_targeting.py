@@ -309,6 +309,20 @@ def test_validate_target_line_warns_for_each_invalid_optional_field(capsys) -> N
         assert f"non-string or empty {key}" in captured.err
 
 
+def test_validate_target_line_warns_for_invalid_effort_override_tier(capsys) -> None:
+    target = validate_target_line(
+        {
+            "description": "good",
+            "files": ["src/**/*.py"],
+            "effort-override": "extreme",
+        },
+    )
+
+    assert target is None
+    captured = capsys.readouterr()
+    assert "invalid effort-override" in captured.err
+
+
 def test_load_targets_jsonl_skips_invalid_optional_fields(tmp_path: Path, capsys) -> None:
     jsonl = tmp_path / "targets.jsonl"
     lines = [

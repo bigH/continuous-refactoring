@@ -224,6 +224,40 @@ def test_classify_nonzero_exit_raises(
         )
 
 
+def test_classify_nonzero_exit_logs_failed_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_tmpdir(tmp_path, monkeypatch)
+    artifacts = _make_artifacts(tmp_path)
+
+    with pytest.raises(ContinuousRefactorError, match="exit code 1"):
+        _run_with_fake_agent(
+            tmp_path,
+            monkeypatch,
+            "decision: cohesive-cleanup\n",
+            returncode=1,
+            artifacts=artifacts,
+        )
+
+    event = _call_finished_events(artifacts)[-1]
+    timestamp = event.pop("timestamp")
+
+    assert isinstance(timestamp, str)
+    assert event == {
+        "attempt": 1,
+        "call_role": "classify",
+        "call_status": "failed",
+        "event": "call_finished",
+        "level": "WARN",
+        "message": "call failed: classify \u2014 Clean up auth module",
+        "phase_reached": "classify",
+        "retry": 1,
+        "returncode": 1,
+        "summary": "codex exited with code 1",
+        "target": "Clean up auth module",
+    }
+
+
 def test_classify_preserves_wrapped_agent_failure(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

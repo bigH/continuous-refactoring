@@ -50,7 +50,7 @@ from continuous_refactoring.effort import (
     EffortBudget,
     EffortResolution,
     resolve_effort_budget,
-    resolve_requested_effort,
+    resolve_target_effort_budget,
 )
 from continuous_refactoring.failure_report import effective_record, persist_decision
 from continuous_refactoring.git import (
@@ -123,30 +123,6 @@ def _effort_budget_from_args(args: argparse.Namespace) -> EffortBudget:
     default_effort = getattr(args, "default_effort", getattr(args, "effort", None))
     max_allowed_effort = getattr(args, "max_allowed_effort", None)
     return resolve_effort_budget(default_effort, max_allowed_effort)
-
-
-def _target_effort_budget(
-    budget: EffortBudget,
-    target: Target,
-) -> tuple[EffortBudget, EffortResolution]:
-    has_override = target.effort_override is not None
-    resolution = resolve_requested_effort(
-        budget,
-        target.effort_override,
-        source="target-override" if has_override else "default",
-        reason=(
-            "target effort override capped by run budget"
-            if has_override
-            else "run default effort"
-        ),
-    )
-    return (
-        EffortBudget(
-            default_effort=resolution.effective_effort,
-            max_allowed_effort=budget.max_allowed_effort,
-        ),
-        resolution,
-    )
 
 
 def _log_effort_budget(artifacts: RunArtifacts, budget: EffortBudget) -> None:
@@ -248,9 +224,31 @@ def _action_banner(action_index: int, action_limit: int | None) -> str:
 
 
 def _print_migration_probe(live_dir: Path, effort_budget: EffortBudget) -> None:
+    preflight = migration_tick._first_unloadable_visible_manifest(live_dir)
+    if preflight is not None:
+        migration_dir, _findings = preflight
+        print(f"Examining migration: migration/{migration_dir.name}")
+        return
+
+    now = datetime.now(timezone.utc)
+    planning_candidates = migration_tick.enumerate_eligible_planning_manifests(
+        live_dir,
+        now,
+    )
+    if planning_candidates:
+        if len(planning_candidates) > 1:
+            print(
+                f"Examining planning migrations: "
+                f"{len(planning_candidates)} eligible"
+            )
+            return
+        manifest, _manifest_path = planning_candidates[0]
+        print(f"Examining planning migration: migration/{manifest.name}")
+        return
+
     candidates = migration_tick.enumerate_eligible_manifests(
         live_dir,
-        datetime.now(timezone.utc),
+        now,
         effort_budget,
     )
     if not candidates:
@@ -268,6 +266,7 @@ def _print_migration_probe(live_dir: Path, effort_budget: EffortBudget) -> None:
 class _MigrationProbeArtifacts:
     def __init__(self, artifacts: RunArtifacts, action_index: int) -> None:
         self._artifacts = artifacts
+        self.run_id = artifacts.run_id
         self.root = artifacts.root / "migration-probes" / f"action-{action_index:03d}"
 
     def attempt_dir(self, attempt: int, retry: int = 1) -> Path:
@@ -382,9 +381,9 @@ def run_once(args: argparse.Namespace) -> int:
 
     base_prompt = _resolve_base_prompt(args)
     model = target.model_override or args.model
-    target_effort_budget, effort_resolution = _target_effort_budget(
+    target_effort_budget, effort_resolution = resolve_target_effort_budget(
         base_effort_budget,
-        target,
+        target.effort_override,
     )
     effort = target_effort_budget.default_effort
 
@@ -450,6 +449,15 @@ def run_once(args: argparse.Namespace) -> int:
             final_status = "completed"
             return 0
         if route_result.outcome in {"abandon", "blocked"}:
+            if route_result.decision_record is not None:
+                persist_decision(
+                    repo_root,
+                    artifacts,
+                    attempt=1,
+                    retry=route_result.decision_record.retry_used,
+                    validation_command=args.validation_command,
+                    record=route_result.decision_record,
+                )
             final_status = "migration_failed"
             raise ContinuousRefactorError(
                 route_result.decision_record.summary
@@ -674,6 +682,58 @@ def run_loop(args: argparse.Namespace) -> int:
             if live_dir is not None:
                 _print_migration_probe(live_dir, base_effort_budget)
                 migration_artifacts = _MigrationProbeArtifacts(artifacts, action_index)
+                planning_outcome, planning_record = migration_tick.try_planning_tick(
+                    live_dir,
+                    taste,
+                    repo_root,
+                    migration_artifacts,
+                    agent=args.agent,
+                    model=args.model,
+                    effort=base_effort_budget.default_effort,
+                    effort_budget=base_effort_budget,
+                    timeout=timeout,
+                    commit_message_prefix=args.commit_message_prefix,
+                    attempt=action_index,
+                    finalize_commit=_finalize_commit,
+                )
+
+                if planning_outcome in {"commit", "abandon", "blocked"}:
+                    artifacts.mark_attempt_started(action_index)
+                    if planning_record is not None:
+                        persist_decision(
+                            repo_root,
+                            artifacts,
+                            attempt=action_index,
+                            retry=planning_record.retry_used,
+                            validation_command=args.validation_command,
+                            record=planning_record,
+                        )
+                    actions_completed += 1
+                    if planning_outcome == "commit":
+                        consecutive_failures = 0
+                    else:
+                        if planning_record is not None:
+                            print(
+                                "Planning blocked: "
+                                f"{planning_record.target} — {planning_record.summary}"
+                            )
+                        consecutive_failures += 1
+                        if consecutive_failures >= max_consecutive:
+                            final_status = "max_consecutive_failures"
+                            raise ContinuousRefactorError(
+                                f"Stopping: {max_consecutive} consecutive failures"
+                            )
+                    _sleep_between_actions(
+                        sleep_seconds,
+                        artifacts=artifacts,
+                        action_index=action_index,
+                        has_more_actions=(
+                            source_index < len(targets)
+                            and _has_action_budget(actions_completed, action_limit)
+                        ),
+                    )
+                    continue
+
                 migration_outcome, migration_record = migration_tick.try_migration_tick(
                     live_dir,
                     taste,
@@ -745,9 +805,9 @@ def run_loop(args: argparse.Namespace) -> int:
             source_index += 1
             artifacts.mark_attempt_started(action_index)
             model = target.model_override or args.model
-            target_effort_budget, effort_resolution = _target_effort_budget(
+            target_effort_budget, effort_resolution = resolve_target_effort_budget(
                 base_effort_budget,
-                target,
+                target.effort_override,
             )
             effort = target_effort_budget.default_effort
             effort_metadata = effort_resolution.event_fields()
@@ -951,6 +1011,28 @@ def _focus_eligible_manifests(
     ]
 
 
+def _focus_eligible_planning_manifests(
+    live_dir: Path, now: datetime,
+) -> list[tuple[MigrationManifest, Path]]:
+    return [
+        pair for pair in migration_tick.enumerate_eligible_planning_manifests(
+            live_dir,
+            now,
+        )
+        if not pair[0].awaiting_human_review
+    ]
+
+
+def _eligible_planning_path_labels(
+    repo_root: Path,
+    candidates: list[tuple[MigrationManifest, Path]],
+) -> tuple[str, ...]:
+    return tuple(
+        _repo_relative_path(repo_root, manifest_path.parent)
+        for _manifest, manifest_path in candidates
+    )
+
+
 def _eligible_phase_path_labels(
     repo_root: Path,
     candidates: list[tuple[MigrationManifest, Path]],
@@ -1037,8 +1119,18 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
 
         while True:
             now = datetime.now(timezone.utc)
-            eligible = _focus_eligible_manifests(live_dir, now, base_effort_budget)
-            if not eligible:
+            preflight = migration_tick._first_unloadable_visible_manifest(live_dir)
+            planning_eligible = (
+                []
+                if preflight is not None
+                else _focus_eligible_planning_manifests(live_dir, now)
+            )
+            phase_eligible = (
+                []
+                if preflight is not None or planning_eligible
+                else _focus_eligible_manifests(live_dir, now, base_effort_budget)
+            )
+            if not planning_eligible and not phase_eligible and preflight is None:
                 print(
                     "Focused migrations loop: nothing eligible — "
                     "every migration is done or blocked."
@@ -1053,25 +1145,53 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
 
             iteration += 1
             artifacts.mark_attempt_started(iteration)
-            names = ", ".join(_eligible_phase_path_labels(repo_root, eligible))
+            names = (
+                f"{preflight[0].name}/manifest.json"
+                if preflight is not None
+                else (
+                    ", ".join(
+                        _eligible_planning_path_labels(repo_root, planning_eligible)
+                    )
+                    if planning_eligible
+                    else ", ".join(
+                        _eligible_phase_path_labels(repo_root, phase_eligible)
+                    )
+                )
+            )
             print(f"\n── Migration tick {iteration} (eligible: {names}) ──")
 
-            outcome, record = migration_tick.try_migration_tick(
-                live_dir,
-                taste,
-                repo_root,
-                artifacts,
-                agent=args.agent,
-                model=args.model,
-                effort=base_effort_budget.default_effort,
-                effort_budget=base_effort_budget,
-                timeout=timeout,
-                commit_message_prefix=args.commit_message_prefix,
-                validation_command=args.validation_command,
-                max_attempts=max_attempts_effective,
-                attempt=iteration,
-                finalize_commit=_finalize_commit,
-            )
+            if planning_eligible:
+                outcome, record = migration_tick.try_planning_tick(
+                    live_dir,
+                    taste,
+                    repo_root,
+                    artifacts,
+                    agent=args.agent,
+                    model=args.model,
+                    effort=base_effort_budget.default_effort,
+                    effort_budget=base_effort_budget,
+                    timeout=timeout,
+                    commit_message_prefix=args.commit_message_prefix,
+                    attempt=iteration,
+                    finalize_commit=_finalize_commit,
+                )
+            else:
+                outcome, record = migration_tick.try_migration_tick(
+                    live_dir,
+                    taste,
+                    repo_root,
+                    artifacts,
+                    agent=args.agent,
+                    model=args.model,
+                    effort=base_effort_budget.default_effort,
+                    effort_budget=base_effort_budget,
+                    timeout=timeout,
+                    commit_message_prefix=args.commit_message_prefix,
+                    validation_command=args.validation_command,
+                    max_attempts=max_attempts_effective,
+                    attempt=iteration,
+                    finalize_commit=_finalize_commit,
+                )
 
             if record is not None and outcome != "not-routed":
                 persist_decision(

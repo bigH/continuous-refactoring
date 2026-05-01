@@ -12,7 +12,6 @@ if TYPE_CHECKING:
 import continuous_refactoring
 import continuous_refactoring.loop
 from continuous_refactoring.artifacts import (
-    CommandCapture,
     ContinuousRefactorError,
     create_run_artifacts,
 )
@@ -27,16 +26,22 @@ from continuous_refactoring.migrations import (
     migration_root,
     save_manifest,
 )
+from continuous_refactoring.planning import PlanningStepResult
+from continuous_refactoring.planning_state import (
+    new_planning_state,
+    planning_state_path,
+    save_planning_state,
+)
 from continuous_refactoring.phases import ExecutePhaseOutcome
 from continuous_refactoring.migration_tick import (
     enumerate_eligible_manifests,
+    enumerate_eligible_planning_manifests,
+    try_planning_tick,
     try_migration_tick,
 )
 
 from conftest import (
     make_run_once_args,
-    noop_agent,
-    noop_tests,
     patch_classifier_trap,
 )
 
@@ -93,8 +98,84 @@ def _make_manifest(
 def _save(manifest: MigrationManifest, live_dir: Path) -> Path:
     root = migration_root(live_dir, manifest.name)
     root.mkdir(parents=True, exist_ok=True)
+    if manifest.status in ("ready", "in-progress"):
+        plan_path = root / "plan.md"
+        if not plan_path.exists():
+            plan_path.write_text("# Plan\n", encoding="utf-8")
+    for phase in manifest.phases:
+        phase_path = root / phase.file
+        if not phase_path.exists():
+            phase_path.parent.mkdir(parents=True, exist_ok=True)
+            phase_path.write_text(f"# {phase.name}\n", encoding="utf-8")
     path = root / "manifest.json"
     save_manifest(manifest, path)
+    return path
+
+
+def _make_planning_manifest(
+    name: str,
+    *,
+    last_touch: datetime,
+    created_at: datetime | None = None,
+    awaiting_human_review: bool = False,
+    human_review_reason: str | None = None,
+    cooldown_until: datetime | None = None,
+) -> MigrationManifest:
+    ts = (created_at or _utc_now()).isoformat(timespec="milliseconds")
+    return MigrationManifest(
+        name=name,
+        created_at=ts,
+        last_touch=last_touch.isoformat(timespec="milliseconds"),
+        wake_up_on=None,
+        awaiting_human_review=awaiting_human_review,
+        status="planning",
+        current_phase="",
+        phases=(),
+        human_review_reason=human_review_reason,
+        cooldown_until=(
+            cooldown_until.isoformat(timespec="milliseconds")
+            if cooldown_until is not None
+            else None
+        ),
+    )
+
+
+def _save_planning(
+    live_dir: Path,
+    repo_root: Path,
+    name: str,
+    *,
+    last_touch: datetime,
+    created_at: datetime | None = None,
+    awaiting_human_review: bool = False,
+    cooldown_until: datetime | None = None,
+    state: str = "valid",
+) -> Path:
+    manifest = _make_planning_manifest(
+        name,
+        last_touch=last_touch,
+        created_at=created_at,
+        awaiting_human_review=awaiting_human_review,
+        human_review_reason="needs review" if awaiting_human_review else None,
+        cooldown_until=cooldown_until,
+    )
+    root = migration_root(live_dir, manifest.name)
+    root.mkdir(parents=True, exist_ok=True)
+    path = root / "manifest.json"
+    save_manifest(manifest, path)
+    if state == "valid":
+        save_planning_state(
+            new_planning_state(f"Target {name}", now=manifest.created_at),
+            planning_state_path(root),
+            repo_root=repo_root,
+            published_migration_root=root,
+        )
+    elif state == "invalid":
+        state_path = planning_state_path(root)
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text("{not json", encoding="utf-8")
+    elif state != "missing":
+        raise AssertionError(f"unknown state fixture: {state}")
     return path
 
 
@@ -215,18 +296,6 @@ def _patch_execute_phase_trap(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("continuous_refactoring.migration_tick.execute_phase", trap)
 
 
-def _patch_one_shot(monkeypatch: pytest.MonkeyPatch) -> list[str]:
-    prompts: list[str] = []
-
-    def capture(**kwargs: object) -> CommandCapture:
-        prompts.append(str(kwargs.get("prompt", "")))
-        return noop_agent(**kwargs)
-
-    monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", capture)
-    monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
-    return prompts
-
-
 def _tick(
     live_dir: Path,
     repo_root: Path,
@@ -264,6 +333,40 @@ def _tick(
         attempt=attempt,
         finalize_commit=finalize_commit or noop_finalize,
         effort_budget=effort_budget,
+    )
+
+
+def _planning_tick(
+    live_dir: Path,
+    repo_root: Path,
+    *,
+    taste: str = "runtime taste",
+    attempt: int = 7,
+    finalize_commit: Callable[..., object] | None = None,
+) -> tuple[RouteOutcome, DecisionRecord | None]:
+    artifacts = create_run_artifacts(
+        repo_root=repo_root,
+        agent="codex",
+        model="fake-model",
+        effort="xhigh",
+        test_command="uv run pytest",
+    )
+
+    def noop_finalize(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    return try_planning_tick(
+        live_dir,
+        taste,
+        repo_root,
+        artifacts,
+        agent="codex",
+        model="fake-model",
+        effort="xhigh",
+        timeout=123,
+        commit_message_prefix="continuous refactor",
+        attempt=attempt,
+        finalize_commit=finalize_commit or noop_finalize,
     )
 
 
@@ -322,6 +425,330 @@ def test_enumerate_eligible_manifests_ignores_noise_and_sorts_by_created_at(
 
     assert [manifest.name for manifest, _ in candidates] == ["older", "newer"]
     assert [path.parent.name for _, path in candidates] == ["older", "newer"]
+
+
+def test_enumeration_uses_visible_migration_dirs(tmp_path: Path) -> None:
+    live_dir = tmp_path / "live"
+    live_dir.mkdir()
+    now = _utc_now()
+
+    _save(
+        _make_manifest(".hidden", last_touch=now - timedelta(days=1)),
+        live_dir,
+    )
+    _save(
+        _make_manifest("__transactions__", last_touch=now - timedelta(days=1)),
+        live_dir,
+    )
+    _save(
+        _make_manifest(
+            "visible",
+            last_touch=now - timedelta(days=1),
+            created_at=now - timedelta(hours=1),
+        ),
+        live_dir,
+    )
+
+    candidates = enumerate_eligible_manifests(live_dir, now)
+
+    assert [manifest.name for manifest, _ in candidates] == ["visible"]
+    assert [path.parent.name for _, path in candidates] == ["visible"]
+
+
+def test_enumerate_eligible_manifests_includes_cooling_effort_candidate_once(
+    tmp_path: Path,
+) -> None:
+    live_dir = tmp_path / "live"
+    live_dir.mkdir()
+    now = _utc_now()
+    over_budget_phase = replace(_PHASE_0, required_effort="xhigh")
+
+    _save(
+        replace(
+            _make_manifest(
+                "cooling-over-budget",
+                last_touch=now - timedelta(days=1),
+                created_at=now - timedelta(hours=2),
+                phases=(over_budget_phase, _PHASE_1),
+            ),
+            cooldown_until=(now + timedelta(hours=1)).isoformat(timespec="milliseconds"),
+        ),
+        live_dir,
+    )
+    _save(
+        _make_manifest(
+            "ready-now",
+            last_touch=now - timedelta(days=1),
+            created_at=now - timedelta(hours=1),
+        ),
+        live_dir,
+    )
+
+    candidates = enumerate_eligible_manifests(
+        live_dir,
+        now,
+        EffortBudget(default_effort="high", max_allowed_effort="xhigh"),
+    )
+
+    assert [manifest.name for manifest, _ in candidates] == [
+        "cooling-over-budget",
+        "ready-now",
+    ]
+
+
+def test_enumerate_eligible_planning_manifests_includes_planning_migrations(
+    run_once_env: Path,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    now = _utc_now()
+    _save_planning(
+        live_dir,
+        run_once_env,
+        "newer-plan",
+        last_touch=now - timedelta(days=1),
+        created_at=now - timedelta(hours=1),
+    )
+    _save_planning(
+        live_dir,
+        run_once_env,
+        "older-plan",
+        last_touch=now - timedelta(days=1),
+        created_at=now - timedelta(hours=2),
+    )
+    _save_planning(
+        live_dir,
+        run_once_env,
+        "needs-review",
+        last_touch=now - timedelta(days=1),
+        created_at=now - timedelta(hours=3),
+        awaiting_human_review=True,
+    )
+    _save_planning(
+        live_dir,
+        run_once_env,
+        "cooling",
+        last_touch=now - timedelta(days=1),
+        created_at=now - timedelta(hours=4),
+        cooldown_until=now + timedelta(hours=1),
+    )
+    _save(
+        _make_manifest(
+            "ready-now",
+            last_touch=now - timedelta(days=1),
+            created_at=now - timedelta(hours=5),
+        ),
+        live_dir,
+    )
+
+    candidates = enumerate_eligible_planning_manifests(live_dir, now)
+
+    assert [manifest.name for manifest, _ in candidates] == [
+        "older-plan",
+        "newer-plan",
+    ]
+
+
+def test_try_migration_tick_completes_planning_before_ready_phase(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    now = _utc_now()
+    _save_planning(
+        live_dir,
+        run_once_env,
+        "mid-plan",
+        last_touch=now - timedelta(days=1),
+        created_at=now - timedelta(hours=2),
+    )
+    _save(
+        _make_manifest(
+            "ready-now",
+            last_touch=now - timedelta(days=1),
+            created_at=now - timedelta(hours=1),
+        ),
+        live_dir,
+    )
+    planning_calls: list[tuple[str, str]] = []
+    commits: list[tuple[str, str]] = []
+
+    def fake_planning(
+        migration_name: str,
+        target: str,
+        *_args: object,
+        **_kwargs: object,
+    ) -> PlanningStepResult:
+        planning_calls.append((migration_name, target))
+        return PlanningStepResult(
+            status="published",
+            migration_name=migration_name,
+            step="approaches",
+            next_step="pick-best",
+            reason="planning accepted",
+        )
+
+    def finalize(
+        _repo_root: Path,
+        _head_before: str,
+        message: str,
+        **kwargs: object,
+    ) -> None:
+        commits.append((message, str(kwargs["phase"])))
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.run_next_planning_step",
+        fake_planning,
+    )
+    _patch_check_ready(
+        monkeypatch,
+        "yes",
+        "ready check must not run before planning",
+    )
+    _patch_execute_phase_trap(monkeypatch)
+
+    outcome, record = _planning_tick(
+        live_dir,
+        run_once_env,
+        finalize_commit=finalize,
+    )
+
+    assert outcome == "commit"
+    assert record is not None
+    assert record.call_role == "planning.approaches"
+    assert planning_calls == [("mid-plan", "Target mid-plan")]
+    assert commits == [
+        (
+            "continuous refactor: planning/mid-plan/approaches\n"
+            "\n"
+            "Why:\n"
+            "planning accepted",
+            "planning",
+        )
+    ]
+
+
+def test_try_migration_tick_does_not_call_ready_check_for_planning_status(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    now = _utc_now()
+    _save_planning(
+        live_dir,
+        run_once_env,
+        "only-plan",
+        last_touch=now - timedelta(days=1),
+    )
+
+    def fake_planning(*_args: object, **_kwargs: object) -> PlanningStepResult:
+        return PlanningStepResult(
+            status="published",
+            migration_name="only-plan",
+            step="approaches",
+            next_step="pick-best",
+            reason="ok",
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.run_next_planning_step",
+        fake_planning,
+    )
+    _patch_check_ready(monkeypatch, "yes")
+    _patch_execute_phase_trap(monkeypatch)
+
+    outcome, record = _planning_tick(live_dir, run_once_env)
+
+    assert outcome == "commit"
+    assert record is not None
+    assert record.target == "only-plan"
+
+
+def test_missing_planning_state_blocks_before_ready_phase_or_source_routing(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    now = _utc_now()
+    _save_planning(
+        live_dir,
+        run_once_env,
+        "missing-state",
+        last_touch=now - timedelta(days=1),
+        created_at=now - timedelta(hours=2),
+        state="missing",
+    )
+    _save(
+        _make_manifest(
+            "ready-now",
+            last_touch=now - timedelta(days=1),
+            created_at=now - timedelta(hours=1),
+        ),
+        live_dir,
+    )
+    _patch_check_ready(monkeypatch, "yes")
+    _patch_execute_phase_trap(monkeypatch)
+
+    outcome, record = _planning_tick(live_dir, run_once_env)
+
+    assert outcome == "blocked"
+    assert record is not None
+    assert record.call_role == "planning.state"
+    assert record.failure_kind == "planning-state-missing"
+    assert record.target == "missing-state"
+    assert ".planning/state.json" in record.summary
+
+
+def test_invalid_planning_state_blocks_before_ready_phase_or_source_routing(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    now = _utc_now()
+    _save_planning(
+        live_dir,
+        run_once_env,
+        "invalid-state",
+        last_touch=now - timedelta(days=1),
+        state="invalid",
+    )
+    _patch_check_ready(monkeypatch, "yes")
+    _patch_execute_phase_trap(monkeypatch)
+
+    outcome, record = _planning_tick(live_dir, run_once_env)
+
+    assert outcome == "blocked"
+    assert record is not None
+    assert record.call_role == "planning.state"
+    assert record.failure_kind == "planning-state-invalid"
+    assert record.target == "invalid-state"
+
+
+def test_planning_slug_mismatch_blocks_before_resume_publish(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    now = _utc_now()
+    manifest_path = _save_planning(
+        live_dir,
+        run_once_env,
+        "visible-name",
+        last_touch=now - timedelta(days=1),
+    )
+    manifest = load_manifest(manifest_path)
+    save_manifest(replace(manifest, name="manifest-name"), manifest_path)
+
+    def fake_planning(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("slug mismatch must block before planning publish")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.run_next_planning_step",
+        fake_planning,
+    )
+
+    outcome, record = _planning_tick(live_dir, run_once_env)
+
+    assert outcome == "blocked"
+    assert record is not None
+    assert record.target == "visible-name"
+    assert record.call_role == "planning.state"
+    assert record.failure_kind == "planning-consistency-error"
+    assert "manifest-slug-mismatch" in record.summary
 
 
 def test_try_migration_tick_skips_migrations_awaiting_human_review(
@@ -391,6 +818,68 @@ def test_ready_check_error_abandons_with_sanitized_decision_record(
     assert record.call_role == "phase.ready-check"
     assert record.phase_reached == "phase.ready-check"
     assert record.summary == "ready check failed at <repo>/phase.md <tmp>"
+
+
+def test_execution_gate_blocks_inconsistent_migration_before_ready_check(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    now = _utc_now()
+    manifest = _make_manifest(
+        "missing-plan",
+        last_touch=now - timedelta(days=1),
+    )
+    root = migration_root(live_dir, manifest.name)
+    root.mkdir(parents=True)
+    (root / _PHASE_0.file).write_text("# Setup\n", encoding="utf-8")
+    save_manifest(manifest, root / "manifest.json")
+
+    def fail_ready(*_args: object, **_kwargs: object) -> tuple[str, str]:
+        raise AssertionError("check_phase_ready must not be called")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.check_phase_ready",
+        fail_ready,
+    )
+    _patch_execute_phase_trap(monkeypatch)
+
+    outcome, record = _tick(live_dir, run_once_env)
+
+    assert outcome == "abandon"
+    assert record is not None
+    assert record.decision == "abandon"
+    assert record.call_role == "phase.execution-gate"
+    assert record.phase_reached == "phase.execution-gate"
+    assert record.failure_kind == "migration-consistency-error"
+    assert "missing-plan" in record.summary
+
+
+def test_execution_gate_reports_malformed_manifest_before_candidate_loading(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    migration_dir = live_dir / "bad-manifest"
+    migration_dir.mkdir(parents=True)
+    (migration_dir / "manifest.json").write_text("{not json", encoding="utf-8")
+
+    def fail_ready(*_args: object, **_kwargs: object) -> tuple[str, str]:
+        raise AssertionError("check_phase_ready must not be called")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.check_phase_ready",
+        fail_ready,
+    )
+    _patch_execute_phase_trap(monkeypatch)
+
+    outcome, record = _tick(live_dir, run_once_env)
+
+    assert outcome == "abandon"
+    assert record is not None
+    assert record.decision == "abandon"
+    assert record.target == "bad-manifest"
+    assert record.call_role == "phase.execution-gate"
+    assert record.failure_kind == "migration-consistency-error"
+    assert "invalid-manifest" in record.summary
 
 
 def test_ready_check_wrapped_failure_keeps_root_cause_in_summary(
@@ -1033,7 +1522,7 @@ def test_unverifiable_human_approval_uncertainty_still_blocks_for_review(
 
 
 def test_eligible_ready_migration_advances_phase(
-    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, prompt_capture: list[str],
 ) -> None:
     now = _utc_now()
     live_dir, _, manifest_path = _seed_manifest(
@@ -1050,7 +1539,6 @@ def test_eligible_ready_migration_advances_phase(
     )
     check_calls = _patch_check_ready(monkeypatch, "yes")
     exec_calls = _patch_execute_phase(monkeypatch, status="done")
-    _patch_one_shot(monkeypatch)
 
     exit_code = _run_once(run_once_env)
 
@@ -1067,6 +1555,7 @@ def test_eligible_ready_migration_advances_phase(
 def test_migration_labels_use_phase_file_not_numeric_cursor(
     run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,
+    prompt_capture: list[str],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     now = _utc_now()
@@ -1086,7 +1575,6 @@ def test_migration_labels_use_phase_file_not_numeric_cursor(
     )
     _patch_check_ready(monkeypatch, "yes")
     _patch_execute_phase(monkeypatch, status="done")
-    _patch_one_shot(monkeypatch)
     monkeypatch.setattr(
         "continuous_refactoring.loop._finalize_commit",
         lambda _repo_root, _head_before, message, **_kwargs: commit_messages.append(message),
@@ -1103,7 +1591,7 @@ def test_migration_labels_use_phase_file_not_numeric_cursor(
 
 
 def test_phase_ready_check_receives_runtime_taste(
-    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, prompt_capture: list[str],
 ) -> None:
     now = _utc_now()
     live_dir, _, _ = _seed_manifest(
@@ -1133,7 +1621,6 @@ def test_phase_ready_check_receives_runtime_taste(
         fake_check_ready,
     )
     _patch_execute_phase_trap(monkeypatch)
-    _patch_one_shot(monkeypatch)
 
     exit_code = _run_once(run_once_env)
 
@@ -1147,18 +1634,16 @@ def test_phase_ready_check_receives_runtime_taste(
 
 
 def test_no_eligible_migrations_falls_through(
-    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, prompt_capture: list[str],
 ) -> None:
     live_dir = _migrations_dir(run_once_env)
 
     _patch_live_dir(monkeypatch, live_dir)
     classifier_calls = _patch_classifier_cohesive(monkeypatch)
-    prompts = _patch_one_shot(monkeypatch)
-
     exit_code = _run_once(run_once_env)
 
     assert exit_code == 0
-    _assert_fell_through(classifier_calls, prompts)
+    _assert_fell_through(classifier_calls, prompt_capture)
 
 
 # ---------------------------------------------------------------------------
@@ -1167,7 +1652,7 @@ def test_no_eligible_migrations_falls_through(
 
 
 def test_eligible_not_ready_bumps_wake_up_on(
-    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, prompt_capture: list[str],
 ) -> None:
     now = _utc_now()
     live_dir, _, manifest_path = _seed_manifest(
@@ -1182,8 +1667,6 @@ def test_eligible_not_ready_bumps_wake_up_on(
     classifier_calls = _patch_classifier_cohesive(monkeypatch)
     _patch_check_ready(monkeypatch, "no", "prerequisites not met")
     _patch_execute_phase_trap(monkeypatch)
-    prompts = _patch_one_shot(monkeypatch)
-
     exit_code = _run_once(run_once_env)
 
     assert exit_code == 0
@@ -1195,7 +1678,7 @@ def test_eligible_not_ready_bumps_wake_up_on(
     assert reloaded.current_phase == "setup"
     assert eligible_now(reloaded, _utc_now()) is False
 
-    _assert_fell_through(classifier_calls, prompts)
+    _assert_fell_through(classifier_calls, prompt_capture)
 
 
 # ---------------------------------------------------------------------------
@@ -1204,7 +1687,7 @@ def test_eligible_not_ready_bumps_wake_up_on(
 
 
 def test_future_wake_up_blocks_execution(
-    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, prompt_capture: list[str],
 ) -> None:
     now = _utc_now()
     live_dir, manifest, _ = _seed_manifest(
@@ -1220,16 +1703,14 @@ def test_future_wake_up_blocks_execution(
     _patch_live_dir(monkeypatch, live_dir)
     classifier_calls = _patch_classifier_cohesive(monkeypatch)
     _patch_execute_phase_trap(monkeypatch)
-    prompts = _patch_one_shot(monkeypatch)
-
     exit_code = _run_once(run_once_env)
 
     assert exit_code == 0
-    _assert_fell_through(classifier_calls, prompts)
+    _assert_fell_through(classifier_calls, prompt_capture)
 
 
 def test_unverifiable_phase_stores_human_review_reason(
-    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, prompt_capture: list[str],
 ) -> None:
     import pytest
 
@@ -1246,7 +1727,6 @@ def test_unverifiable_phase_stores_human_review_reason(
     _patch_classifier_cohesive(monkeypatch)
     _patch_check_ready(monkeypatch, "unverifiable", reason)
     _patch_execute_phase_trap(monkeypatch)
-    _patch_one_shot(monkeypatch)
 
     with pytest.raises(ContinuousRefactorError, match="external dependency"):
         _run_once(run_once_env)
@@ -1257,7 +1737,7 @@ def test_unverifiable_phase_stores_human_review_reason(
 
 
 def test_empty_current_phase_skips_migration_path(
-    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch, prompt_capture: list[str],
 ) -> None:
     now = _utc_now()
     live_dir, manifest, manifest_path = _seed_manifest(
@@ -1274,13 +1754,11 @@ def test_empty_current_phase_skips_migration_path(
     check_calls = _patch_check_ready(monkeypatch, "yes")
     _patch_execute_phase_trap(monkeypatch)
     classifier_calls = _patch_classifier_cohesive(monkeypatch)
-    prompts = _patch_one_shot(monkeypatch)
-
     exit_code = _run_once(run_once_env)
 
     assert exit_code == 0
     assert check_calls == []
-    _assert_fell_through(classifier_calls, prompts)
+    _assert_fell_through(classifier_calls, prompt_capture)
 
     reloaded = load_manifest(manifest_path)
     assert reloaded.current_phase == ""

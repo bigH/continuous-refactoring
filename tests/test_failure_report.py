@@ -48,6 +48,26 @@ def _record(**overrides: object) -> DecisionRecord:
     return DecisionRecord(**values)
 
 
+def assert_attempt_decision(
+    artifacts: RunArtifacts,
+    *,
+    attempt: int,
+    retry: int,
+    record: DecisionRecord,
+    reason_doc_path: str | None,
+) -> None:
+    stats = artifacts.attempts[attempt]
+    assert stats.target == record.target
+    assert stats.retry == retry
+    assert stats.call_role == record.call_role
+    assert stats.phase_reached == record.phase_reached
+    assert stats.decision == record.decision
+    assert stats.retry_recommendation == record.retry_recommendation
+    assert stats.failure_kind == record.failure_kind
+    assert stats.failure_summary == record.summary
+    assert stats.reason_doc_path == reason_doc_path
+
+
 def test_effective_record_abandons_after_max_attempts() -> None:
     record = _record(
         summary="Still red",
@@ -230,10 +250,13 @@ def test_persist_decision_records_commit_without_failure_snapshot(tmp_path: Path
 
     assert result is None
     assert failure_snapshot_calls == 0
-    stats = artifacts.attempts[1]
-    assert stats.decision == "commit"
-    assert stats.retry == 2
-    assert stats.reason_doc_path is None
+    assert_attempt_decision(
+        artifacts,
+        attempt=1,
+        retry=2,
+        record=record,
+        reason_doc_path=None,
+    )
     assert not artifacts.events_path.exists()
 
 
@@ -258,9 +281,142 @@ def test_persist_decision_records_non_commit_snapshot(
 
     assert result is not None
     assert result.exists()
-    stats = artifacts.attempts[1]
-    assert stats.decision == "retry"
-    assert stats.reason_doc_path == str(result)
+    assert_attempt_decision(
+        artifacts,
+        attempt=1,
+        retry=1,
+        record=record,
+        reason_doc_path=str(result),
+    )
     events = artifacts.events_path.read_text(encoding="utf-8")
     assert '"event": "failure_doc_written"' in events
     assert '"event": "target_transition"' in events
+
+
+def test_planning_step_failure_snapshot_names_step_and_resume_behavior(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    artifacts = _artifacts(tmp_path / "artifacts")
+    record = _record(
+        decision="abandon",
+        retry_recommendation="new-target",
+        target="auth-cleanup",
+        call_role="planning.review-2",
+        phase_reached="planning.review-2",
+        failure_kind="planning-step-failed",
+        summary="Revised plan still has findings",
+        next_retry_focus=None,
+    )
+
+    result = persist_decision(
+        repo_root,
+        artifacts,
+        attempt=1,
+        retry=1,
+        validation_command="uv run pytest",
+        record=record,
+    )
+
+    assert result is not None
+    content = result.read_text(encoding="utf-8")
+    assert 'call_role: "planning.review-2"' in content
+    assert "planning step `review-2`" in content
+    assert ".planning/state.json" in content
+    assert "failed current-step output" in content
+    assert "not resume input" in content
+
+    events = artifacts.events_path.read_text(encoding="utf-8")
+    assert '"event": "planning_step_failure_doc_written"' in events
+    assert '"planning_step": "review-2"' in events
+    assert '"event": "failure_doc_written"' not in events
+
+
+def test_planning_call_role_gets_planning_resume_wording_for_infra_failure_kind(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    artifacts = _artifacts(tmp_path / "artifacts")
+    record = _record(
+        decision="abandon",
+        retry_recommendation="new-target",
+        target="auth-cleanup",
+        call_role="planning.expand",
+        phase_reached="planning.expand",
+        failure_kind="agent-infra-failure",
+        summary="planning.expand failed: agent exited 1",
+        next_retry_focus=None,
+    )
+
+    result = persist_decision(
+        repo_root,
+        artifacts,
+        attempt=1,
+        retry=1,
+        validation_command="uv run pytest",
+        record=record,
+    )
+
+    assert result is not None
+    content = result.read_text(encoding="utf-8")
+    assert 'call_role: "planning.expand"' in content
+    assert "planning step `expand`" in content
+    assert ".planning/state.json" in content
+    assert "failed current-step output" in content
+    assert "not resume input" in content
+    assert 'failure_kind: "agent-infra-failure"' in content
+
+    events = artifacts.events_path.read_text(encoding="utf-8")
+    assert '"event": "planning_step_failure_doc_written"' in events
+    assert '"planning_step": "expand"' in events
+    assert '"event": "failure_doc_written"' not in events
+
+
+@pytest.mark.parametrize(
+    "call_role",
+    ["planning.state", "planning.publish", "planning.resume"],
+)
+def test_internal_planning_call_roles_keep_generic_failure_wording(
+    tmp_path: Path,
+    monkeypatch,
+    call_role: str,
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    artifacts = _artifacts(tmp_path / "artifacts")
+    record = _record(
+        decision="abandon",
+        retry_recommendation="new-target",
+        target="auth-cleanup",
+        call_role=call_role,
+        phase_reached=call_role,
+        failure_kind="agent-infra-failure",
+        summary=f"{call_role} failed",
+        next_retry_focus=None,
+    )
+
+    result = persist_decision(
+        repo_root,
+        artifacts,
+        attempt=1,
+        retry=1,
+        validation_command="uv run pytest",
+        record=record,
+    )
+
+    assert result is not None
+    content = result.read_text(encoding="utf-8")
+    assert f'call_role: "{call_role}"' in content
+    assert "planning step `" not in content
+    assert "failed current-step output" not in content
+
+    events = artifacts.events_path.read_text(encoding="utf-8")
+    assert '"event": "failure_doc_written"' in events
+    assert '"event": "planning_step_failure_doc_written"' not in events

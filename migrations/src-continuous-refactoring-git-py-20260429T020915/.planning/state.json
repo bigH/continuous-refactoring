@@ -1,0 +1,39 @@
+{
+  "completed_steps": [
+    {
+      "completed_at": "2026-04-29T02:09:15.185-07:00",
+      "name": "approaches",
+      "outcome": "completed",
+      "outputs": {
+        "stdout": "migrations/src-continuous-refactoring-git-py-20260429T020915/.planning/stages/approaches.stdout.md"
+      }
+    },
+    {
+      "completed_at": "2026-04-29T02:17:11.327-07:00",
+      "name": "pick-best",
+      "outcome": "completed",
+      "outputs": {
+        "stdout": "migrations/src-continuous-refactoring-git-py-20260429T020915/.planning/stages/pick-best.stdout.md"
+      }
+    },
+    {
+      "completed_at": "2026-04-29T02:17:11.327-07:00",
+      "name": "expand",
+      "outcome": "completed",
+      "outputs": {
+        "stdout": "migrations/src-continuous-refactoring-git-py-20260429T020915/.planning/stages/expand.stdout.md"
+      }
+    }
+  ],
+  "feedback": [],
+  "final_decision": null,
+  "final_reason": null,
+  "next_step": "review",
+  "review_findings": null,
+  "revision_base_step_counts": [],
+  "schema_version": 1,
+  "started_at": "2026-04-29T02:09:15.185-07:00",
+  "target": "src/continuous_refactoring/git.py",
+  "updated_at": "2026-04-29T02:17:11.327-07:00"
+}
+

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import re
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -24,10 +23,11 @@ from continuous_refactoring.artifacts import ContinuousRefactorError
 from continuous_refactoring.prompts import compose_scope_selection_prompt
 from continuous_refactoring.scope_candidates import ScopeCandidate, ScopeCandidateKind
 
-_SELECTION_RE = re.compile(
-    r"^selected-candidate:\s*(seed|local-cluster|cross-cluster)"
-    r"(?:\s*[—-]\s*(.+))?$",
-    re.IGNORECASE,
+_SCOPE_SELECTION_PREFIX = "selected-candidate:"
+_KNOWN_SCOPE_SELECTION_KINDS: tuple[ScopeCandidateKind, ...] = (
+    "local-cluster",
+    "cross-cluster",
+    "seed",
 )
 
 
@@ -41,10 +41,41 @@ def _scope_selection_line(selection: ScopeSelection) -> str:
     return f"selected-candidate: {selection.kind} — {selection.reason}\n"
 
 
-def _write_selection_logs(selection_dir: Path, selection: ScopeSelection) -> None:
+def write_scope_selection_logs(selection_dir: Path, selection: ScopeSelection) -> None:
     line = _scope_selection_line(selection)
     (selection_dir / "selection.stdout.log").write_text(line, encoding="utf-8")
     (selection_dir / "selection-last-message.md").write_text(line, encoding="utf-8")
+
+
+def _parse_selection_line(line: str) -> tuple[ScopeCandidateKind, str] | None:
+    if not line[: len(_SCOPE_SELECTION_PREFIX)].lower() == _SCOPE_SELECTION_PREFIX:
+        return None
+    body = line[len(_SCOPE_SELECTION_PREFIX):].strip()
+    for kind in _KNOWN_SCOPE_SELECTION_KINDS:
+        if not body.lower().startswith(kind):
+            continue
+        reason = body[len(kind):].strip()
+        if not reason:
+            return kind, kind
+        if reason[0] not in {"—", "-"}:
+            return None
+        reason = reason[1:].strip()
+        return kind, reason or kind
+    return None
+
+
+def _require_unique_candidate_kinds(
+    candidate_kinds: tuple[ScopeCandidateKind, ...],
+) -> tuple[ScopeCandidateKind, ...]:
+    duplicates = tuple(
+        kind for kind in _KNOWN_SCOPE_SELECTION_KINDS if candidate_kinds.count(kind) > 1
+    )
+    if duplicates:
+        quoted = ", ".join(repr(kind) for kind in duplicates)
+        raise ContinuousRefactorError(
+            f"Scope selection requires unique candidate kinds, got duplicates: {quoted}"
+        )
+    return candidate_kinds
 
 
 def scope_expansion_bypass_reason(target: Target) -> str | None:
@@ -61,21 +92,19 @@ def parse_scope_selection(
     stdout: str,
     candidate_kinds: tuple[ScopeCandidateKind, ...],
 ) -> ScopeSelection:
+    candidate_kinds = _require_unique_candidate_kinds(candidate_kinds)
     non_blank = [line.strip() for line in stdout.splitlines() if line.strip()]
     if not non_blank:
         raise ContinuousRefactorError("Scope selection produced no output")
     for stripped in reversed(non_blank):
-        match = _SELECTION_RE.match(stripped)
-        if not match:
+        parsed = _parse_selection_line(stripped)
+        if parsed is None:
             continue
-        kind = match.group(1).lower()
+        kind, reason = parsed
         if kind not in candidate_kinds:
             raise ContinuousRefactorError(
                 f"Selection chose unavailable candidate: {kind!r}"
             )
-        reason = match.group(2).strip() if match.group(2) else ""
-        if not reason:
-            reason = kind
         return ScopeSelection(kind=kind, reason=reason)
     raise ContinuousRefactorError(
         f"Scope selection produced unrecognised output: {non_blank[-1]!r}"
@@ -101,6 +130,9 @@ def select_scope_candidate(
     retry: int = 1,
     effort_metadata: dict[str, object] | None = None,
 ) -> ScopeSelection:
+    candidate_kinds = _require_unique_candidate_kinds(
+        tuple(candidate.kind for candidate in candidates)
+    )
     selection_dir = artifacts.root / "scope-expansion"
     selection_dir.mkdir(parents=True, exist_ok=True)
     selection_stdout_path = selection_dir / "selection.stdout.log"
@@ -111,7 +143,7 @@ def select_scope_candidate(
             kind=candidates[0].kind,
             reason="only viable candidate",
         )
-        _write_selection_logs(selection_dir, selection)
+        write_scope_selection_logs(selection_dir, selection)
         return selection
 
     call_role = "scope-expansion"
@@ -164,7 +196,6 @@ def select_scope_candidate(
         raise ContinuousRefactorError(
             f"Scope selection agent failed with exit code {result.returncode}"
         )
-    candidate_kinds = tuple(candidate.kind for candidate in candidates)
     try:
         selection = parse_scope_selection(result.stdout, candidate_kinds)
     except ContinuousRefactorError as error:

@@ -7,7 +7,11 @@ import pytest
 import continuous_refactoring
 import continuous_refactoring.loop
 import continuous_refactoring.routing_pipeline
-from continuous_refactoring.artifacts import RunArtifacts, create_run_artifacts
+from continuous_refactoring.artifacts import (
+    ContinuousRefactorError,
+    RunArtifacts,
+    create_run_artifacts,
+)
 from continuous_refactoring.decisions import DecisionRecord
 from continuous_refactoring.routing_pipeline import RouteResult
 from continuous_refactoring.targeting import Target
@@ -220,15 +224,21 @@ def test_needs_plan_receives_expanded_scope_context(
         lambda *_args, **_kwargs: "needs-plan",
     )
 
-    class StubPlanningOutcome:
-        status = "ready"
+    class StubPlanningStepResult:
+        status = "published"
+        step = "approaches"
+        next_step = "pick-best"
+        terminal_outcome = None
         reason = "stub"
 
-    def fake_run_planning(*_args: object, **kwargs: object) -> StubPlanningOutcome:
+    def fake_run_next_planning_step(*_args: object, **kwargs: object) -> StubPlanningStepResult:
         captured["extra_context"] = str(kwargs["extra_context"])
-        return StubPlanningOutcome()
+        return StubPlanningStepResult()
 
-    monkeypatch.setattr("continuous_refactoring.routing_pipeline.run_planning", fake_run_planning)
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.run_next_planning_step",
+        fake_run_next_planning_step,
+    )
 
     result = _invoke_route_and_run(
         repo_root,
@@ -238,6 +248,76 @@ def test_needs_plan_receives_expanded_scope_context(
 
     assert result.outcome == "commit"
     assert captured["extra_context"] == planning_context
+
+
+def test_classifier_failure_returns_abandon_record(
+    routing_env: tuple[Path, RunArtifacts],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, artifacts = routing_env
+    target = Target(description="seed", files=("README.md",), provenance="globs")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ContinuousRefactorError("transport failed")
+        ),
+    )
+
+    result = _invoke_route_and_run(repo_root, artifacts, target)
+
+    assert result.outcome == "abandon"
+    assert result.decision_record == DecisionRecord(
+        decision="abandon",
+        retry_recommendation="new-target",
+        target="seed",
+        call_role="classify",
+        phase_reached="classify",
+        failure_kind="agent-infra-failure",
+        summary="transport failed",
+    )
+
+
+def test_planning_failure_uses_stage_label_in_abandon_record(
+    routing_env: tuple[Path, RunArtifacts],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, artifacts = routing_env
+
+    _patch_scope_expansion(
+        monkeypatch,
+        files=("src/foo.py",),
+        context="Selected scope candidate: local-cluster",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        lambda *_args, **_kwargs: "needs-plan",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.run_next_planning_step",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ContinuousRefactorError(
+                "planning.review-2 failed: revised plan still has findings"
+            )
+        ),
+    )
+
+    result = _invoke_route_and_run(
+        repo_root,
+        artifacts,
+        Target(description="seed", files=("src/foo.py",), provenance="globs"),
+    )
+
+    assert result.outcome == "abandon"
+    assert result.decision_record == DecisionRecord(
+        decision="abandon",
+        retry_recommendation="new-target",
+        target="seed",
+        call_role="planning.review-2",
+        phase_reached="planning.review-2",
+        failure_kind="agent-infra-failure",
+        summary="planning.review-2 failed: revised plan still has findings",
+    )
 
 
 def test_live_migrations_unset_skips_scope_expansion_and_classification(

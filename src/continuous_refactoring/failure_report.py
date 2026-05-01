@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from continuous_refactoring.config import failure_snapshots_dir
 from continuous_refactoring.decisions import DecisionRecord
+from continuous_refactoring.planning_state import is_executable_planning_step
 
 if TYPE_CHECKING:
     from continuous_refactoring.artifacts import RunArtifacts
@@ -20,6 +21,9 @@ __all__ = [
     "persist_decision",
     "write",
 ]
+
+_PLANNING_CALL_ROLE_PREFIX = "planning."
+_INTERNAL_PLANNING_CALL_ROLES = frozenset({"state", "publish", "resume"})
 
 
 @dataclass(frozen=True)
@@ -243,6 +247,13 @@ def write(
 
 
 def _next_step_text(record: DecisionRecord) -> str:
+    planning_step = _planning_step(record)
+    if planning_step is not None:
+        return (
+            f"Rerun planning step `{planning_step}` from the last published "
+            ".planning/state.json; failed current-step output and partial "
+            "work are artifact evidence only, not resume input."
+        )
     if record.decision == "retry":
         focus = f" Focus: {record.next_retry_focus}" if record.next_retry_focus else ""
         return f"Retry the same target on the next attempt.{focus}"
@@ -251,6 +262,17 @@ def _next_step_text(record: DecisionRecord) -> str:
     if record.decision == "blocked":
         return "Pause for human review before attempting more automated work."
     return "Commit the validated result and continue normally."
+
+
+def _planning_step(record: DecisionRecord) -> str | None:
+    if not record.call_role.startswith(_PLANNING_CALL_ROLE_PREFIX):
+        return None
+    step = record.call_role.removeprefix(_PLANNING_CALL_ROLE_PREFIX)
+    if step in _INTERNAL_PLANNING_CALL_ROLES:
+        return None
+    if not is_executable_planning_step(step):
+        return None
+    return step
 
 
 def effective_record(
@@ -271,6 +293,50 @@ def effective_record(
     )
 
 
+def _update_attempt_from_record(
+    artifacts: RunArtifacts,
+    *,
+    attempt: int,
+    retry: int,
+    record: DecisionRecord,
+    reason_doc_path: Path | None,
+) -> None:
+    artifacts.update_attempt(
+        attempt,
+        target=record.target,
+        retry=retry,
+        call_role=record.call_role,
+        phase_reached=record.phase_reached,
+        decision=record.decision,
+        retry_recommendation=record.retry_recommendation,
+        failure_kind=record.failure_kind,
+        failure_summary=record.summary,
+        reason_doc_path=reason_doc_path,
+    )
+
+
+def _log_transition_from_record(
+    artifacts: RunArtifacts,
+    *,
+    attempt: int,
+    retry: int,
+    record: DecisionRecord,
+    reason_doc_path: Path | None,
+) -> None:
+    artifacts.log_transition(
+        attempt=attempt,
+        retry=retry,
+        target=record.target,
+        call_role=record.call_role,
+        phase_reached=record.phase_reached,
+        decision=record.decision,
+        retry_recommendation=record.retry_recommendation,
+        failure_kind=record.failure_kind,
+        summary=record.summary,
+        reason_doc_path=reason_doc_path,
+    )
+
+
 def persist_decision(
     repo_root: Path,
     artifacts: RunArtifacts,
@@ -281,16 +347,11 @@ def persist_decision(
     record: DecisionRecord,
 ) -> Path | None:
     if record.decision == "commit":
-        artifacts.update_attempt(
-            attempt,
-            target=record.target,
+        _update_attempt_from_record(
+            artifacts,
+            attempt=attempt,
             retry=retry,
-            call_role=record.call_role,
-            phase_reached=record.phase_reached,
-            decision=record.decision,
-            retry_recommendation=record.retry_recommendation,
-            failure_kind=record.failure_kind,
-            failure_summary=record.summary,
+            record=record,
             reason_doc_path=None,
         )
         return None
@@ -303,27 +364,31 @@ def persist_decision(
         validation_command=validation_command,
         record=record,
     )
+    planning_step = _planning_step(record)
+    log_fields: dict[str, object] = {}
+    if planning_step is not None:
+        log_fields["planning_step"] = planning_step
     artifacts.log(
         "WARN",
         f"failure snapshot written: {reason_doc}",
-        event="failure_doc_written",
+        event=(
+            "planning_step_failure_doc_written"
+            if planning_step is not None
+            else "failure_doc_written"
+        ),
         attempt=attempt,
         retry=retry,
         target=record.target,
         call_role=record.call_role,
         phase_reached=record.phase_reached,
         reason_doc_path=str(reason_doc),
+        **log_fields,
     )
-    artifacts.log_transition(
+    _log_transition_from_record(
+        artifacts,
         attempt=attempt,
         retry=retry,
-        target=record.target,
-        call_role=record.call_role,
-        phase_reached=record.phase_reached,
-        decision=record.decision,
-        retry_recommendation=record.retry_recommendation,
-        failure_kind=record.failure_kind,
-        summary=record.summary,
+        record=record,
         reason_doc_path=reason_doc,
     )
     return reason_doc

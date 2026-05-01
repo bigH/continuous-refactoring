@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -8,8 +7,10 @@ import pytest
 import continuous_refactoring
 import continuous_refactoring.loop
 from continuous_refactoring.artifacts import CommandCapture, ContinuousRefactorError
+from continuous_refactoring.decisions import DecisionRecord, RouteOutcome
 
 from conftest import (
+    assert_single_prompt,
     failing_tests,
     make_run_once_args,
     noop_agent,
@@ -17,21 +18,25 @@ from conftest import (
     read_single_run_events,
     read_single_run_summary,
     touch_file_agent,
+    write_targets_file,
 )
-
-
-def _run_once_prompt_capture(
-    run_once_env: Path, prompt_capture: list[str], **kwargs: object
-) -> str:
-    args = make_run_once_args(run_once_env, **kwargs)
-    continuous_refactoring.run_once(args)
-    assert len(prompt_capture) == 1
-    return prompt_capture[0]
 
 
 def _is_baseline_validation(stdout_path: Path) -> bool:
     parts = stdout_path.parts
     return "baseline" in parts and "initial" in parts
+
+
+def _planning_record(decision: str) -> DecisionRecord:
+    return DecisionRecord(
+        decision=decision,  # type: ignore[arg-type]
+        retry_recommendation="none" if decision == "commit" else "human-review",
+        target="queued-planning",
+        call_role="planning.approaches" if decision == "commit" else "planning.state",
+        phase_reached="planning.approaches" if decision == "commit" else "planning.state",
+        failure_kind="none" if decision == "commit" else "planning-state-missing",
+        summary="planning result",
+    )
 
 
 @pytest.mark.parametrize(
@@ -54,9 +59,9 @@ def test_run_once_prompt_composition(
     kwargs: dict[str, object],
     needles: tuple[str, ...],
 ) -> None:
-    prompt = _run_once_prompt_capture(run_once_env, prompt_capture, **kwargs)
-    for needle in needles:
-        assert needle in prompt
+    args = make_run_once_args(run_once_env, **kwargs)
+    continuous_refactoring.run_once(args)
+    assert_single_prompt(prompt_capture, *needles)
 
 
 def test_run_once_baseline_validation_blocks_routing_and_agent_when_red(
@@ -308,14 +313,13 @@ def test_run_once_direct_refactor_audits_effort_budget(
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", effort_capturing_agent)
     monkeypatch.setattr("continuous_refactoring.loop.run_tests", noop_tests)
 
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        json.dumps({
+    targets_file = write_targets_file(
+        tmp_path,
+        targets=[{
             "description": "direct override",
             "files": ["foo.py"],
             "effort-override": "xhigh",
-        }),
-        encoding="utf-8",
+        }],
     )
     args = make_run_once_args(
         run_once_env,
@@ -510,3 +514,78 @@ def test_ctrl_c_prints_file_paths(
     assert exit_code == 130
     captured = capsys.readouterr()
     assert "Artifact logs:" in captured.err
+
+
+def test_run_once_resumes_planning_before_classification(
+    run_once_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = run_once_env / ".migrations"
+    live_dir.mkdir()
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    planning_calls = 0
+
+    def fake_planning_tick(
+        live_dir: Path,
+        taste: str,
+        repo_root: Path,
+        artifacts: object,
+        **kwargs: object,
+    ) -> tuple[RouteOutcome, DecisionRecord | None]:
+        nonlocal planning_calls
+        planning_calls += 1
+        (repo_root / "planning-step.txt").write_text("planned\n", encoding="utf-8")
+        head_before = continuous_refactoring.run_command(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+        ).stdout.strip()
+        kwargs["finalize_commit"](
+            repo_root,
+            head_before,
+            "continuous refactor: planning/queued-planning/approaches\n"
+            "\n"
+            "Why:\n"
+            "planning result",
+            artifacts=artifacts,
+            attempt=kwargs["attempt"],
+            phase="planning",
+        )
+        return ("commit", _planning_record("commit"))
+
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline._try_planning_tick",
+        fake_planning_tick,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        lambda *_args, **_kwargs: pytest.fail("classification must wait for planning"),
+    )
+
+    assert continuous_refactoring.run_once(make_run_once_args(run_once_env)) == 0
+    assert planning_calls == 1
+
+
+def test_run_once_raises_when_planning_resume_blocks(
+    run_once_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = run_once_env / ".migrations"
+    live_dir.mkdir()
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline._try_planning_tick",
+        lambda *_args, **_kwargs: ("blocked", _planning_record("blocked")),
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        lambda *_args, **_kwargs: pytest.fail("blocked planning must not classify"),
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="planning result"):
+        continuous_refactoring.run_once(make_run_once_args(run_once_env))

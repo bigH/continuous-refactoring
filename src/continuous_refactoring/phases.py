@@ -26,6 +26,7 @@ from continuous_refactoring.decisions import (
     read_status,
     resolved_phase_reached,
     sanitize_text,
+    sanitized_text_or,
     status_summary,
 )
 from continuous_refactoring.git import get_head_sha, revert_to
@@ -347,7 +348,7 @@ def _run_phase_agent(
             timeout=timeout,
         )
     except ContinuousRefactorError as error:
-        summary = sanitize_text(str(error), repo_root) or str(error)
+        summary = sanitized_text_or(str(error), repo_root, str(error))
         return _PhaseAgentRun(
             status=None,
             phase_reached=_PHASE_EXECUTE_ROLE,
@@ -448,7 +449,7 @@ def _run_phase_validation(
     except ContinuousRefactorError as error:
         summary, focus = status_summary(
             agent_run.status,
-            fallback=sanitize_text(str(error), repo_root) or str(error),
+            fallback=sanitized_text_or(str(error), repo_root, str(error)),
             repo_root=repo_root,
         )
         return _PhaseValidationResult(

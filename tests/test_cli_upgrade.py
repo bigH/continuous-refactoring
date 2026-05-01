@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -16,13 +17,17 @@ from continuous_refactoring.config import (
     register_project,
 )
 
+_LEGACY_TASTE = "- Old taste without version.\n"
+
 
 def _upgrade_args() -> argparse.Namespace:
     return argparse.Namespace(command="upgrade")
 
 
-def _set_xdg_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+def _set_xdg_home(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    xdg_root = tmp_path / "xdg"
+    monkeypatch.setenv("XDG_DATA_HOME", str(xdg_root))
+    return xdg_root
 
 
 def _register_project_with_upgrade_layout(
@@ -33,6 +38,30 @@ def _register_project_with_upgrade_layout(
     repo = tmp_path / "project"
     init_repo(repo)
     register_project(repo)
+
+
+def _write_stale_config_manifest(xdg_root: Path) -> None:
+    manifest_dir = xdg_root / "continuous-refactoring"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    (manifest_dir / "manifest.json").write_text(
+        json.dumps({"projects": {}}), encoding="utf-8",
+    )
+
+
+def _write_global_taste(text: str) -> None:
+    gdir = global_dir()
+    gdir.mkdir(parents=True, exist_ok=True)
+    (gdir / "taste.md").write_text(text, encoding="utf-8")
+
+
+def _assert_upgrade_fails_for_bad_config(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    with pytest.raises(SystemExit) as exc_info:
+        _handle_upgrade(_upgrade_args())
+
+    assert exc_info.value.code == 1
+    assert "config version" in capsys.readouterr().err
 
 
 # ---------------------------------------------------------------------------
@@ -60,49 +89,27 @@ def test_upgrade_is_idempotent(
 
 
 # ---------------------------------------------------------------------------
-# Failure: missing config → exit 1
+# Failure: missing or stale config → exit 1
 # ---------------------------------------------------------------------------
 
 
-def test_upgrade_fails_when_config_missing(
+@pytest.mark.parametrize(
+    "prepare_config",
+    [
+        lambda xdg_root: None,
+        _write_stale_config_manifest,
+    ],
+    ids=["missing", "stale"],
+)
+def test_upgrade_fails_for_missing_or_stale_config(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    prepare_config: Callable[[Path], None],
 ) -> None:
-    _set_xdg_home(tmp_path, monkeypatch)
-
-    with pytest.raises(SystemExit) as exc_info:
-        _handle_upgrade(_upgrade_args())
-
-    assert exc_info.value.code == 1
-    err = capsys.readouterr().err
-    assert "config version" in err
-
-
-# ---------------------------------------------------------------------------
-# Failure: stale config version → exit 1
-# ---------------------------------------------------------------------------
-
-
-def test_upgrade_fails_when_config_stale(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    _set_xdg_home(tmp_path, monkeypatch)
-
-    manifest_dir = tmp_path / "xdg" / "continuous-refactoring"
-    manifest_dir.mkdir(parents=True, exist_ok=True)
-    (manifest_dir / "manifest.json").write_text(
-        json.dumps({"projects": {}}), encoding="utf-8",
-    )
-
-    with pytest.raises(SystemExit) as exc_info:
-        _handle_upgrade(_upgrade_args())
-
-    assert exc_info.value.code == 1
-    err = capsys.readouterr().err
-    assert "config version" in err
+    xdg_root = _set_xdg_home(tmp_path, monkeypatch)
+    prepare_config(xdg_root)
+    _assert_upgrade_fails_for_bad_config(capsys)
 
 
 # ---------------------------------------------------------------------------
@@ -116,10 +123,7 @@ def test_upgrade_warns_on_stale_global_taste(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _register_project_with_upgrade_layout(tmp_path, monkeypatch)
-
-    gdir = global_dir()
-    gdir.mkdir(parents=True, exist_ok=True)
-    (gdir / "taste.md").write_text("- Old taste without version.\n", encoding="utf-8")
+    _write_global_taste(_LEGACY_TASTE)
 
     _handle_upgrade(_upgrade_args())
 
@@ -128,31 +132,21 @@ def test_upgrade_warns_on_stale_global_taste(
     assert "out of date" in err
 
 
-def test_upgrade_no_taste_warning_when_current(
+@pytest.mark.parametrize(
+    "taste_text",
+    [default_taste_text(), None],
+    ids=["current", "absent"],
+)
+def test_upgrade_skips_taste_warning_when_global_taste_is_current_or_absent(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
+    taste_text: str | None,
 ) -> None:
     _register_project_with_upgrade_layout(tmp_path, monkeypatch)
-
-    gdir = global_dir()
-    gdir.mkdir(parents=True, exist_ok=True)
-    (gdir / "taste.md").write_text(default_taste_text(), encoding="utf-8")
+    if taste_text is not None:
+        _write_global_taste(taste_text)
 
     _handle_upgrade(_upgrade_args())
 
-    err = capsys.readouterr().err
-    assert err == ""
-
-
-def test_upgrade_no_taste_warning_when_absent(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    capsys: pytest.CaptureFixture[str],
-) -> None:
-    _register_project_with_upgrade_layout(tmp_path, monkeypatch)
-
-    _handle_upgrade(_upgrade_args())
-
-    err = capsys.readouterr().err
-    assert err == ""
+    assert capsys.readouterr().err == ""

@@ -4,7 +4,7 @@ import argparse
 from pathlib import Path
 
 import pytest
-from conftest import init_taste_project, make_taste_agent_writer
+from conftest import init_taste_project, make_taste_agent_writer, make_taste_args
 
 from continuous_refactoring.cli import _handle_taste, build_parser
 from continuous_refactoring.config import default_taste_text, global_dir
@@ -18,11 +18,9 @@ def _refine_args(
     effort: str | None = "high",
     force: bool = False,
 ) -> argparse.Namespace:
-    return argparse.Namespace(
+    return make_taste_args(
+        "refine",
         global_=global_,
-        interview=False,
-        upgrade=False,
-        refine=True,
         agent=agent,
         model=model,
         effort=effort,

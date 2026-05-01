@@ -56,6 +56,7 @@ from continuous_refactoring.phases import (
 from continuous_refactoring.planning import PlanningStepResult, run_next_planning_step
 from continuous_refactoring.planning_state import (
     PlanningState,
+    is_executable_planning_step,
     load_planning_state,
     planning_state_path,
 )
@@ -70,19 +71,6 @@ _BASELINE_VALIDATION_UNCERTAINTY_PHRASES = (
     "full test suite passes",
     "tests pass now",
 )
-
-_EXECUTABLE_PLANNING_STEPS = frozenset(
-    {
-        "approaches",
-        "pick-best",
-        "expand",
-        "review",
-        "revise",
-        "review-2",
-        "final-review",
-    }
-)
-
 
 class _FinalizeCommit(Protocol):
     def __call__(
@@ -436,7 +424,7 @@ def try_planning_tick(
             return "blocked", state_result
         state = state_result
         step = state.next_step
-        if step not in _EXECUTABLE_PLANNING_STEPS:
+        if not is_executable_planning_step(step):
             return "blocked", _planning_state_record(
                 (
                     f"Planning migration has terminal next_step {step!r} "
@@ -558,7 +546,7 @@ def _planning_route_outcome(result: PlanningStepResult) -> RouteOutcome:
 
 
 def _planning_call_role(step: object) -> str:
-    if step in _EXECUTABLE_PLANNING_STEPS:
+    if is_executable_planning_step(step):
         return f"planning.{step}"
     return "planning.resume"
 

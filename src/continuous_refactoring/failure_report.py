@@ -11,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from continuous_refactoring.config import failure_snapshots_dir
 from continuous_refactoring.decisions import DecisionRecord
+from continuous_refactoring.planning_state import is_executable_planning_step
 
 if TYPE_CHECKING:
     from continuous_refactoring.artifacts import RunArtifacts
@@ -23,17 +24,6 @@ __all__ = [
 
 _PLANNING_CALL_ROLE_PREFIX = "planning."
 _INTERNAL_PLANNING_CALL_ROLES = frozenset({"state", "publish", "resume"})
-_EXECUTABLE_PLANNING_STEPS = frozenset(
-    {
-        "approaches",
-        "pick-best",
-        "expand",
-        "review",
-        "revise",
-        "review-2",
-        "final-review",
-    }
-)
 
 
 @dataclass(frozen=True)
@@ -280,7 +270,7 @@ def _planning_step(record: DecisionRecord) -> str | None:
     step = record.call_role.removeprefix(_PLANNING_CALL_ROLE_PREFIX)
     if step in _INTERNAL_PLANNING_CALL_ROLES:
         return None
-    if step not in _EXECUTABLE_PLANNING_STEPS:
+    if not is_executable_planning_step(step):
         return None
     return step
 

@@ -11,6 +11,7 @@ from continuous_refactoring.planning_state import (
     PlanningState,
     append_planning_feedback,
     complete_planning_step,
+    is_executable_planning_step,
     load_planning_state,
     new_planning_state,
     planning_stage_stdout_path,
@@ -81,6 +82,29 @@ def _payload(
         "final_decision": final_decision,
         "final_reason": final_reason,
     }
+
+
+def _ready_completed_payloads(
+    repo_root: Path,
+    mig_root: Path,
+    *,
+    final_outcome: str = "approve-auto",
+) -> list[dict[str, object]]:
+    return [
+        _completed(repo_root, mig_root, "approaches").to_payload(),
+        _completed(repo_root, mig_root, "pick-best").to_payload(),
+        _completed(repo_root, mig_root, "expand").to_payload(),
+        _completed(repo_root, mig_root, "review", "clear").to_payload(),
+        _completed(repo_root, mig_root, "final-review", final_outcome).to_payload(),
+    ]
+
+
+def test_is_executable_planning_step_matches_planning_steps() -> None:
+    assert is_executable_planning_step("approaches")
+    assert is_executable_planning_step("review-2")
+    assert not is_executable_planning_step("terminal-ready")
+    assert not is_executable_planning_step("planning.state")
+    assert not is_executable_planning_step(True)
 
 
 def test_planning_state_roundtrip_preserves_completed_steps_and_current_step(
@@ -273,6 +297,174 @@ def test_legacy_revision_base_step_count_decodes_as_single_anchor(
     saved = json.loads(planning_state_path(mig_root).read_text(encoding="utf-8"))
     assert saved["revision_base_step_counts"] == [5]
     assert "revision_base_step_count" not in saved
+
+
+def test_legacy_revision_base_step_count_reopens_human_review_ready_state(
+    tmp_path: Path,
+) -> None:
+    repo_root, mig_root = _migration_root(tmp_path)
+    path = planning_state_path(mig_root)
+    payload = _payload(
+        repo_root=repo_root,
+        mig_root=mig_root,
+        next_step="revise",
+        completed_steps=_ready_completed_payloads(
+            repo_root,
+            mig_root,
+            final_outcome="approve-needs-human",
+        ),
+    )
+    payload["revision_base_step_count"] = 5
+    _write_state_payload(path, payload)
+
+    loaded = load_planning_state(repo_root, path)
+    assert loaded.next_step == "revise"
+    assert loaded.revision_base_step_counts == (5,)
+
+
+@pytest.mark.parametrize(
+    ("anchors", "message"),
+    [
+        ([5, 5], "strictly increasing"),
+        ([5, 4], "strictly increasing"),
+        ([0], "outside completed history"),
+        ([6], "outside completed history"),
+    ],
+)
+def test_planning_state_rejects_invalid_revision_anchor_order_and_range(
+    tmp_path: Path,
+    anchors: list[int],
+    message: str,
+) -> None:
+    repo_root, mig_root = _migration_root(tmp_path)
+    path = planning_state_path(mig_root)
+    payload = _payload(
+        repo_root=repo_root,
+        mig_root=mig_root,
+        next_step="revise",
+        completed_steps=_ready_completed_payloads(repo_root, mig_root),
+    )
+    payload["revision_base_step_counts"] = anchors
+    _write_state_payload(path, payload)
+
+    with pytest.raises(ContinuousRefactorError, match=message):
+        load_planning_state(repo_root, path)
+
+
+@pytest.mark.parametrize("anchor", [True, "5", 1.0])
+def test_planning_state_rejects_non_integer_revision_anchor(
+    tmp_path: Path,
+    anchor: object,
+) -> None:
+    repo_root, mig_root = _migration_root(tmp_path)
+    path = planning_state_path(mig_root)
+    payload = _payload(
+        repo_root=repo_root,
+        mig_root=mig_root,
+        next_step="revise",
+        completed_steps=_ready_completed_payloads(repo_root, mig_root),
+    )
+    payload["revision_base_step_counts"] = [anchor]
+    _write_state_payload(path, payload)
+
+    with pytest.raises(
+        ContinuousRefactorError,
+        match="Planning field 'revision_base_step_counts\\[0\\]' must be an integer",
+    ):
+        load_planning_state(repo_root, path)
+
+
+def test_planning_state_rejects_mixed_legacy_and_current_revision_anchors(
+    tmp_path: Path,
+) -> None:
+    repo_root, mig_root = _migration_root(tmp_path)
+    path = planning_state_path(mig_root)
+    payload = _payload(
+        repo_root=repo_root,
+        mig_root=mig_root,
+        next_step="revise",
+        completed_steps=_ready_completed_payloads(repo_root, mig_root),
+    )
+    payload["revision_base_step_count"] = 5
+    payload["revision_base_step_counts"] = [5]
+    _write_state_payload(path, payload)
+
+    with pytest.raises(
+        ContinuousRefactorError,
+        match="may not mix revision_base_step_count and revision_base_step_counts",
+    ):
+        load_planning_state(repo_root, path)
+
+
+def test_planning_state_allows_null_legacy_anchor_with_current_revision_anchors(
+    tmp_path: Path,
+) -> None:
+    repo_root, mig_root = _migration_root(tmp_path)
+    path = planning_state_path(mig_root)
+    payload = _payload(
+        repo_root=repo_root,
+        mig_root=mig_root,
+        next_step="revise",
+        completed_steps=_ready_completed_payloads(repo_root, mig_root),
+    )
+    payload["revision_base_step_count"] = None
+    payload["revision_base_step_counts"] = [5]
+    _write_state_payload(path, payload)
+
+    loaded = load_planning_state(repo_root, path)
+    assert loaded.revision_base_step_counts == (5,)
+
+
+def test_planning_state_rejects_revision_anchor_at_non_terminal_cursor(
+    tmp_path: Path,
+) -> None:
+    repo_root, mig_root = _migration_root(tmp_path)
+    path = planning_state_path(mig_root)
+    payload = _payload(
+        repo_root=repo_root,
+        mig_root=mig_root,
+        next_step="revise",
+        completed_steps=[
+            _completed(repo_root, mig_root, "approaches").to_payload(),
+            _completed(repo_root, mig_root, "pick-best").to_payload(),
+            _completed(repo_root, mig_root, "expand").to_payload(),
+        ],
+    )
+    payload["revision_base_step_counts"] = [3]
+    _write_state_payload(path, payload)
+
+    with pytest.raises(
+        ContinuousRefactorError,
+        match="must point at a terminal ready cursor, got 'review'",
+    ):
+        load_planning_state(repo_root, path)
+
+
+def test_planning_state_rejects_revision_anchor_at_skipped_terminal_cursor(
+    tmp_path: Path,
+) -> None:
+    repo_root, mig_root = _migration_root(tmp_path)
+    path = planning_state_path(mig_root)
+    payload = _payload(
+        repo_root=repo_root,
+        mig_root=mig_root,
+        next_step="revise",
+        completed_steps=_ready_completed_payloads(
+            repo_root,
+            mig_root,
+            final_outcome="reject",
+        ),
+        final_decision="reject",
+        final_reason="skip",
+    )
+    payload["revision_base_step_counts"] = [5]
+    _write_state_payload(path, payload)
+
+    with pytest.raises(
+        ContinuousRefactorError,
+        match="must point at a terminal ready cursor, got 'terminal-skipped'",
+    ):
+        load_planning_state(repo_root, path)
 
 
 def test_planning_state_rejects_unknown_current_step(tmp_path: Path) -> None:

@@ -4,7 +4,7 @@ import json
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal, cast, get_args
+from typing import Literal, TypeGuard, cast, get_args
 
 from continuous_refactoring.artifacts import ContinuousRefactorError, iso_timestamp
 
@@ -20,6 +20,7 @@ __all__ = [
     "append_planning_feedback",
     "complete_planning_step",
     "initial_planning_state",
+    "is_executable_planning_step",
     "load_planning_state",
     "new_planning_state",
     "planning_stage_stdout_path",
@@ -174,6 +175,10 @@ def new_planning_state(target: str, *, now: str | None = None) -> PlanningState:
 
 def initial_planning_state(target: str, *, now: str | None = None) -> PlanningState:
     return new_planning_state(target, now=now)
+
+
+def is_executable_planning_step(value: object) -> TypeGuard[PlanningStep]:
+    return isinstance(value, str) and value in _PLANNING_STEPS
 
 
 def complete_planning_step(

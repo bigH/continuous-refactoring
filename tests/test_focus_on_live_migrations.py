@@ -583,7 +583,6 @@ def test_e2e_focused_run_completes_planning_before_phase_execution(
         live_dir,
         "mid-planning",
     )
-    ready_path = _seed_manifest(live_dir, "ready-phase")
     continuous_refactoring.run_command(["git", "add", "migrations"], cwd=run_loop_env)
     continuous_refactoring.run_command(
         ["git", "commit", "-m", "seed focused migrations"],
@@ -620,8 +619,7 @@ def test_e2e_focused_run_completes_planning_before_phase_execution(
         **_kwargs: object,
     ) -> tuple[str, str]:
         calls.append(f"ready:{manifest.name}")
-        if executed:
-            return ("no", "stop after first phase")
+        assert manifest.name == "mid-planning"
         return ("yes", "ready")
 
     def fake_execute(
@@ -631,6 +629,7 @@ def test_e2e_focused_run_completes_planning_before_phase_execution(
         **_kwargs: object,
     ) -> object:
         calls.append(f"execute:{manifest.name}")
+        assert manifest.name == "mid-planning"
         executed.append(manifest.name)
         manifest_path = live_dir / manifest.name / "manifest.json"
         _mark_done(manifest_path)
@@ -643,11 +642,13 @@ def test_e2e_focused_run_completes_planning_before_phase_execution(
 
     args = make_run_loop_args(run_loop_env, focus_on_live_migrations=True)
     assert continuous_refactoring.run_migrations_focused_loop(args) == 0
-    assert calls[0] == "planning:final-review"
-    assert len(executed) == 1
-    assert calls.index(f"execute:{executed[0]}") > calls.index("planning:final-review")
-    assert load_manifest(planning_path).status in {"ready", "done"}
-    assert load_manifest(ready_path).status in {"ready", "done"}
+    assert calls == [
+        "planning:final-review",
+        "ready:mid-planning",
+        "execute:mid-planning",
+    ]
+    assert executed == ["mid-planning"]
+    assert load_manifest(planning_path).status == "done"
 
 
 def test_focused_loop_stops_when_only_blocked_planning_remains(

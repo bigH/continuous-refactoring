@@ -130,7 +130,13 @@ class PlanningState:
     review_findings: str | None
     final_decision: FinalPlanningDecision | None
     final_reason: str | None
-    revision_base_step_count: int | None = None
+    revision_base_step_counts: tuple[int, ...] = ()
+
+    @property
+    def revision_base_step_count(self) -> int | None:
+        if not self.revision_base_step_counts:
+            return None
+        return self.revision_base_step_counts[-1]
 
 
 @dataclass(frozen=True)
@@ -162,7 +168,7 @@ def new_planning_state(target: str, *, now: str | None = None) -> PlanningState:
         review_findings=None,
         final_decision=None,
         final_reason=None,
-        revision_base_step_count=None,
+        revision_base_step_counts=(),
     )
 
 
@@ -218,7 +224,7 @@ def complete_planning_step(
         review_findings=state.review_findings,
         final_decision=state.final_decision,
         final_reason=state.final_reason,
-        revision_base_step_count=state.revision_base_step_count,
+        revision_base_step_counts=state.revision_base_step_counts,
     )
     replay = _replay_details(updated)
     return PlanningState(
@@ -236,7 +242,7 @@ def complete_planning_step(
             replay.final_decision,
             final_reason,
         ),
-        revision_base_step_count=updated.revision_base_step_count,
+        revision_base_step_counts=updated.revision_base_step_counts,
     )
 
 
@@ -264,7 +270,7 @@ def append_planning_feedback(
         review_findings=state.review_findings,
         final_decision=state.final_decision,
         final_reason=state.final_reason,
-        revision_base_step_count=state.revision_base_step_count,
+        revision_base_step_counts=state.revision_base_step_counts,
     )
     _validate_replay_metadata(updated, _replay_details(updated))
     return updated
@@ -291,7 +297,10 @@ def reopen_planning_for_revise(
         review_findings=None,
         final_decision=None,
         final_reason=None,
-        revision_base_step_count=len(state.completed_steps),
+        revision_base_step_counts=(
+            *state.revision_base_step_counts,
+            len(state.completed_steps),
+        ),
     )
     _validate_replay_metadata(updated, _replay_details(updated))
     return updated
@@ -492,10 +501,16 @@ def _replay_details(state: PlanningState) -> _ReplayResult:
     review_findings: str | None = None
     final_decision: FinalPlanningDecision | None = None
 
-    _validate_revision_base_step_count(state)
+    _validate_revision_base_step_counts(state)
+    revision_anchor_index = 0
+    revision_anchors = state.revision_base_step_counts
     for index, completed in enumerate(state.completed_steps):
-        if state.revision_base_step_count == index:
+        if (
+            revision_anchor_index < len(revision_anchors)
+            and revision_anchors[revision_anchor_index] == index
+        ):
             expected, review_findings, final_decision = _reopen_cursor(expected)
+            revision_anchor_index += 1
         if expected not in _PLANNING_STEPS:
             raise ContinuousRefactorError(
                 f"Planning step {completed.name!r} appears after terminal cursor {expected!r}"
@@ -511,8 +526,12 @@ def _replay_details(state: PlanningState) -> _ReplayResult:
             final_decision=final_decision,
         )
 
-    if state.revision_base_step_count == len(state.completed_steps):
+    if (
+        revision_anchor_index < len(revision_anchors)
+        and revision_anchors[revision_anchor_index] == len(state.completed_steps)
+    ):
         expected, review_findings, final_decision = _reopen_cursor(expected)
+        revision_anchor_index += 1
 
     return _ReplayResult(
         next_step=expected,
@@ -521,14 +540,22 @@ def _replay_details(state: PlanningState) -> _ReplayResult:
     )
 
 
-def _validate_revision_base_step_count(state: PlanningState) -> None:
-    value = state.revision_base_step_count
-    if value is None:
-        return
-    if value < 1 or value > len(state.completed_steps):
-        raise ContinuousRefactorError(
-            "Planning state revision_base_step_count is outside completed history"
-        )
+def _validate_revision_base_step_counts(state: PlanningState) -> None:
+    previous = 0
+    for value in state.revision_base_step_counts:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ContinuousRefactorError(
+                "Planning state revision_base_step_counts must contain integers"
+            )
+        if value < 1 or value > len(state.completed_steps):
+            raise ContinuousRefactorError(
+                "Planning state revision_base_step_counts is outside completed history"
+            )
+        if value <= previous:
+            raise ContinuousRefactorError(
+                "Planning state revision_base_step_counts must be strictly increasing"
+            )
+        previous = value
 
 
 def _reopen_cursor(
@@ -536,7 +563,7 @@ def _reopen_cursor(
 ) -> tuple[PlanningCursor, str | None, FinalPlanningDecision | None]:
     if cursor not in ("terminal-ready", "terminal-ready-awaiting-human"):
         raise ContinuousRefactorError(
-            "Planning state revision_base_step_count must point at a "
+            "Planning state revision_base_step_counts must point at a "
             f"terminal ready cursor, got {cursor!r}"
         )
     return "revise", None, None
@@ -736,9 +763,10 @@ def _decode_state_payload(raw_payload: object) -> PlanningState:
             "final_decision",
             "final_reason",
         },
-        optional={"revision_base_step_count"},
+        optional={"revision_base_step_count", "revision_base_step_counts"},
         field="planning state",
     )
+    revision_base_step_counts = _decode_revision_base_step_counts(raw)
     return PlanningState(
         schema_version=_require_int(raw.get("schema_version"), field="schema_version"),
         target=_require_str(raw.get("target"), field="target"),
@@ -752,9 +780,7 @@ def _decode_state_payload(raw_payload: object) -> PlanningState:
             raw.get("final_decision"), field="final_decision"
         ),
         final_reason=_optional_str(raw.get("final_reason"), field="final_reason"),
-        revision_base_step_count=_optional_int(
-            raw.get("revision_base_step_count"), field="revision_base_step_count"
-        ),
+        revision_base_step_counts=revision_base_step_counts,
     )
 
 
@@ -777,9 +803,31 @@ def _encode_state_payload(state: PlanningState) -> str:
         "review_findings": state.review_findings,
         "final_decision": state.final_decision,
         "final_reason": state.final_reason,
-        "revision_base_step_count": state.revision_base_step_count,
+        "revision_base_step_counts": list(state.revision_base_step_counts),
     }
     return json.dumps(payload, indent=2, sort_keys=True) + "\n"
+
+
+def _decode_revision_base_step_counts(
+    raw: dict[str, object],
+) -> tuple[int, ...]:
+    if "revision_base_step_counts" in raw:
+        if "revision_base_step_count" in raw and raw["revision_base_step_count"] is not None:
+            raise ContinuousRefactorError(
+                "Planning state may not mix revision_base_step_count and "
+                "revision_base_step_counts"
+            )
+        return _require_int_tuple(
+            raw.get("revision_base_step_counts"),
+            field="revision_base_step_counts",
+        )
+    legacy_value = _optional_int(
+        raw.get("revision_base_step_count"),
+        field="revision_base_step_count",
+    )
+    if legacy_value is None:
+        return ()
+    return (legacy_value,)
 
 
 def _require_completed_steps(value: object) -> tuple[CompletedPlanningStep, ...]:
@@ -883,6 +931,17 @@ def _optional_int(value: object, *, field: str) -> int | None:
     if value is None:
         return None
     return _require_int(value, field=field)
+
+
+def _require_int_tuple(value: object, *, field: str) -> tuple[int, ...]:
+    if not isinstance(value, list):
+        raise ContinuousRefactorError(
+            f"Planning field {field!r} must be a list: {value!r}"
+        )
+    return tuple(
+        _require_int(item, field=f"{field}[{index}]")
+        for index, item in enumerate(value)
+    )
 
 
 def _require_feedback_tuple(

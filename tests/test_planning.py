@@ -682,7 +682,7 @@ def test_refine_ready_reopen_runs_one_revise_step(
     assert mock.stage_labels == ["revise"]
     assert manifest.status == "planning"
     assert state.next_step == "review-2"
-    assert state.revision_base_step_count == 5
+    assert state.revision_base_step_counts == (5,)
 
 
 def test_refine_repeated_steps_keep_original_stdout_history(
@@ -733,6 +733,100 @@ def test_refine_repeated_steps_keep_original_stdout_history(
     assert (
         mig_root / ".planning" / "stages" / "final-review-2.stdout.md"
     ).read_text(encoding="utf-8") == "final-decision: approve-auto - refined ready\n"
+
+
+def test_refine_ready_can_reopen_after_prior_refine_cycle(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, live_dir, mig_root = _planning_repo_context(tmp_path, monkeypatch)
+    _seed_ready_snapshot(repo_root, live_dir)
+    original_final_review = planning_stage_stdout_path(mig_root, "final-review")
+    original_final_review_text = original_final_review.read_text(encoding="utf-8")
+
+    result, _mock = _run_refine_step(
+        repo_root,
+        live_dir,
+        [
+            _workspace_response(
+                "Revised with feedback.\n",
+                {
+                    "plan.md": "# Plan v2\n",
+                    "phase-0-setup.md": _phase_doc("always", "Setup is complete."),
+                },
+            )
+        ],
+        monkeypatch,
+        feedback="Narrow the rollout.",
+    )
+    assert result.status == "published"
+    assert result.step == "revise"
+    _commit_all(repo_root, "planning refine")
+
+    for responses in (
+        [_workspace_response("Reviewed revised plan. no findings.\n")],
+        [_workspace_response("final-decision: approve-auto - refined ready\n")],
+    ):
+        result, _mock = _run_next_step(repo_root, live_dir, responses, monkeypatch)
+        assert result.status == "published"
+        _commit_all(repo_root, f"planning {result.step}")
+
+    result, mock = _run_refine_step(
+        repo_root,
+        live_dir,
+        [
+            _workspace_response(
+                "Revised again.\n",
+                {
+                    "plan.md": "# Plan v3\n",
+                    "phase-0-setup.md": _phase_doc("always", "Setup is complete."),
+                },
+            )
+        ],
+        monkeypatch,
+        feedback="Make the second pass smaller.",
+    )
+
+    state = load_planning_state(repo_root, planning_state_path(mig_root))
+    assert result.status == "published"
+    assert result.step == "revise"
+    assert mock.stage_labels == ["revise"]
+    assert state.next_step == "review-2"
+    assert [feedback.text for feedback in state.feedback] == [
+        "Narrow the rollout.",
+        "Make the second pass smaller.",
+    ]
+    assert [step.name for step in state.completed_steps] == [
+        "approaches",
+        "pick-best",
+        "expand",
+        "review",
+        "final-review",
+        "revise",
+        "review-2",
+        "final-review",
+        "revise",
+    ]
+    assert state.revision_base_step_counts == (5, 8)
+    final_review_refs = [
+        step.outputs["stdout"]
+        for step in state.completed_steps
+        if step.name == "final-review"
+    ]
+    assert final_review_refs == [
+        "live/rework-auth/.planning/stages/final-review.stdout.md",
+        "live/rework-auth/.planning/stages/final-review-2.stdout.md",
+    ]
+    assert original_final_review.read_text(encoding="utf-8") == original_final_review_text
+    assert (
+        mig_root / ".planning" / "stages" / "final-review-2.stdout.md"
+    ).read_text(encoding="utf-8") == "final-decision: approve-auto - refined ready\n"
+    assert (
+        mig_root / ".planning" / "stages" / "revise.stdout.md"
+    ).read_text(encoding="utf-8") == "Revised with feedback.\n"
+    assert (
+        mig_root / ".planning" / "stages" / "revise-2.stdout.md"
+    ).read_text(encoding="utf-8") == "Revised again.\n"
 
 
 # ---------------------------------------------------------------------------

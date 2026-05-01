@@ -519,7 +519,7 @@ def _build_durable_planning_context(
     elif state.next_step == "review":
         step_context = f"Plan:\n{_read_plan_text(plan_path)}"
     elif state.next_step == "revise":
-        if state.revision_base_step_count is None:
+        if not state.revision_base_step_counts:
             step_context = _durable_stdout_context(
                 "Review findings to address",
                 state,

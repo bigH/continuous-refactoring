@@ -21,6 +21,20 @@ __all__ = [
     "write",
 ]
 
+_PLANNING_CALL_ROLE_PREFIX = "planning."
+_INTERNAL_PLANNING_CALL_ROLES = frozenset({"state", "publish", "resume"})
+_EXECUTABLE_PLANNING_STEPS = frozenset(
+    {
+        "approaches",
+        "pick-best",
+        "expand",
+        "review",
+        "revise",
+        "review-2",
+        "final-review",
+    }
+)
+
 
 @dataclass(frozen=True)
 class SnapshotArtifactPaths:
@@ -261,13 +275,14 @@ def _next_step_text(record: DecisionRecord) -> str:
 
 
 def _planning_step(record: DecisionRecord) -> str | None:
-    if record.failure_kind != "planning-step-failed":
+    if not record.call_role.startswith(_PLANNING_CALL_ROLE_PREFIX):
         return None
-    prefix = "planning."
-    if not record.call_role.startswith(prefix):
+    step = record.call_role.removeprefix(_PLANNING_CALL_ROLE_PREFIX)
+    if step in _INTERNAL_PLANNING_CALL_ROLES:
         return None
-    step = record.call_role.removeprefix(prefix)
-    return step or None
+    if step not in _EXECUTABLE_PLANNING_STEPS:
+        return None
+    return step
 
 
 def effective_record(

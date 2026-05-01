@@ -762,6 +762,66 @@ def test_migration_refine_resumes_from_current_planning_state(
     assert (migration_dir / "plan.md").read_text(encoding="utf-8") == "# Refined Plan\n"
 
 
+def test_migration_refine_reads_feedback_from_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, live_dir = _init_migration_project(tmp_path, monkeypatch)
+    migration_dir = _write_migration(
+        live_dir, "target", status="planning", current_phase="", phases=(),
+    )
+    _write_completed_planning_state(
+        repo,
+        migration_dir,
+        [
+            ("approaches", "completed", "Generated approaches.\n"),
+            ("pick-best", "completed", "Chose incremental.\n"),
+        ],
+    )
+    feedback_path = repo / "feedback.md"
+    feedback_text = "Split phase one.\nPreserve this exact text.\n"
+    feedback_path.write_text(feedback_text, encoding="utf-8")
+    _commit_all(repo)
+    fake = _RefineAgent(
+        [
+            _agent_response(
+                "Expanded.\n",
+                {
+                    "plan.md": "# File Feedback Plan\n",
+                    _PHASE.file: _phase_doc("always", "Done."),
+                },
+            )
+        ]
+    )
+    monkeypatch.setattr("continuous_refactoring.planning.maybe_run_agent", fake)
+
+    handle_migration_refine(_refine_args("target", file=feedback_path))
+
+    state = load_planning_state(repo, planning_state_path(migration_dir))
+    assert fake.stage_labels == ["expand"]
+    assert state.feedback[-1].source == "file"
+    assert state.feedback[-1].text == feedback_text
+
+
+def test_migration_refine_rejects_empty_feedback_file(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _repo, live_dir = _init_migration_project(tmp_path, monkeypatch)
+    migration_dir = _write_migration(live_dir, "target")
+    feedback_path = tmp_path / "empty-feedback.md"
+    feedback_path.write_text("  \n\t", encoding="utf-8")
+    before = snapshot_tree_digest(migration_dir)
+
+    with pytest.raises(SystemExit) as exc_info:
+        handle_migration_refine(_refine_args("target", file=feedback_path))
+
+    assert exc_info.value.code == 2
+    assert "must not be empty" in capsys.readouterr().err
+    assert snapshot_tree_digest(migration_dir) == before
+
+
 def test_migration_refine_reopens_unexecuted_ready_migration_to_planning(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -794,8 +854,48 @@ def test_migration_refine_reopens_unexecuted_ready_migration_to_planning(
     assert manifest.current_phase == "setup"
     assert all(not phase.done for phase in manifest.phases)
     assert state.next_step == "review-2"
-    assert state.revision_base_step_count == 5
+    assert state.revision_base_step_counts == (5,)
     assert planning_stage_stdout_path(migration_dir, "final-review").is_file()
+
+
+def test_migration_refine_reopens_ready_awaiting_review_without_approving_review(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, live_dir = _init_migration_project(tmp_path, monkeypatch)
+    migration_dir = _write_migration(
+        live_dir,
+        "target",
+        awaiting_human_review=True,
+        human_review_reason="needs approval",
+    )
+    _write_terminal_ready_planning_state(repo, migration_dir)
+    _commit_all(repo)
+    fake = _RefineAgent(
+        [
+            _agent_response(
+                "Revised.\n",
+                {
+                    "plan.md": "# Plan v2\n",
+                    _PHASE.file: _phase_doc("always", "Still done."),
+                },
+            )
+        ]
+    )
+    monkeypatch.setattr("continuous_refactoring.planning.maybe_run_agent", fake)
+
+    handle_migration_refine(_refine_args("target", message="rewrite after review"))
+
+    manifest = load_manifest(migration_dir / "manifest.json")
+    state = load_planning_state(repo, planning_state_path(migration_dir))
+    assert fake.stage_labels == ["revise"]
+    assert manifest.status == "planning"
+    assert manifest.awaiting_human_review is False
+    assert manifest.human_review_reason is None
+    assert manifest.current_phase == "setup"
+    assert all(not phase.done for phase in manifest.phases)
+    assert state.next_step == "review-2"
+    assert state.feedback[-1].text == "rewrite after review"
 
 
 def test_migration_refine_refuses_migration_with_completed_phase(
@@ -815,6 +915,59 @@ def test_migration_refine_refuses_migration_with_completed_phase(
 
     assert exc_info.value.code == 2
     assert "completed phase" in capsys.readouterr().err
+    assert snapshot_tree_digest(migration_dir) == before
+
+
+@pytest.mark.parametrize("status", ["in-progress", "done", "skipped"])
+def test_migration_refine_refuses_non_planning_status_matrix(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    status: str,
+) -> None:
+    repo, live_dir = _init_migration_project(tmp_path, monkeypatch)
+    migration_dir = _write_migration(live_dir, "target", status=status)
+    _write_terminal_ready_planning_state(repo, migration_dir)
+    _commit_all(repo)
+    before = snapshot_tree_digest(migration_dir)
+
+    with pytest.raises(SystemExit) as exc_info:
+        handle_migration_refine(_refine_args("target"))
+
+    assert exc_info.value.code == 2
+    assert "only planning or unexecuted ready migrations can be refined" in (
+        capsys.readouterr().err
+    )
+    assert snapshot_tree_digest(migration_dir) == before
+
+
+def test_migration_refine_refuses_ready_state_with_advanced_cursor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    repo, live_dir = _init_migration_project(tmp_path, monkeypatch)
+    followup_phase = PhaseSpec(
+        name="migrate",
+        file="phase-2-migrate.md",
+        done=False,
+        precondition="setup is done",
+    )
+    migration_dir = _write_migration(
+        live_dir,
+        "target",
+        current_phase="migrate",
+        phases=(_PHASE, followup_phase),
+    )
+    _write_terminal_ready_planning_state(repo, migration_dir)
+    _commit_all(repo)
+    before = snapshot_tree_digest(migration_dir)
+
+    with pytest.raises(SystemExit) as exc_info:
+        handle_migration_refine(_refine_args("target"))
+
+    assert exc_info.value.code == 2
+    assert "already advanced past its first phase" in capsys.readouterr().err
     assert snapshot_tree_digest(migration_dir) == before
 
 

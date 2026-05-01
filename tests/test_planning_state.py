@@ -16,6 +16,7 @@ from continuous_refactoring.planning_state import (
     planning_stage_stdout_path,
     planning_state_path,
     planning_step_stdout,
+    reopen_planning_for_revise,
     save_planning_state,
     write_planning_stage_stdout,
 )
@@ -182,6 +183,96 @@ def test_repeated_planning_step_stdout_keeps_prior_audit_output(
     assert (
         mig_root / ".planning" / "stages" / "final-review-2.stdout.md"
     ).read_text(encoding="utf-8") == "second\n"
+
+
+def test_reopen_planning_for_revise_appends_revision_anchors(
+    tmp_path: Path,
+) -> None:
+    repo_root, mig_root = _migration_root(tmp_path)
+    state = new_planning_state("Clean up auth", now=_NOW)
+
+    for step, outcome in (
+        ("approaches", "completed"),
+        ("pick-best", "completed"),
+        ("expand", "completed"),
+        ("review", "clear"),
+        ("final-review", "approve-auto"),
+    ):
+        state = complete_planning_step(
+            state,
+            step,
+            outcome,
+            write_planning_stage_stdout(repo_root, mig_root, step, f"{step}\n"),
+            completed_at=_LATER,
+            final_reason="ready" if step == "final-review" else None,
+        )
+
+    state = reopen_planning_for_revise(state, now=_LATER)
+    assert state.next_step == "revise"
+    assert state.revision_base_step_counts == (5,)
+
+    for step, outcome in (
+        ("revise", "completed"),
+        ("review-2", "clear"),
+        ("final-review", "approve-auto"),
+    ):
+        state = complete_planning_step(
+            state,
+            step,
+            outcome,
+            write_planning_stage_stdout(repo_root, mig_root, step, f"{step} again\n"),
+            completed_at=_LATER,
+            final_reason="ready again" if step == "final-review" else None,
+        )
+
+    state = reopen_planning_for_revise(state, now=_LATER)
+    save_planning_state(state, planning_state_path(mig_root), repo_root=repo_root)
+    loaded = load_planning_state(repo_root, planning_state_path(mig_root))
+
+    assert loaded.next_step == "revise"
+    assert loaded.revision_base_step_counts == (5, 8)
+
+
+def test_legacy_revision_base_step_count_decodes_as_single_anchor(
+    tmp_path: Path,
+) -> None:
+    repo_root, mig_root = _migration_root(tmp_path)
+    state = new_planning_state("Clean up auth", now=_NOW)
+
+    for step, outcome in (
+        ("approaches", "completed"),
+        ("pick-best", "completed"),
+        ("expand", "completed"),
+        ("review", "clear"),
+        ("final-review", "approve-auto"),
+    ):
+        state = complete_planning_step(
+            state,
+            step,
+            outcome,
+            write_planning_stage_stdout(repo_root, mig_root, step, f"{step}\n"),
+            completed_at=_LATER,
+            final_reason="ready" if step == "final-review" else None,
+        )
+
+    payload = _payload(
+        repo_root=repo_root,
+        mig_root=mig_root,
+        next_step="revise",
+        completed_steps=[step.to_payload() for step in state.completed_steps],
+    )
+    payload["revision_base_step_count"] = 5
+    _write_state_payload(planning_state_path(mig_root), payload)
+
+    loaded = load_planning_state(repo_root, planning_state_path(mig_root))
+    assert loaded.next_step == "revise"
+    assert loaded.revision_base_step_counts == (5,)
+    assert loaded.revision_base_step_count == 5
+
+    save_planning_state(loaded, planning_state_path(mig_root), repo_root=repo_root)
+    saved = json.loads(planning_state_path(mig_root).read_text(encoding="utf-8"))
+    assert saved["revision_base_step_counts"] == [5]
+    assert "revision_base_step_count" not in saved
 
 
 def test_planning_state_rejects_unknown_current_step(tmp_path: Path) -> None:

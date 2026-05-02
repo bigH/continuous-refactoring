@@ -1,4 +1,4 @@
-# Phase 4: Tighten Boundary Contracts
+# Phase 5: Tighten Boundary Contracts
 
 ## Scope
 - `src/continuous_refactoring/migrations.py`
@@ -11,11 +11,9 @@ required_effort: medium
 effort_reason: boundary cleanup can accidentally change error semantics or public exports
 
 ## Precondition
-Phase 3 is complete, `src/continuous_refactoring/phases.py`,
-`src/continuous_refactoring/loop.py`, and
-`src/continuous_refactoring/prompts.py` now import their extracted operational
-helpers from `migration_manifest_ops.py`, and `migrations.py` still preserves
-the locked compatibility export set.
+Phase 4 is complete, all planned internal callers now import extracted
+operational helpers from `migration_manifest_ops.py`, and `migrations.py` still
+preserves the locked compatibility export set.
 
 ## Instructions
 - Remove residual non-boundary operational logic from `migrations.py` that no

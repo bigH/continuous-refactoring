@@ -1023,6 +1023,18 @@ def _focus_eligible_planning_manifests(
     ]
 
 
+def _unskipped_planning_candidates(
+    candidates: list[tuple[MigrationManifest, Path]],
+    skipped_names: set[str],
+) -> list[tuple[MigrationManifest, Path]]:
+    if not skipped_names:
+        return candidates
+    return [
+        pair for pair in candidates
+        if pair[0].name not in skipped_names
+    ]
+
+
 def _eligible_planning_path_labels(
     repo_root: Path,
     candidates: list[tuple[MigrationManifest, Path]],
@@ -1101,6 +1113,7 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
     error_message: str | None = None
     consecutive_failures = 0
     iteration = 0
+    skipped_planning_names: set[str] = set()
 
     try:
         require_clean_worktree(repo_root)
@@ -1120,16 +1133,24 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
         while True:
             now = datetime.now(timezone.utc)
             preflight = migration_tick._first_unloadable_visible_manifest(live_dir)
-            planning_eligible = (
+            all_planning_eligible = (
                 []
                 if preflight is not None
                 else _focus_eligible_planning_manifests(live_dir, now)
+            )
+            planning_eligible = _unskipped_planning_candidates(
+                all_planning_eligible,
+                skipped_planning_names,
             )
             phase_eligible = (
                 []
                 if preflight is not None or planning_eligible
                 else _focus_eligible_manifests(live_dir, now, base_effort_budget)
             )
+            if all_planning_eligible and not planning_eligible and not phase_eligible:
+                skipped_planning_names.clear()
+                planning_eligible = all_planning_eligible
+
             if not planning_eligible and not phase_eligible and preflight is None:
                 print(
                     "Focused migrations loop: nothing eligible — "
@@ -1174,6 +1195,7 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
                     commit_message_prefix=args.commit_message_prefix,
                     attempt=iteration,
                     finalize_commit=_finalize_commit,
+                    skip_migration_names=skipped_planning_names,
                 )
             else:
                 outcome, record = migration_tick.try_migration_tick(
@@ -1205,7 +1227,16 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
 
             if outcome == "commit":
                 consecutive_failures = 0
+                if record is not None and record.call_role.startswith("planning."):
+                    skipped_planning_names.discard(record.target)
             elif outcome in {"abandon", "blocked"}:
+                if (
+                    outcome == "abandon"
+                    and record is not None
+                    and record.call_role.startswith("planning.")
+                    and record.retry_recommendation == "new-target"
+                ):
+                    skipped_planning_names.add(record.target)
                 consecutive_failures += 1
                 if consecutive_failures >= max_consecutive:
                     final_status = "max_consecutive_failures"
@@ -1213,6 +1244,16 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
                         f"Stopping: {max_consecutive} consecutive failures"
                     )
             else:
+                if skipped_planning_names:
+                    artifacts.log(
+                        "INFO",
+                        "Focused migration alternatives deferred; retrying skipped "
+                        "planning migrations.",
+                        event="focus_retry_skipped_planning",
+                        skipped_planning_targets=sorted(skipped_planning_names),
+                    )
+                    skipped_planning_names.clear()
+                    continue
                 message = (
                     "Migration tick deferred all eligible migrations; "
                     "terminating until a wake-up window or manifest change."

@@ -80,10 +80,17 @@ def _seed_manifest(
     return path
 
 
-def _seed_planning_manifest(live_dir: Path, name: str) -> Path:
+def _seed_planning_manifest(
+    live_dir: Path,
+    name: str,
+    *,
+    created_at: datetime | None = None,
+) -> Path:
     manifest = MigrationManifest(
         name=name,
-        created_at=(_utc_now() - timedelta(days=2)).isoformat(timespec="milliseconds"),
+        created_at=(created_at or _utc_now() - timedelta(days=2)).isoformat(
+            timespec="milliseconds",
+        ),
         last_touch=(_utc_now() - timedelta(days=1)).isoformat(timespec="milliseconds"),
         wake_up_on=None,
         awaiting_human_review=False,
@@ -102,8 +109,10 @@ def _seed_planning_manifest_at_final_review(
     repo_root: Path,
     live_dir: Path,
     name: str,
+    *,
+    created_at: datetime | None = None,
 ) -> Path:
-    path = _seed_planning_manifest(live_dir, name)
+    path = _seed_planning_manifest(live_dir, name, created_at=created_at)
     root = path.parent
     (root / "plan.md").write_text("# Plan\n", encoding="utf-8")
     (root / _PHASE.file).write_text(
@@ -649,6 +658,123 @@ def test_e2e_focused_run_completes_planning_before_phase_execution(
     ]
     assert executed == ["mid-planning"]
     assert load_manifest(planning_path).status == "done"
+
+
+def test_focused_loop_skips_abandoned_planning_migration_while_other_is_eligible(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = run_loop_env / "migrations"
+    live_dir.mkdir()
+    now = _utc_now()
+    _seed_planning_manifest_at_final_review(
+        run_loop_env,
+        live_dir,
+        "alpha",
+        created_at=now - timedelta(hours=2),
+    )
+    _seed_planning_manifest_at_final_review(
+        run_loop_env,
+        live_dir,
+        "beta",
+        created_at=now - timedelta(hours=1),
+    )
+    continuous_refactoring.run_command(["git", "add", "migrations"], cwd=run_loop_env)
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "seed focused planning migrations"],
+        cwd=run_loop_env,
+    )
+    _install_focused_loop_env(run_loop_env, monkeypatch, live_dir)
+    calls: list[str] = []
+
+    def failing_planning(
+        migration_name: str,
+        *_args: object,
+        **_kwargs: object,
+    ) -> object:
+        calls.append(migration_name)
+        raise ContinuousRefactorError(
+            f"planning.review-2 failed: {migration_name} still has findings"
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.run_next_planning_step",
+        failing_planning,
+    )
+
+    args = make_run_loop_args(
+        run_loop_env,
+        focus_on_live_migrations=True,
+        max_consecutive_failures=2,
+    )
+    with pytest.raises(ContinuousRefactorError, match="2 consecutive failures"):
+        continuous_refactoring.run_migrations_focused_loop(args)
+
+    assert calls == ["alpha", "beta"]
+
+
+def test_focused_loop_retries_skipped_planning_after_phase_alternative_defers(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = run_loop_env / "migrations"
+    live_dir.mkdir()
+    _seed_planning_manifest_at_final_review(run_loop_env, live_dir, "alpha")
+    _seed_manifest(live_dir, "phase-alt")
+    continuous_refactoring.run_command(["git", "add", "migrations"], cwd=run_loop_env)
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "seed focused alternatives"],
+        cwd=run_loop_env,
+    )
+    _install_focused_loop_env(run_loop_env, monkeypatch, live_dir)
+    calls: list[str] = []
+
+    def failing_planning(
+        migration_name: str,
+        *_args: object,
+        **_kwargs: object,
+    ) -> object:
+        calls.append(f"planning:{migration_name}")
+        raise ContinuousRefactorError(
+            f"planning.review-2 failed: {migration_name} still has findings"
+        )
+
+    def deferred_phase(
+        *_args: object,
+        **_kwargs: object,
+    ) -> tuple[RouteOutcome, DecisionRecord]:
+        calls.append("phase")
+        return (
+            "not-routed",
+            DecisionRecord(
+                decision="retry",
+                retry_recommendation="same-target",
+                target="migration/phase-alt",
+                call_role="phase.ready-check",
+                phase_reached="phase.ready-check",
+                failure_kind="phase-ready-no",
+                summary="phase deferred",
+            ),
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.run_next_planning_step",
+        failing_planning,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_migration_tick",
+        deferred_phase,
+    )
+
+    args = make_run_loop_args(
+        run_loop_env,
+        focus_on_live_migrations=True,
+        max_consecutive_failures=2,
+    )
+    with pytest.raises(ContinuousRefactorError, match="2 consecutive failures"):
+        continuous_refactoring.run_migrations_focused_loop(args)
+
+    assert calls == ["planning:alpha", "phase", "planning:alpha"]
 
 
 def test_focused_loop_stops_when_only_blocked_planning_remains(

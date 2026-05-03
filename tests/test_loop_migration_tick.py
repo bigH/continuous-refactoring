@@ -343,6 +343,7 @@ def _planning_tick(
     taste: str = "runtime taste",
     attempt: int = 7,
     finalize_commit: Callable[..., object] | None = None,
+    skip_migration_names: tuple[str, ...] = (),
 ) -> tuple[RouteOutcome, DecisionRecord | None]:
     artifacts = create_run_artifacts(
         repo_root=repo_root,
@@ -367,6 +368,7 @@ def _planning_tick(
         commit_message_prefix="continuous refactor",
         attempt=attempt,
         finalize_commit=finalize_commit or noop_finalize,
+        skip_migration_names=skip_migration_names,
     )
 
 
@@ -659,6 +661,58 @@ def test_try_migration_tick_does_not_call_ready_check_for_planning_status(
     assert outcome == "commit"
     assert record is not None
     assert record.target == "only-plan"
+
+
+def test_try_planning_tick_skips_requested_planning_migrations(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    now = _utc_now()
+    _save_planning(
+        live_dir,
+        run_once_env,
+        "older-plan",
+        last_touch=now - timedelta(days=1),
+        created_at=now - timedelta(hours=2),
+    )
+    _save_planning(
+        live_dir,
+        run_once_env,
+        "newer-plan",
+        last_touch=now - timedelta(days=1),
+        created_at=now - timedelta(hours=1),
+    )
+    calls: list[str] = []
+
+    def fake_planning(
+        migration_name: str,
+        *_args: object,
+        **_kwargs: object,
+    ) -> PlanningStepResult:
+        calls.append(migration_name)
+        return PlanningStepResult(
+            status="blocked",
+            migration_name=migration_name,
+            step="approaches",
+            next_step="pick-best",
+            reason="needs human review",
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.run_next_planning_step",
+        fake_planning,
+    )
+
+    outcome, record = _planning_tick(
+        live_dir,
+        run_once_env,
+        skip_migration_names=("older-plan",),
+    )
+
+    assert outcome == "blocked"
+    assert record is not None
+    assert record.target == "newer-plan"
+    assert calls == ["newer-plan"]
 
 
 def test_missing_planning_state_blocks_before_ready_phase_or_source_routing(

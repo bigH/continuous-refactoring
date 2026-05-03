@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Collection
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -384,6 +385,7 @@ def try_planning_tick(
     finalize_commit: _FinalizeCommit,
     effort_budget: EffortBudget | None = None,
     effort_metadata: dict[str, object] | None = None,
+    skip_migration_names: Collection[str] = (),
 ) -> tuple[RouteOutcome, DecisionRecord | None]:
     now = datetime.now(timezone.utc)
     preflight = _first_unloadable_visible_manifest(live_dir)
@@ -396,6 +398,13 @@ def try_planning_tick(
         )
 
     candidates = enumerate_eligible_planning_manifests(live_dir, now)
+    if skip_migration_names:
+        skipped_names = frozenset(skip_migration_names)
+        candidates = [
+            (manifest, manifest_path)
+            for manifest, manifest_path in candidates
+            if manifest.name not in skipped_names
+        ]
     for manifest, manifest_path in candidates:
         migration_dir = manifest_path.parent
         try:

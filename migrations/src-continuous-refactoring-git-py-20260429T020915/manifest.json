@@ -4,7 +4,7 @@
   "created_at": "2026-04-29T02:09:15.185-07:00",
   "current_phase": "lock-git-behavior",
   "human_review_reason": null,
-  "last_touch": "2026-05-03T21:56:47.641-07:00",
+  "last_touch": "2026-05-03T21:58:21.078-07:00",
   "name": "src-continuous-refactoring-git-py-20260429T020915",
   "phases": [
     {
@@ -36,7 +36,7 @@
       "effort_reason": "final cleanup is limited to transitional private helpers and",
       "file": "phase-4-trim-helper-shapes-and-verify-surface.md",
       "name": "trim-helper-shapes-and-verify-surface",
-      "precondition": "Phase 3 is marked complete, and the public symbol set in `src/continuous_refactoring/git.py::__all__` still matches the surface this migration is preserving.",
+      "precondition": "Phase 3 is marked complete, and the Phase 1 export-lock coverage that pins the `src/continuous_refactoring/git.py` `__all__` symbol set still exists as the artifact this phase will preserve.",
       "required_effort": "low"
     }
   ],

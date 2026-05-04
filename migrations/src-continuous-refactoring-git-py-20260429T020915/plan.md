@@ -83,6 +83,9 @@ flowchart TD
   - destructive reset/clean flows through `discard_workspace_changes()` and
     `revert_to()`,
   - commit and undo behavior through `git_commit()` and `undo_last_commit()`.
+- Phase 1 should also pin the exported git helper surface with the smallest
+  stable assertion set, using `git.py.__all__` and package-root coverage only
+  where needed to catch drift.
 - Use downstream suites only when a phase touches the behavior they consume:
   - package-root export checks: `uv run pytest tests/test_continuous_refactoring.py`
   - direct `GitCommandError` consumers: `uv run pytest tests/test_targeting.py tests/test_refactor_attempts.py`

@@ -37,8 +37,10 @@ listed in its `__all__` for downstream callers and package-root re-export.
   - workspace status and clean-worktree enforcement,
   - destructive reset/clean behavior,
   - commit, undo, and revert behavior.
-- Any package-root git exports this migration intends to preserve are pinned by
-  the smallest explicit coverage needed.
+- The exported git helper surface this migration preserves is pinned by the
+  smallest explicit coverage needed, with `src/continuous_refactoring/git.py`
+  `__all__` treated as the canonical module-level symbol set and package-root
+  coverage added only where needed to catch drift.
 - No caller-facing behavior has changed beyond test-only clarification.
 - The configured broad validation command passes.
 

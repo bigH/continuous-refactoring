@@ -29,9 +29,9 @@ flows.
 - `src/continuous_refactoring/git.py` is ordered top-down by the three domains
   named above.
 - The public symbol set exposed from `git.py.__all__` is unchanged.
-- `discard_workspace_changes()` and `revert_to()` both delegate their reset and
-  clean work through `_reset_hard_and_clean()` rather than duplicating inline
-  command sequences.
+- `discard_workspace_changes()` and `revert_to()` share one reset-and-clean
+  execution path rather than duplicating inline destructive command sequences,
+  while preserving their current behavior.
 - The characterization tests added in Phase 1 still pass without changing the
   contract they assert.
 - The configured broad validation command passes.

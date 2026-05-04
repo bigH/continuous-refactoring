@@ -12,9 +12,9 @@ effort_reason: final cleanup is limited to transitional private helpers and
 surface verification
 
 ## Precondition
-Phase 3 is marked complete, and the public symbol set in
-`src/continuous_refactoring/git.py::__all__` still matches the surface this
-migration is preserving.
+Phase 3 is marked complete, and the Phase 1 export-lock coverage that pins the
+`src/continuous_refactoring/git.py` `__all__` symbol set still exists as the
+artifact this phase will preserve.
 
 ## Instructions
 - Remove only private helpers or naming that were introduced or retained solely
@@ -33,7 +33,7 @@ migration is preserving.
 - No private staging helper or alias introduced during phases 2 or 3 remains
   unless this phase intentionally keeps it as part of the final file shape.
 - The public symbol set exposed from `git.py.__all__` is unchanged from the
-  start of the migration.
+  symbol set pinned by the Phase 1 export-lock coverage.
 - Any package-root re-export coverage needed to catch symbol drift is present.
 - The final `git.py` layout and cleanup preserve caller-facing behavior under
   the focused git tests and the configured broad validation command.

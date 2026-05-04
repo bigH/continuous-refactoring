@@ -34,7 +34,8 @@ manifest types, manifest I/O helpers, path helpers, and compatibility exports.
   `tests/test_focus_on_live_migrations.py`,
   `tests/test_prompts.py`,
   `tests/test_run.py`,
-  `tests/test_cli_review.py`
+  `tests/test_cli_review.py`,
+  `tests/test_cli_migrations.py`
 - Read-only adjacencies only if a phase proves they are needed:
   `tests/test_continuous_refactoring.py`,
   `tests/test_planning.py`,
@@ -90,7 +91,9 @@ flowchart TD
   callers it touched before broad validation.
 - Phase 3 must cover runtime and scheduling behavior because `migration_tick.py`
   participates in the extracted helper graph today. Phase 4 should keep the
-  blast radius smaller by limiting itself to the read-only CLI consumers.
+  blast radius smaller by limiting itself to the read-only CLI consumers, with
+  focused checks for both CLI suites because it touches `review_cli.py` and
+  `migration_cli.py`.
 - Error behavior is part of the contract: filesystem and JSON failures must
   stay wrapped at the actual boundary with preserved nested causes.
 

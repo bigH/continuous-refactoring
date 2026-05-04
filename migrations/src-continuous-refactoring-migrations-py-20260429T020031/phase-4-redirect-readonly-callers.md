@@ -6,12 +6,13 @@
 - `src/continuous_refactoring/migrations.py`
 - `src/continuous_refactoring/migration_manifest_ops.py`
 - Related tests for touched call sites:
-  `tests/test_cli_review.py`, `tests/test_migrations.py`
+  `tests/test_cli_review.py`, `tests/test_cli_migrations.py`,
+  `tests/test_migrations.py`
 - Read-only adjacencies only if needed for coherence:
   `tests/test_continuous_refactoring.py`
 
 required_effort: low
-effort_reason: the remaining redirects are import-only in read-only CLI flows
+effort_reason: import-only read-only CLI redirects with explicit CLI suite coverage
 
 ## Precondition
 Phase 3 is complete, the runtime and scheduling callers already import
@@ -40,7 +41,7 @@ the compatibility facade.
 - The configured broad validation command passes.
 
 ## Validation
-- Run `uv run pytest tests/test_cli_review.py tests/test_migrations.py`.
+- Run `uv run pytest tests/test_cli_review.py tests/test_cli_migrations.py tests/test_migrations.py`.
 - If package-root export coverage moved, run
   `uv run pytest tests/test_continuous_refactoring.py`.
 - Finish with `uv run pytest`.

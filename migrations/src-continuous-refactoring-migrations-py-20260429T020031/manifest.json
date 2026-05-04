@@ -33,7 +33,7 @@
     },
     {
       "done": false,
-      "effort_reason": "the remaining redirects are import-only in read-only CLI flows",
+      "effort_reason": "import-only read-only CLI redirects with explicit CLI suite coverage",
       "file": "phase-4-redirect-readonly-callers.md",
       "name": "redirect-readonly-callers",
       "precondition": "Phase 3 is complete, the runtime and scheduling callers already import extracted helpers from `migration_manifest_ops.py`, and `review_cli.py` plus `migration_cli.py` are the remaining internal consumers intentionally left on the compatibility facade.",

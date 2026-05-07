@@ -328,50 +328,6 @@ def effective_record(
     )
 
 
-def _update_attempt_from_record(
-    artifacts: RunArtifacts,
-    *,
-    attempt: int,
-    retry: int,
-    record: DecisionRecord,
-    reason_doc_path: Path | None,
-) -> None:
-    artifacts.update_attempt(
-        attempt,
-        target=record.target,
-        retry=retry,
-        call_role=record.call_role,
-        phase_reached=record.phase_reached,
-        decision=record.decision,
-        retry_recommendation=record.retry_recommendation,
-        failure_kind=record.failure_kind,
-        failure_summary=record.summary,
-        reason_doc_path=reason_doc_path,
-    )
-
-
-def _log_transition_from_record(
-    artifacts: RunArtifacts,
-    *,
-    attempt: int,
-    retry: int,
-    record: DecisionRecord,
-    reason_doc_path: Path | None,
-) -> None:
-    artifacts.log_transition(
-        attempt=attempt,
-        retry=retry,
-        target=record.target,
-        call_role=record.call_role,
-        phase_reached=record.phase_reached,
-        decision=record.decision,
-        retry_recommendation=record.retry_recommendation,
-        failure_kind=record.failure_kind,
-        summary=record.summary,
-        reason_doc_path=reason_doc_path,
-    )
-
-
 def persist_decision(
     repo_root: Path,
     artifacts: RunArtifacts,
@@ -382,11 +338,16 @@ def persist_decision(
     record: DecisionRecord,
 ) -> Path | None:
     if record.decision == "commit":
-        _update_attempt_from_record(
-            artifacts,
-            attempt=attempt,
+        artifacts.update_attempt(
+            attempt,
+            target=record.target,
             retry=retry,
-            record=record,
+            call_role=record.call_role,
+            phase_reached=record.phase_reached,
+            decision=record.decision,
+            retry_recommendation=record.retry_recommendation,
+            failure_kind=record.failure_kind,
+            failure_summary=record.summary,
             reason_doc_path=None,
         )
         return None
@@ -419,11 +380,16 @@ def persist_decision(
         reason_doc_path=str(reason_doc),
         **log_fields,
     )
-    _log_transition_from_record(
-        artifacts,
+    artifacts.log_transition(
         attempt=attempt,
         retry=retry,
-        record=record,
+        target=record.target,
+        call_role=record.call_role,
+        phase_reached=record.phase_reached,
+        decision=record.decision,
+        retry_recommendation=record.retry_recommendation,
+        failure_kind=record.failure_kind,
+        summary=record.summary,
         reason_doc_path=reason_doc,
     )
     return reason_doc

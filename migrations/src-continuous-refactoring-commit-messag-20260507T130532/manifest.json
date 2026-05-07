@@ -1,0 +1,12 @@
+{
+  "awaiting_human_review": false,
+  "cooldown_until": null,
+  "created_at": "2026-05-07T13:05:32.749-07:00",
+  "current_phase": "",
+  "human_review_reason": null,
+  "last_touch": "2026-05-07T13:06:18.791-07:00",
+  "name": "src-continuous-refactoring-commit-messag-20260507T130532",
+  "phases": [],
+  "status": "planning",
+  "wake_up_on": null
+}

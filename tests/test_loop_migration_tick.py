@@ -1086,6 +1086,33 @@ def test_execution_gate_reports_malformed_manifest_before_candidate_loading(
     assert "invalid-manifest" in record.summary
 
 
+def test_planning_tick_reports_malformed_manifest_before_candidate_loading(
+    run_once_env: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    migration_dir = live_dir / "bad-manifest"
+    migration_dir.mkdir(parents=True)
+    (migration_dir / "manifest.json").write_text("{not json", encoding="utf-8")
+
+    def fail_planning(*_args: object, **_kwargs: object) -> object:
+        raise AssertionError("run_next_planning_step must not be called")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.run_next_planning_step",
+        fail_planning,
+    )
+
+    outcome, record = _planning_tick(live_dir, run_once_env)
+
+    assert outcome == "abandon"
+    assert record is not None
+    assert record.decision == "abandon"
+    assert record.target == "bad-manifest"
+    assert record.call_role == "phase.execution-gate"
+    assert record.failure_kind == "migration-consistency-error"
+    assert "invalid-manifest" in record.summary
+
+
 def test_ready_check_wrapped_failure_keeps_root_cause_in_summary(
     run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,

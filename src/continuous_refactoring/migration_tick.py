@@ -212,6 +212,21 @@ def _first_unloadable_visible_manifest(
     return None
 
 
+def _preflight_manifest_consistency(
+    live_dir: Path,
+    repo_root: Path,
+) -> DecisionRecord | None:
+    preflight = _first_unloadable_visible_manifest(live_dir)
+    if preflight is None:
+        return None
+    migration_dir, consistency_findings = preflight
+    return _consistency_failure_record(
+        consistency_findings,
+        repo_root,
+        migration_dir.name,
+    )
+
+
 def try_migration_tick(
     live_dir: Path,
     taste: str,
@@ -231,14 +246,9 @@ def try_migration_tick(
 ) -> tuple[RouteOutcome, DecisionRecord | None]:
     resolved_budget = effort_budget or resolve_effort_budget(effort, None)
     now = datetime.now(timezone.utc)
-    preflight = _first_unloadable_visible_manifest(live_dir)
-    if preflight is not None:
-        migration_dir, consistency_findings = preflight
-        return "abandon", _consistency_failure_record(
-            consistency_findings,
-            repo_root,
-            migration_dir.name,
-        )
+    preflight_record = _preflight_manifest_consistency(live_dir, repo_root)
+    if preflight_record is not None:
+        return "abandon", preflight_record
     candidates = enumerate_eligible_manifests(live_dir, now, resolved_budget)
     deferred_record: DecisionRecord | None = None
     pending_defers: list[tuple[MigrationManifest, Path]] = []
@@ -396,14 +406,9 @@ def try_planning_tick(
     skip_migration_names: Collection[str] = (),
 ) -> tuple[RouteOutcome, DecisionRecord | None]:
     now = datetime.now(timezone.utc)
-    preflight = _first_unloadable_visible_manifest(live_dir)
-    if preflight is not None:
-        migration_dir, consistency_findings = preflight
-        return "abandon", _consistency_failure_record(
-            consistency_findings,
-            repo_root,
-            migration_dir.name,
-        )
+    preflight_record = _preflight_manifest_consistency(live_dir, repo_root)
+    if preflight_record is not None:
+        return "abandon", preflight_record
 
     candidates = enumerate_eligible_planning_manifests(live_dir, now)
     if skip_migration_names:

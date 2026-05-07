@@ -12,6 +12,7 @@ __all__ = ["ClassifierDecision", "classify_target"]
 
 from continuous_refactoring.agent import maybe_run_agent
 from continuous_refactoring.artifacts import ContinuousRefactorError
+from continuous_refactoring.log_mirroring import LogMirroring
 from continuous_refactoring.prompts import compose_classifier_prompt
 
 ClassifierDecision = Literal["cohesive-cleanup", "needs-plan"]
@@ -70,6 +71,7 @@ def classify_target(
     effort: str,
     timeout: int | None,
     effort_metadata: dict[str, object] | None = None,
+    log_mirroring: LogMirroring = LogMirroring(),
 ) -> ClassifierDecision:
     prompt = compose_classifier_prompt(target, taste)
     classify_dir = artifacts.root / "classify"
@@ -96,7 +98,7 @@ def classify_target(
             last_message_path=(
                 classify_dir / "agent-last-message.md" if agent == "codex" else None
             ),
-            mirror_to_terminal=False,
+            mirror_to_terminal=log_mirroring.agent,
             timeout=timeout,
         )
     except ContinuousRefactorError as error:

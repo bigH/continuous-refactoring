@@ -11,6 +11,7 @@ from continuous_refactoring.artifacts import (
     RunArtifacts,
     create_run_artifacts,
 )
+from continuous_refactoring.log_mirroring import LogMirroring
 from continuous_refactoring.routing import classify_target
 from continuous_refactoring.targeting import Target
 
@@ -126,6 +127,61 @@ def test_classify_needs_plan(
         )
         == "needs-plan"
     )
+
+
+def test_classify_target_passes_log_mirroring_to_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_tmpdir(tmp_path, monkeypatch)
+    captured: list[bool] = []
+
+    def fake_agent(**kwargs: object) -> CommandCapture:
+        captured.append(bool(kwargs["mirror_to_terminal"]))
+        Path(str(kwargs["stdout_path"])).write_text("", encoding="utf-8")
+        Path(str(kwargs["stderr_path"])).write_text("", encoding="utf-8")
+        return _fake_capture("decision: cohesive-cleanup\n", tmp_path=tmp_path)
+
+    monkeypatch.setattr("continuous_refactoring.routing.maybe_run_agent", fake_agent)
+
+    assert classify_target(
+        _target(),
+        _TASTE,
+        tmp_path,
+        _make_artifacts(tmp_path),
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        log_mirroring=LogMirroring(agent=True),
+    ) == "cohesive-cleanup"
+    assert captured == [True]
+
+
+def test_classify_target_defaults_quiet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_tmpdir(tmp_path, monkeypatch)
+    captured: list[bool] = []
+
+    def fake_agent(**kwargs: object) -> CommandCapture:
+        captured.append(bool(kwargs["mirror_to_terminal"]))
+        Path(str(kwargs["stdout_path"])).write_text("", encoding="utf-8")
+        Path(str(kwargs["stderr_path"])).write_text("", encoding="utf-8")
+        return _fake_capture("decision: cohesive-cleanup\n", tmp_path=tmp_path)
+
+    monkeypatch.setattr("continuous_refactoring.routing.maybe_run_agent", fake_agent)
+
+    classify_target(
+        _target(),
+        _TASTE,
+        tmp_path,
+        _make_artifacts(tmp_path),
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+    )
+    assert captured == [False]
 
 
 def test_classify_case_insensitive(

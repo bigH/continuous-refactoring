@@ -30,6 +30,7 @@ from continuous_refactoring.decisions import (
 )
 from continuous_refactoring.effort import EffortBudget, resolve_effort_budget
 from continuous_refactoring.git import get_head_sha
+from continuous_refactoring.log_mirroring import LogMirroring
 from continuous_refactoring.migration_tick import (
     try_migration_tick as _try_migration_tick,
     try_planning_tick as _try_planning_tick,
@@ -176,6 +177,7 @@ def expand_target_for_classification(
     timeout: int | None,
     attempt: int = 1,
     effort_metadata: dict[str, object] | None = None,
+    log_mirroring: LogMirroring = LogMirroring(),
 ) -> tuple[Target, str]:
     scope_dir = artifacts.root / "scope-expansion"
     bypass_reason = scope_expansion_bypass_reason(target)
@@ -204,6 +206,7 @@ def expand_target_for_classification(
         effort=effort,
         attempt=attempt,
         effort_metadata=effort_metadata,
+        log_mirroring=log_mirroring,
         timeout=timeout,
     )
     write_scope_expansion_artifacts(
@@ -239,6 +242,7 @@ def route_and_run(
     check_migrations: bool = True,
     effort_budget: EffortBudget | None = None,
     effort_metadata: dict[str, object] | None = None,
+    log_mirroring: LogMirroring = LogMirroring(),
 ) -> RouteResult:
     resolved_budget = effort_budget or resolve_effort_budget(effort, None)
     if live_dir is None:
@@ -253,6 +257,7 @@ def route_and_run(
             timeout=timeout, commit_message_prefix=commit_message_prefix,
             attempt=attempt,
             finalize_commit=finalize_commit,
+            log_mirroring=log_mirroring,
         )
         if planning_result != "not-routed":
             return RouteResult(
@@ -270,6 +275,7 @@ def route_and_run(
             max_attempts=max_attempts,
             attempt=attempt,
             finalize_commit=finalize_commit,
+            log_mirroring=log_mirroring,
         )
         if migration_result != "not-routed":
             return RouteResult(
@@ -288,6 +294,7 @@ def route_and_run(
         effort=effort,
         attempt=attempt,
         effort_metadata=effort_metadata,
+        log_mirroring=log_mirroring,
         timeout=timeout,
     )
 
@@ -303,6 +310,7 @@ def route_and_run(
             model=model,
             effort=effort,
             effort_metadata=effort_metadata,
+            log_mirroring=log_mirroring,
             timeout=timeout,
         )
     except ContinuousRefactorError as error:
@@ -341,6 +349,7 @@ def route_and_run(
             effort_metadata=effort_metadata,
             timeout=timeout,
             extra_context=planning_context,
+            log_mirroring=log_mirroring,
         )
     except ContinuousRefactorError as error:
         call_role = "planning.final-review"

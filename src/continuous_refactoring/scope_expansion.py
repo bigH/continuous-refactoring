@@ -20,6 +20,7 @@ __all__ = [
 
 from continuous_refactoring.agent import maybe_run_agent
 from continuous_refactoring.artifacts import ContinuousRefactorError
+from continuous_refactoring.log_mirroring import LogMirroring
 from continuous_refactoring.prompts import compose_scope_selection_prompt
 from continuous_refactoring.scope_candidates import ScopeCandidate, ScopeCandidateKind
 
@@ -132,6 +133,7 @@ def select_scope_candidate(
     attempt: int = 1,
     retry: int = 1,
     effort_metadata: dict[str, object] | None = None,
+    log_mirroring: LogMirroring = LogMirroring(),
 ) -> ScopeSelection:
     candidate_kinds = _require_unique_candidate_kinds(
         tuple(candidate.kind for candidate in candidates)
@@ -168,7 +170,7 @@ def select_scope_candidate(
             stdout_path=selection_stdout_path,
             stderr_path=selection_dir / "selection.stderr.log",
             last_message_path=selection_last_message_path if agent == "codex" else None,
-            mirror_to_terminal=False,
+            mirror_to_terminal=log_mirroring.agent,
             timeout=timeout,
         )
     except ContinuousRefactorError as error:

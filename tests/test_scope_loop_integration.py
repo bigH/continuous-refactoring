@@ -13,6 +13,8 @@ from continuous_refactoring.artifacts import (
     create_run_artifacts,
 )
 from continuous_refactoring.decisions import DecisionRecord
+from continuous_refactoring.log_mirroring import LogMirroring
+from continuous_refactoring.planning import PlanningStepResult
 from continuous_refactoring.routing_pipeline import RouteResult
 from continuous_refactoring.targeting import Target
 
@@ -134,6 +136,81 @@ def test_expanded_target_reaches_classifier(
 
     assert seen_files == [EXPANDED_FILES]
     assert result.target.files == EXPANDED_FILES
+
+
+def test_route_and_run_forwards_log_mirroring_to_routing_steps(
+    routing_env: tuple[Path, RunArtifacts],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, artifacts = routing_env
+    target = Target(
+        description="needs a plan",
+        files=("README.md",),
+        provenance="globs",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_expand(
+        target: Target, *_args: object, **kwargs: object,
+    ) -> tuple[Target, str]:
+        captured["expand"] = kwargs["log_mirroring"]
+        return target, "Selected scope candidate: seed"
+
+    def fake_classify(target: Target, *_args: object, **kwargs: object) -> str:
+        captured["classify"] = kwargs["log_mirroring"]
+        return "needs-plan"
+
+    def fake_planning(*_args: object, **kwargs: object) -> PlanningStepResult:
+        captured["planning"] = kwargs["log_mirroring"]
+        return PlanningStepResult(
+            status="published",
+            migration_name="needs-a-plan",
+            step="approaches",
+            next_step="pick-best",
+            reason="approaches accepted",
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.expand_target_for_classification",
+        fake_expand,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        fake_classify,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.run_next_planning_step",
+        fake_planning,
+    )
+
+    def noop_finalize(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    result = continuous_refactoring.routing_pipeline.route_and_run(
+        target,
+        "taste",
+        repo_root,
+        artifacts,
+        live_dir=repo_root / LIVE_MIGRATIONS_DIR,
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        commit_message_prefix="continuous refactor",
+        validation_command="uv run pytest",
+        max_attempts=1,
+        attempt=1,
+        finalize_commit=noop_finalize,
+        check_migrations=False,
+        log_mirroring=LogMirroring(agent=True),
+    )
+
+    assert result.outcome == "commit"
+    assert captured == {
+        "expand": LogMirroring(agent=True),
+        "classify": LogMirroring(agent=True),
+        "planning": LogMirroring(agent=True),
+    }
 
 
 def test_deferred_migration_tick_falls_through_to_classifier(

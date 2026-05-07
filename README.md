@@ -130,7 +130,7 @@ continuous-refactoring run \
 | `migration doctor <slug-or-path>` | Validates one visible migration's consistency. |
 | `migration doctor --all` | Validates every visible migration plus internal transaction state. |
 | `migration review <slug-or-path>` | Starts staged review for a migration awaiting human review. Requires `--with`, `--model`, and `--effort`. |
-| `migration refine <slug-or-path>` | Records feedback for a planning or unexecuted ready migration and runs one staged planning revision. Requires `--message <text>` or `--file <path>`, plus `--with`, `--model`, and `--effort`. |
+| `migration refine <slug-or-path>` | Records feedback for a planning or unexecuted ready migration and runs one staged planning revision. Requires `--message <text>` or `--file <path>`, plus `--with`, `--model`, and `--effort`; add `--show-agent-logs` to mirror the planning agent. |
 
 Legacy `review list` and `review perform <migration>` remain compatibility aliases; prefer `migration list --awaiting-review` and `migration review`.
 
@@ -161,7 +161,7 @@ context for that target.
 - `migration list` — shows visible migrations; `--awaiting-review` narrows to human-review handoffs.
 - `migration doctor <slug-or-path>` / `migration doctor --all` — read-only consistency checks. Doctor reports problems; it does not repair them.
 - `migration review <slug-or-path> --with ... --model ... --effort ...` — resolves an `awaiting_human_review` migration through a staged workspace.
-- `migration refine <slug-or-path> (--message <text>|--file <path>) --with ... --model ... --effort ...` — adds user feedback to a planning or unexecuted ready migration and resumes planning through the `revise` step when reopening ready work.
+- `migration refine <slug-or-path> (--message <text>|--file <path>) --with ... --model ... --effort ... [--show-agent-logs]` — adds user feedback to a planning or unexecuted ready migration and resumes planning through the `revise` step when reopening ready work.
 - `taste --refine` — opens a collaborative editing session for the taste file. The agent keeps refining until you tell it to write, then the session ends automatically after the settled write.
 - `taste --upgrade` — re-interviews for taste dimensions added since your last version. No-op when already current; use `taste --refine` if you want to rework the doc anyway.
 - `taste --force` — only applies to `--interview`; it allows a customized taste file to be overwritten after backing it up to `taste.md.bak`.

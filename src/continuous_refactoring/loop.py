@@ -60,6 +60,7 @@ from continuous_refactoring.git import (
     revert_to,
     run_command,
 )
+from continuous_refactoring.log_mirroring import LogMirroring
 from continuous_refactoring.migrations import (
     phase_file_reference,
     resolve_current_phase,
@@ -88,12 +89,14 @@ def run_baseline_checks(
     *,
     stdout_path: Path,
     stderr_path: Path,
+    log_mirroring: LogMirroring = LogMirroring(),
 ) -> tuple[bool, str]:
     result = run_tests(
         test_command,
         repo_root,
         stdout_path=stdout_path,
         stderr_path=stderr_path,
+        mirror_to_terminal=log_mirroring.command,
     )
     if result.returncode == 0:
         return True, ""
@@ -123,6 +126,13 @@ def _effort_budget_from_args(args: argparse.Namespace) -> EffortBudget:
     default_effort = getattr(args, "default_effort", getattr(args, "effort", None))
     max_allowed_effort = getattr(args, "max_allowed_effort", None)
     return resolve_effort_budget(default_effort, max_allowed_effort)
+
+
+def _log_mirroring_from_args(args: argparse.Namespace) -> LogMirroring:
+    return LogMirroring(
+        agent=bool(getattr(args, "show_agent_logs", False)),
+        command=bool(getattr(args, "show_command_logs", False)),
+    )
 
 
 def _log_effort_budget(artifacts: RunArtifacts, budget: EffortBudget) -> None:
@@ -366,6 +376,7 @@ def _sleep_between_actions(
 def run_once(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
     timeout = args.timeout or 900
+    log_mirroring = _log_mirroring_from_args(args)
     base_effort_budget = _effort_budget_from_args(args)
     max_attempts_effective = _effective_max_attempts(
         getattr(args, "max_attempts", None)
@@ -416,6 +427,7 @@ def run_once(args: argparse.Namespace) -> int:
             repo_root,
             stdout_path=artifacts.baseline_dir("initial") / "tests.stdout.log",
             stderr_path=artifacts.baseline_dir("initial") / "tests.stderr.log",
+            log_mirroring=log_mirroring,
         )
         if not baseline_ok:
             final_status = "baseline_failed"
@@ -443,6 +455,7 @@ def run_once(args: argparse.Namespace) -> int:
             max_attempts=max_attempts_effective,
             attempt=1,
             finalize_commit=_finalize_commit,
+            log_mirroring=log_mirroring,
         )
         target = route_result.target
         if route_result.outcome == "commit":
@@ -498,7 +511,7 @@ def run_once(args: argparse.Namespace) -> int:
                 stdout_path=attempt_dir / "agent.stdout.log",
                 stderr_path=attempt_dir / "agent.stderr.log",
                 last_message_path=last_message_path,
-                mirror_to_terminal=args.show_agent_logs,
+                mirror_to_terminal=log_mirroring.agent,
                 timeout=timeout,
             )
         except ContinuousRefactorError as error:
@@ -546,7 +559,7 @@ def run_once(args: argparse.Namespace) -> int:
             repo_root,
             stdout_path=attempt_dir / "tests.stdout.log",
             stderr_path=attempt_dir / "tests.stderr.log",
-            mirror_to_terminal=args.show_command_logs,
+            mirror_to_terminal=log_mirroring.command,
         )
 
         if validation_result.returncode != 0:
@@ -606,6 +619,7 @@ def run_once(args: argparse.Namespace) -> int:
 def run_loop(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
     timeout = args.timeout or 1800
+    log_mirroring = _log_mirroring_from_args(args)
     sleep_seconds = getattr(args, "sleep", 0.0)
     max_consecutive = args.max_consecutive_failures
     base_effort_budget = _effort_budget_from_args(args)
@@ -665,6 +679,7 @@ def run_loop(args: argparse.Namespace) -> int:
             repo_root,
             stdout_path=artifacts.baseline_dir("initial") / "tests.stdout.log",
             stderr_path=artifacts.baseline_dir("initial") / "tests.stderr.log",
+            log_mirroring=log_mirroring,
         )
         if not baseline_ok:
             final_status = "baseline_failed"
@@ -695,6 +710,7 @@ def run_loop(args: argparse.Namespace) -> int:
                     commit_message_prefix=args.commit_message_prefix,
                     attempt=action_index,
                     finalize_commit=_finalize_commit,
+                    log_mirroring=log_mirroring,
                 )
 
                 if planning_outcome in {"commit", "abandon", "blocked"}:
@@ -749,6 +765,7 @@ def run_loop(args: argparse.Namespace) -> int:
                     max_attempts=max_attempts_effective,
                     attempt=action_index,
                     finalize_commit=_finalize_commit,
+                    log_mirroring=log_mirroring,
                 )
 
                 if migration_outcome in {"commit", "abandon"}:
@@ -837,6 +854,7 @@ def run_loop(args: argparse.Namespace) -> int:
                 attempt=action_index,
                 finalize_commit=_finalize_commit,
                 check_migrations=False,
+                log_mirroring=log_mirroring,
             )
             target = route_result.target
             if route_result.outcome == "commit":
@@ -921,8 +939,8 @@ def run_loop(args: argparse.Namespace) -> int:
                     prompt=prompt,
                     timeout=timeout,
                     validation_command=args.validation_command,
-                    show_agent_logs=args.show_agent_logs,
-                    show_command_logs=args.show_command_logs,
+                    show_agent_logs=log_mirroring.agent,
+                    show_command_logs=log_mirroring.command,
                     commit_message_prefix=args.commit_message_prefix,
                     preserved_workspace=preserved_workspace,
                 )
@@ -1071,6 +1089,7 @@ def _repo_relative_path(repo_root: Path, path: Path) -> str:
 def run_migrations_focused_loop(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
     timeout = args.timeout or 1800
+    log_mirroring = _log_mirroring_from_args(args)
     sleep_seconds = getattr(args, "sleep", 0.0)
     max_consecutive = args.max_consecutive_failures
     base_effort_budget = _effort_budget_from_args(args)
@@ -1123,6 +1142,7 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
             repo_root,
             stdout_path=artifacts.baseline_dir("initial") / "tests.stdout.log",
             stderr_path=artifacts.baseline_dir("initial") / "tests.stderr.log",
+            log_mirroring=log_mirroring,
         )
         if not baseline_ok:
             final_status = "baseline_failed"
@@ -1196,6 +1216,7 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
                     attempt=iteration,
                     finalize_commit=_finalize_commit,
                     skip_migration_names=skipped_planning_names,
+                    log_mirroring=log_mirroring,
                 )
             else:
                 outcome, record = migration_tick.try_migration_tick(
@@ -1213,6 +1234,7 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
                     max_attempts=max_attempts_effective,
                     attempt=iteration,
                     finalize_commit=_finalize_commit,
+                    log_mirroring=log_mirroring,
                 )
 
             if record is not None and outcome != "not-routed":

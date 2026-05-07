@@ -46,7 +46,7 @@ Treat `AGENTS.md` as part of the codebase's invariants, not documentation. A dri
   --effort ...` remain compatibility wrappers)
 - Refine migration planning: `continuous-refactoring migration refine <slug-or-path>
   (--message <text>|--file <path>) --with codex|claude --model <model>
-  --effort <low|medium|high|xhigh>`
+  --effort <low|medium|high|xhigh> [--show-agent-logs]`
 
 No lint, no typecheck, no formatter, no pre-commit. GitHub Actions `Test`
 runs `uv run pytest`. **Pytest is the only code gate.** GitHub Actions

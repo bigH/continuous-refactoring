@@ -14,6 +14,7 @@ from continuous_refactoring.artifacts import (
     RunArtifacts,
     create_run_artifacts,
 )
+from continuous_refactoring.log_mirroring import LogMirroring
 from continuous_refactoring.scope_candidates import ScopeCandidate, ScopeCandidateKind
 from continuous_refactoring.scope_expansion import (
     ScopeSelection,
@@ -122,6 +123,48 @@ def test_select_scope_candidate_single_candidate_writes_selection_logs(
     assert (
         selection_dir / "selection-last-message.md"
     ).read_text(encoding="utf-8") == expected
+
+
+def test_select_scope_candidate_passes_log_mirroring_to_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = Target(description="clean up", files=("README.md",), provenance="globs")
+    artifacts = _make_artifacts(tmp_path, monkeypatch)
+    captured: list[bool] = []
+
+    def fake_run_agent(**kwargs: object) -> CommandCapture:
+        captured.append(bool(kwargs["mirror_to_terminal"]))
+        Path(str(kwargs["stdout_path"])).write_text("", encoding="utf-8")
+        Path(str(kwargs["stderr_path"])).write_text("", encoding="utf-8")
+        if kwargs["last_message_path"] is not None:
+            Path(str(kwargs["last_message_path"])).write_text("", encoding="utf-8")
+        return _fake_capture(
+            "selected-candidate: local-cluster - clustered evidence\n",
+            tmp_path,
+        )
+
+    monkeypatch.setattr(scope_expansion, "maybe_run_agent", fake_run_agent)
+
+    selection = select_scope_candidate(
+        target,
+        (_candidate("seed"), _candidate("local-cluster")),
+        "taste",
+        tmp_path,
+        artifacts,
+        agent="codex",
+        model="gpt-5.5",
+        effort="low",
+        timeout=None,
+        log_mirroring=LogMirroring(agent=True),
+    )
+
+    assert selection == ScopeSelection(
+        kind="local-cluster",
+        reason="clustered evidence",
+    )
+    assert captured == [True]
+    assert (artifacts.root / "scope-expansion" / "selection.stdout.log").exists()
+    assert (artifacts.root / "scope-expansion" / "selection-last-message.md").exists()
 
 
 def test_write_scope_expansion_artifacts_records_payload(tmp_path: Path) -> None:

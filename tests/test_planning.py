@@ -30,6 +30,7 @@ from continuous_refactoring.planning import (
     run_refine_planning_step,
 )
 from continuous_refactoring.git import run_command
+from continuous_refactoring.log_mirroring import LogMirroring
 from continuous_refactoring.planning_state import (
     complete_planning_step,
     load_planning_state,
@@ -180,6 +181,7 @@ class _WorkspaceAgent:
         self.stage_labels: list[str] = []
         self.prompts: list[str] = []
         self.migration_dirs: list[Path] = []
+        self.mirror_to_terminal: list[bool] = []
 
     def __call__(self, **kwargs: object) -> CommandCapture:
         assert self._index < len(self._responses), (
@@ -195,6 +197,7 @@ class _WorkspaceAgent:
         self.prompts.append(prompt)
         self.stage_labels.append(stdout_path.parent.name)
         self.migration_dirs.append(migration_dir)
+        self.mirror_to_terminal.append(bool(kwargs["mirror_to_terminal"]))
 
         for rel_path, content in writes.items():
             full = migration_dir / rel_path
@@ -253,6 +256,45 @@ def _run_next_step(
         timeout=None,
     )
     return result, mock
+
+
+def test_run_next_planning_step_passes_log_mirroring_to_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, live_dir, _mig_root = _planning_repo_context(tmp_path, monkeypatch)
+    mock = _WorkspaceAgent(
+        [
+            _workspace_response(
+                "approach: focused cleanup\n",
+                {"approaches/focused.md": "Use a focused cleanup.\n"},
+            )
+        ]
+    )
+    monkeypatch.setattr("continuous_refactoring.planning.maybe_run_agent", mock)
+
+    result = run_next_planning_step(
+        _MIGRATION,
+        _TARGET,
+        _TASTE,
+        repo_root,
+        live_dir,
+        _make_artifacts(repo_root),
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        log_mirroring=LogMirroring(agent=True),
+    )
+
+    assert result.status == "published"
+    assert mock.mirror_to_terminal == [True]
+    staged_stdout = (
+        migration_root(live_dir, _MIGRATION)
+        / ".planning"
+        / "stages"
+        / "approaches.stdout.md"
+    )
+    assert staged_stdout.exists()
 
 
 def _run_refine_step(

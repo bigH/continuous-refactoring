@@ -171,6 +171,7 @@ def handle_migration_refine(args: argparse.Namespace) -> None:
         raise SystemExit(2) from error
 
     from continuous_refactoring.config import load_taste
+    from continuous_refactoring.log_mirroring import LogMirroring
     from continuous_refactoring.planning import (
         PlanningRefineRequest,
         run_refine_planning_step,
@@ -202,6 +203,9 @@ def handle_migration_refine(args: argparse.Namespace) -> None:
                 agent=args.agent,
                 model=args.model,
                 effort=args.effort,
+                log_mirroring=LogMirroring(
+                    agent=bool(getattr(args, "show_agent_logs", False)),
+                ),
             )
         )
     except ContinuousRefactorError as error:

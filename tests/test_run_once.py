@@ -109,6 +109,37 @@ def test_run_once_baseline_validation_blocks_routing_and_agent_when_red(
     assert summary["final_status"] == "baseline_failed"
 
 
+def test_run_once_show_command_logs_mirrors_baseline_validation(
+    run_once_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mirrored: list[bool] = []
+
+    def fail_validation(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        mirrored.append(bool(kwargs["mirror_to_terminal"]))
+        return failing_tests(
+            test_command,
+            repo_root,
+            stdout_path,
+            stderr_path,
+            **kwargs,
+        )
+
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", fail_validation)
+
+    args = make_run_once_args(run_once_env, show_command_logs=True)
+    with pytest.raises(ContinuousRefactorError, match="Baseline validation failed"):
+        continuous_refactoring.run_once(args)
+
+    assert mirrored == [True]
+
+
 def test_run_once_runs_baseline_before_refactor_validation(
     run_once_env: Path,
     monkeypatch: pytest.MonkeyPatch,

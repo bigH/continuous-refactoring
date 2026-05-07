@@ -14,6 +14,7 @@ from continuous_refactoring.agent import maybe_run_agent
 from continuous_refactoring.artifacts import ContinuousRefactorError, iso_timestamp
 from continuous_refactoring.config import resolve_project
 from continuous_refactoring.effort import EffortBudget, require_effort_tier
+from continuous_refactoring.log_mirroring import LogMirroring
 from continuous_refactoring.migrations import (
     MigrationManifest,
     PhaseSpec,
@@ -109,6 +110,7 @@ class PlanningRefineRequest:
     retry: int = 1
     effort_budget: EffortBudget | None = None
     effort_metadata: dict[str, object] | None = None
+    log_mirroring: LogMirroring = LogMirroring()
 
 
 @dataclass(frozen=True)
@@ -360,6 +362,7 @@ def _run_stage(
     timeout: int | None,
     effort_metadata: dict[str, object] | None = None,
     effort_budget: EffortBudget | None = None,
+    log_mirroring: LogMirroring = LogMirroring(),
     stage_label: str | None = None,
 ) -> str:
     prompt = compose_planning_prompt(
@@ -398,7 +401,7 @@ def _run_stage(
             stdout_path=paths.agent_stdout_path,
             stderr_path=paths.agent_stderr_path,
             last_message_path=paths.agent_last_message_path,
-            mirror_to_terminal=False,
+            mirror_to_terminal=log_mirroring.agent,
             timeout=timeout,
         )
     except ContinuousRefactorError as error:
@@ -649,6 +652,7 @@ def _run_pipeline_stage(
     attempt: int,
     retry: int,
     agent_kw: dict[str, object],
+    log_mirroring: LogMirroring,
 ) -> tuple[MigrationManifest, str]:
     stdout = _run_stage(
         spec.prompt_stage,
@@ -660,6 +664,7 @@ def _run_pipeline_stage(
         artifacts,
         attempt=attempt,
         retry=retry,
+        log_mirroring=log_mirroring,
         **agent_kw,
     )
     if spec.stage_label == "approaches":
@@ -716,6 +721,7 @@ def run_next_planning_step(
     effort_budget: EffortBudget | None = None,
     effort_metadata: dict[str, object] | None = None,
     extra_context: str = "",
+    log_mirroring: LogMirroring = LogMirroring(),
 ) -> PlanningStepResult:
     live_mig_root = migration_root(live_dir, migration_name)
     base_snapshot_id = capture_live_snapshot(repo_root, live_dir, migration_name)
@@ -756,6 +762,7 @@ def run_next_planning_step(
         effort_budget=effort_budget,
         effort_metadata=effort_metadata,
         extra_context=extra_context,
+        log_mirroring=log_mirroring,
     )
 
     validation_mode = "ready-publish" if manifest.status == "ready" else "planning-snapshot"
@@ -845,6 +852,7 @@ def run_refine_planning_step(request: PlanningRefineRequest) -> PlanningStepResu
         effort_budget=request.effort_budget,
         effort_metadata=request.effort_metadata,
         extra_context=_user_feedback_context(request.feedback_text),
+        log_mirroring=request.log_mirroring,
     )
 
     validation_mode = "ready-publish" if manifest.status == "ready" else "planning-snapshot"
@@ -1072,6 +1080,7 @@ def _execute_step_in_workspace(
     effort_budget: EffortBudget | None,
     effort_metadata: dict[str, object] | None,
     extra_context: str,
+    log_mirroring: LogMirroring,
 ) -> tuple[MigrationManifest, PlanningState, PlanningOutcome | None]:
     step = state.next_step
     if step not in _STEP_PROMPT_STAGES:
@@ -1101,6 +1110,7 @@ def _execute_step_in_workspace(
         timeout=timeout,
         effort_metadata=effort_metadata,
         effort_budget=effort_budget,
+        log_mirroring=log_mirroring,
         stage_label=step,
     )
 

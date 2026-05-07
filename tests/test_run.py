@@ -206,6 +206,41 @@ def test_run_parser_accepts_sleep_flag() -> None:
     assert args.sleep == 0.25
 
 
+def test_run_loop_show_command_logs_mirrors_baseline_validation(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mirrored: list[bool] = []
+
+    def fail_validation(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        mirrored.append(bool(kwargs["mirror_to_terminal"]))
+        return failing_tests(
+            test_command,
+            repo_root,
+            stdout_path,
+            stderr_path,
+            **kwargs,
+        )
+
+    _patch_run_loop_tests(monkeypatch, fail_validation)
+
+    args = make_run_loop_args(
+        run_loop_env,
+        max_refactors=1,
+        show_command_logs=True,
+    )
+    with pytest.raises(ContinuousRefactorError, match="Baseline validation failed"):
+        continuous_refactoring.run_loop(args)
+
+    assert mirrored == [True]
+
+
 def test_run_observed_command_wraps_launch_failures_with_cause(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

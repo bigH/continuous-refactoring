@@ -398,6 +398,86 @@ def test_focused_loop_exits_zero_when_no_live_migrations_remain(
     assert exit_code == 0
 
 
+def test_focused_loop_forwards_log_mirroring_to_baseline_and_ticks(
+    run_loop_env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = tmp_path / "live-migrations"
+    live_dir.mkdir()
+    planning_path = _seed_planning_manifest(live_dir, "plan-first")
+    phase_path = _seed_manifest(live_dir, "phase-second")
+    _install_focused_loop_env(run_loop_env, monkeypatch, live_dir)
+    captured_baseline: list[bool] = []
+    captured_planning: list[object] = []
+    captured_phase: list[object] = []
+
+    def fake_tests(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        captured_baseline.append(bool(kwargs["mirror_to_terminal"]))
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stderr_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text("ok\n", encoding="utf-8")
+        stderr_path.write_text("", encoding="utf-8")
+        return CommandCapture(
+            command=(test_command,),
+            returncode=0,
+            stdout="ok\n",
+            stderr="",
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+
+    def fake_planning_tick(
+        live_dir: Path,
+        taste: str,
+        repo_root: Path,
+        artifacts: object,
+        **kwargs: object,
+    ) -> tuple[RouteOutcome, DecisionRecord | None]:
+        captured_planning.append(kwargs["log_mirroring"])
+        _mark_done(planning_path)
+        return ("commit", _commit_ok("plan-first"))
+
+    def fake_phase_tick(
+        live_dir: Path,
+        taste: str,
+        repo_root: Path,
+        artifacts: object,
+        **kwargs: object,
+    ) -> tuple[RouteOutcome, DecisionRecord | None]:
+        captured_phase.append(kwargs["log_mirroring"])
+        _mark_done(phase_path)
+        return ("commit", _commit_ok("phase-second"))
+
+    monkeypatch.setattr("continuous_refactoring.loop.run_tests", fake_tests)
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_planning_tick",
+        fake_planning_tick,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_migration_tick",
+        fake_phase_tick,
+    )
+
+    args = make_run_loop_args(
+        run_loop_env,
+        focus_on_live_migrations=True,
+        show_agent_logs=True,
+        show_command_logs=True,
+    )
+
+    assert continuous_refactoring.run_migrations_focused_loop(args) == 0
+    assert captured_baseline == [True]
+    assert [getattr(value, "agent") for value in captured_planning] == [True]
+    assert [getattr(value, "command") for value in captured_planning] == [True]
+    assert [getattr(value, "agent") for value in captured_phase] == [True]
+    assert [getattr(value, "command") for value in captured_phase] == [True]
+
+
 def test_focused_loop_raises_when_live_dir_unconfigured(
     run_loop_env: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:

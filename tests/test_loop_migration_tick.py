@@ -18,6 +18,7 @@ from continuous_refactoring.artifacts import (
 from continuous_refactoring.config import default_taste_text
 from continuous_refactoring.decisions import DecisionRecord, RouteOutcome
 from continuous_refactoring.effort import EffortBudget
+from continuous_refactoring.log_mirroring import LogMirroring
 from continuous_refactoring.migrations import (
     MigrationManifest,
     PhaseSpec,
@@ -43,6 +44,7 @@ from continuous_refactoring.migration_tick import (
 )
 
 from conftest import (
+    init_repo,
     make_run_once_args,
     patch_classifier_trap,
 )
@@ -461,6 +463,125 @@ def test_enumerate_eligible_manifests_ignores_noise_and_sorts_by_created_at(
 
     assert [manifest.name for manifest, _ in candidates] == ["older", "newer"]
     assert [path.parent.name for _, path in candidates] == ["older", "newer"]
+
+
+def test_try_planning_tick_forwards_log_mirroring(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    init_repo(repo_root)
+    live_dir = repo_root / "live"
+    live_dir.mkdir()
+    _save_planning(live_dir, repo_root, "planning", last_touch=_utc_now())
+    captured: list[LogMirroring] = []
+
+    def fake_planning(*_args: object, **kwargs: object) -> PlanningStepResult:
+        captured.append(kwargs["log_mirroring"])
+        return PlanningStepResult(
+            status="blocked",
+            migration_name="planning",
+            step="approaches",
+            next_step="approaches",
+            reason="publish blocked",
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.run_next_planning_step",
+        fake_planning,
+    )
+    artifacts = create_run_artifacts(
+        repo_root=repo_root,
+        agent="codex",
+        model="fake-model",
+        effort="xhigh",
+        test_command="uv run pytest",
+    )
+
+    outcome, _record = try_planning_tick(
+        live_dir,
+        "runtime taste",
+        repo_root,
+        artifacts,
+        agent="codex",
+        model="fake-model",
+        effort="xhigh",
+        timeout=123,
+        commit_message_prefix="continuous refactor",
+        attempt=7,
+        finalize_commit=lambda *_args, **_kwargs: None,
+        log_mirroring=LogMirroring(agent=True),
+    )
+
+    assert outcome == "blocked"
+    assert captured == [LogMirroring(agent=True)]
+
+
+def test_try_migration_tick_forwards_log_mirroring_to_ready_and_execute(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = tmp_path / "repo"
+    init_repo(repo_root)
+    live_dir = repo_root / "live"
+    live_dir.mkdir()
+    _save(_make_manifest("migration", last_touch=_utc_now() - timedelta(days=1)), live_dir)
+    captured: dict[str, LogMirroring] = {}
+
+    def fake_ready(
+        _phase: PhaseSpec, _manifest: MigrationManifest, *_args: object, **kwargs: object,
+    ) -> tuple[str, str]:
+        captured["ready"] = kwargs["log_mirroring"]
+        return "yes", "ready"
+
+    def fake_execute(
+        _phase: PhaseSpec,
+        _manifest: MigrationManifest,
+        _taste: object,
+        _repo_root: Path,
+        _live_dir: Path,
+        _artifacts: object,
+        **kwargs: object,
+    ) -> ExecutePhaseOutcome:
+        captured["execute"] = kwargs["log_mirroring"]
+        return ExecutePhaseOutcome(status="done", reason="ok")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.check_phase_ready",
+        fake_ready,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.execute_phase",
+        fake_execute,
+    )
+    artifacts = create_run_artifacts(
+        repo_root=repo_root,
+        agent="codex",
+        model="fake-model",
+        effort="xhigh",
+        test_command="uv run pytest",
+    )
+
+    outcome, _record = try_migration_tick(
+        live_dir,
+        "runtime taste",
+        repo_root,
+        artifacts,
+        agent="codex",
+        model="fake-model",
+        effort="xhigh",
+        timeout=123,
+        commit_message_prefix="continuous refactor",
+        validation_command="uv run pytest",
+        max_attempts=3,
+        attempt=7,
+        finalize_commit=lambda *_args, **_kwargs: None,
+        log_mirroring=LogMirroring(agent=True, command=True),
+    )
+
+    assert outcome == "commit"
+    assert captured == {
+        "ready": LogMirroring(agent=True, command=True),
+        "execute": LogMirroring(agent=True, command=True),
+    }
 
 
 def test_enumeration_uses_visible_migration_dirs(tmp_path: Path) -> None:

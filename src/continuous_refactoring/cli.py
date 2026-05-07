@@ -352,6 +352,11 @@ def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
     refine_parser.add_argument(
         "--effort", choices=EFFORT_TIERS, required=True, help="Effort level."
     )
+    refine_parser.add_argument(
+        "--show-agent-logs",
+        action="store_true",
+        help="Mirror planning agent output to terminal.",
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:

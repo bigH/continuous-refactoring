@@ -34,6 +34,7 @@ from continuous_refactoring.effort import (
     resolve_phase_effort,
 )
 from continuous_refactoring.git import get_head_sha
+from continuous_refactoring.log_mirroring import LogMirroring
 from continuous_refactoring.migrations import (
     bump_last_touch,
     eligible_now,
@@ -243,6 +244,7 @@ def try_migration_tick(
     attempt: int,
     finalize_commit: _FinalizeCommit,
     effort_budget: EffortBudget | None = None,
+    log_mirroring: LogMirroring = LogMirroring(),
 ) -> tuple[RouteOutcome, DecisionRecord | None]:
     resolved_budget = effort_budget or resolve_effort_budget(effort, None)
     now = datetime.now(timezone.utc)
@@ -324,6 +326,7 @@ def try_migration_tick(
                 effort=phase_effort,
                 effort_metadata=effort_metadata,
                 timeout=timeout,
+                log_mirroring=log_mirroring,
             )
         except ContinuousRefactorError as error:
             return "abandon", _ready_check_failure_record(error, repo_root, target_label)
@@ -348,6 +351,7 @@ def try_migration_tick(
                 timeout=timeout,
                 validation_command=validation_command,
                 max_attempts=max_attempts,
+                log_mirroring=log_mirroring,
             )
 
             if outcome.status != "failed":
@@ -404,6 +408,7 @@ def try_planning_tick(
     effort_budget: EffortBudget | None = None,
     effort_metadata: dict[str, object] | None = None,
     skip_migration_names: Collection[str] = (),
+    log_mirroring: LogMirroring = LogMirroring(),
 ) -> tuple[RouteOutcome, DecisionRecord | None]:
     now = datetime.now(timezone.utc)
     preflight_record = _preflight_manifest_consistency(live_dir, repo_root)
@@ -473,6 +478,7 @@ def try_planning_tick(
                 effort_budget=effort_budget,
                 effort_metadata=effort_metadata,
                 timeout=timeout,
+                log_mirroring=log_mirroring,
             )
         except ContinuousRefactorError as error:
             paths = planning_artifact_paths(

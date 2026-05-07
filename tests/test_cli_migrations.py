@@ -204,6 +204,7 @@ def test_migration_refine_requires_message_or_file() -> None:
             "test-model",
             "--effort",
             "low",
+            "--show-agent-logs",
         ]
     )
 
@@ -214,6 +215,26 @@ def test_migration_refine_requires_message_or_file() -> None:
     assert args.agent == "codex"
     assert args.model == "test-model"
     assert args.effort == "low"
+    assert args.show_agent_logs is True
+
+    with pytest.raises(SystemExit) as command_logs_exit:
+        parser.parse_args(
+            [
+                "migration",
+                "refine",
+                "my-mig",
+                "--message",
+                "tighten it",
+                "--with",
+                "codex",
+                "--model",
+                "test-model",
+                "--effort",
+                "low",
+                "--show-command-logs",
+            ]
+        )
+    assert command_logs_exit.value.code == 2
 
 
 def test_migration_list_includes_planning_ready_review_and_done_statuses(
@@ -752,10 +773,17 @@ def test_migration_refine_resumes_from_current_planning_state(
     )
     monkeypatch.setattr("continuous_refactoring.planning.maybe_run_agent", fake)
 
-    handle_migration_refine(_refine_args("target", message="split phase one"))
+    handle_migration_refine(
+        _refine_args(
+            "target",
+            message="split phase one",
+            show_agent_logs=True,
+        )
+    )
 
     state = load_planning_state(repo, planning_state_path(migration_dir))
     assert fake.stage_labels == ["expand"]
+    assert fake.mirror_to_terminal == [True]
     assert state.next_step == "review"
     assert state.feedback[-1].source == "message"
     assert state.feedback[-1].text == "split phase one"
@@ -1373,6 +1401,7 @@ def _refine_args(
     *,
     message: str = "please refine this migration",
     file: Path | None = None,
+    show_agent_logs: bool = False,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         target=target,
@@ -1381,6 +1410,7 @@ def _refine_args(
         agent="codex",
         model="test-model",
         effort="low",
+        show_agent_logs=show_agent_logs,
     )
 
 
@@ -1413,6 +1443,7 @@ class _RefineAgent:
         self._on_call = on_call
         self.stage_labels: list[str] = []
         self.prompts: list[str] = []
+        self.mirror_to_terminal: list[bool] = []
 
     def __call__(self, **kwargs: object) -> CommandCapture:
         assert self._index < len(self._responses)
@@ -1425,6 +1456,7 @@ class _RefineAgent:
 
         self.prompts.append(prompt)
         self.stage_labels.append(stdout_path.parent.name)
+        self.mirror_to_terminal.append(bool(kwargs["mirror_to_terminal"]))
         for rel_path, content in writes.items():
             path = migration_dir / rel_path
             path.parent.mkdir(parents=True, exist_ok=True)

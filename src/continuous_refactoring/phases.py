@@ -30,6 +30,7 @@ from continuous_refactoring.decisions import (
     status_summary,
 )
 from continuous_refactoring.git import get_head_sha, revert_to
+from continuous_refactoring.log_mirroring import LogMirroring
 from continuous_refactoring.migrations import (
     complete_manifest_phase,
     migration_root,
@@ -134,6 +135,7 @@ def check_phase_ready(
     effort: str,
     timeout: int | None,
     effort_metadata: dict[str, object] | None = None,
+    log_mirroring: LogMirroring = LogMirroring(),
 ) -> tuple[ReadyVerdict, str]:
     prompt = compose_phase_ready_prompt(phase, manifest, taste)
     check_dir = artifacts.root / "phase-ready-check"
@@ -163,7 +165,7 @@ def check_phase_ready(
             last_message_path=(
                 check_dir / "agent-last-message.md" if agent == "codex" else None
             ),
-            mirror_to_terminal=False,
+            mirror_to_terminal=log_mirroring.agent,
             timeout=timeout,
         )
     except ContinuousRefactorError as error:
@@ -324,6 +326,7 @@ def _run_phase_agent(
     effort: str,
     effort_metadata: dict[str, object] | None,
     timeout: int | None,
+    log_mirroring: LogMirroring,
 ) -> _PhaseAgentRun:
     artifacts.log_call_started(
         attempt=attempt,
@@ -344,7 +347,7 @@ def _run_phase_agent(
             stdout_path=phase_attempt.phase_dir / "agent.stdout.log",
             stderr_path=phase_attempt.phase_dir / "agent.stderr.log",
             last_message_path=phase_attempt.last_message_path,
-            mirror_to_terminal=False,
+            mirror_to_terminal=log_mirroring.agent,
             timeout=timeout,
         )
     except ContinuousRefactorError as error:
@@ -429,6 +432,7 @@ def _run_phase_validation(
     display_target_label: str,
     repo_root: Path,
     validation_command: str,
+    log_mirroring: LogMirroring,
 ) -> _PhaseValidationResult:
     artifacts.log_call_started(
         attempt=attempt,
@@ -444,7 +448,7 @@ def _run_phase_validation(
             repo_root,
             stdout_path=phase_attempt.phase_dir / "tests.stdout.log",
             stderr_path=phase_attempt.phase_dir / "tests.stderr.log",
-            mirror_to_terminal=False,
+            mirror_to_terminal=log_mirroring.command,
         )
     except ContinuousRefactorError as error:
         summary, focus = status_summary(
@@ -603,6 +607,7 @@ def execute_phase(
     validation_command: str,
     max_attempts: int | None,
     effort_metadata: dict[str, object] | None = None,
+    log_mirroring: LogMirroring = LogMirroring(),
 ) -> ExecutePhaseOutcome:
     _require_phase_in_manifest(manifest, phase.name)
     head_before = get_head_sha(repo_root)
@@ -639,6 +644,7 @@ def execute_phase(
             effort=effort,
             effort_metadata=effort_metadata,
             timeout=timeout,
+            log_mirroring=log_mirroring,
         )
         if agent_run.failure is not None:
             return agent_run.failure
@@ -652,6 +658,7 @@ def execute_phase(
             display_target_label=display_target_label,
             repo_root=repo_root,
             validation_command=validation_command,
+            log_mirroring=log_mirroring,
         )
 
         if validation_result.status == "passed":

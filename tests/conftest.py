@@ -450,26 +450,33 @@ def make_run_once_args(
     globs: str | None = None,
     targets: Path | None = None,
     paths: str | None = None,
+    show_agent_logs: bool = False,
+    show_command_logs: bool = False,
 ) -> argparse.Namespace:
-    return argparse.Namespace(
-        **_build_run_args(
-            repo_root=repo_root,
-            agent=agent,
-            model=model,
-            effort=effort,
-            default_effort=default_effort,
-            max_allowed_effort=max_allowed_effort,
-            validation_command=validation_command,
-            scope_instruction=scope_instruction,
-            timeout=timeout,
-            refactoring_prompt=refactoring_prompt,
-            extensions=extensions,
-            globs=globs,
-            targets=targets,
-            paths=paths,
-        ),
-        fix_prompt=None,
+    args = _build_run_args(
+        repo_root=repo_root,
+        agent=agent,
+        model=model,
+        effort=effort,
+        default_effort=default_effort,
+        max_allowed_effort=max_allowed_effort,
+        validation_command=validation_command,
+        scope_instruction=scope_instruction,
+        timeout=timeout,
+        refactoring_prompt=refactoring_prompt,
+        extensions=extensions,
+        globs=globs,
+        targets=targets,
+        paths=paths,
     )
+    args.update(
+        {
+            "fix_prompt": None,
+            "show_agent_logs": show_agent_logs,
+            "show_command_logs": show_command_logs,
+        }
+    )
+    return argparse.Namespace(**args)
 
 
 def make_run_loop_args(

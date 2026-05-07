@@ -64,11 +64,7 @@ def iter_visible_migration_dirs(live_dir: Path) -> list[Path]:
     return [
         child
         for child in sorted(live_dir.iterdir())
-        if (
-            child.is_dir()
-            and not child.is_symlink()
-            and _is_visible_migration_dir_name(child.name)
-        )
+        if _is_visible_migration_dir(child)
     ]
 
 
@@ -102,22 +98,9 @@ def check_migration_consistency(
             )
         ]
 
-    if manifest.name != migration_dir.name:
-        findings.append(
-            _finding(
-                mode,
-                "error",
-                "manifest-slug-mismatch",
-                manifest_path,
-                (
-                    f"Manifest name {manifest.name!r} does not match "
-                    f"directory slug {migration_dir.name!r}."
-                ),
-            )
-        )
-
-    findings.extend(_phase_doc_duplicate_findings(migration_dir, mode))
-    findings.extend(_plan_findings(migration_dir, manifest, mode))
+    findings.extend(_manifest_identity_findings(migration_dir, manifest, mode))
+    findings.extend(_phase_doc_name_collision_findings(migration_dir, mode))
+    findings.extend(_manifest_plan_findings(migration_dir, manifest, mode))
     findings.extend(_manifest_phase_file_findings(migration_dir, manifest, mode))
     findings.extend(_manifest_phase_metadata_findings(migration_dir, manifest, mode))
     return findings
@@ -127,6 +110,14 @@ def has_blocking_consistency_findings(
     findings: Iterable[MigrationConsistencyFinding],
 ) -> bool:
     return any(finding.severity == "error" for finding in findings)
+
+
+def _is_visible_migration_dir(path: Path) -> bool:
+    return (
+        path.is_dir()
+        and not path.is_symlink()
+        and _is_visible_migration_dir_name(path.name)
+    )
 
 
 def _is_visible_migration_dir_name(name: str) -> bool:
@@ -153,7 +144,28 @@ def _finding(
     )
 
 
-def _phase_doc_duplicate_findings(
+def _manifest_identity_findings(
+    migration_dir: Path,
+    manifest: MigrationManifest,
+    mode: ConsistencyMode,
+) -> list[MigrationConsistencyFinding]:
+    if manifest.name == migration_dir.name:
+        return []
+    return [
+        _finding(
+            mode,
+            "error",
+            "manifest-slug-mismatch",
+            migration_dir / "manifest.json",
+            (
+                f"Manifest name {manifest.name!r} does not match "
+                f"directory slug {migration_dir.name!r}."
+            ),
+        )
+    ]
+
+
+def _phase_doc_name_collision_findings(
     migration_dir: Path,
     mode: ConsistencyMode,
 ) -> list[MigrationConsistencyFinding]:
@@ -164,9 +176,12 @@ def _phase_doc_duplicate_findings(
         match = _PHASE_DOC_RE.match(path.name)
         if match is None:
             continue
+
         phase_index = int(match.group("index"))
         phase_name = match.group("name")
-        if phase_index in by_index:
+
+        existing_index_path = by_index.get(phase_index)
+        if existing_index_path is not None:
             findings.append(
                 _finding(
                     mode,
@@ -175,13 +190,15 @@ def _phase_doc_duplicate_findings(
                     path,
                     (
                         f"Phase doc index {phase_index} is duplicated by "
-                        f"{by_index[phase_index].name!r} and {path.name!r}."
+                        f"{existing_index_path.name!r} and {path.name!r}."
                     ),
                 )
             )
         else:
             by_index[phase_index] = path
-        if phase_name in by_name:
+
+        existing_name_path = by_name.get(phase_name)
+        if existing_name_path is not None:
             findings.append(
                 _finding(
                     mode,
@@ -190,7 +207,7 @@ def _phase_doc_duplicate_findings(
                     path,
                     (
                         f"Phase doc name {phase_name!r} is duplicated by "
-                        f"{by_name[phase_name].name!r} and {path.name!r}."
+                        f"{existing_name_path.name!r} and {path.name!r}."
                     ),
                 )
             )
@@ -212,16 +229,18 @@ def _phase_doc_paths(migration_dir: Path) -> list[Path]:
         ) from error
 
 
-def _plan_findings(
+def _manifest_plan_findings(
     migration_dir: Path,
     manifest: MigrationManifest,
     mode: ConsistencyMode,
 ) -> list[MigrationConsistencyFinding]:
     if not _requires_plan(manifest, mode):
         return []
+
     plan_path = migration_dir / "plan.md"
     if plan_path.exists():
         return []
+
     return [
         _finding(
             mode,
@@ -246,60 +265,76 @@ def _manifest_phase_file_findings(
     mode: ConsistencyMode,
 ) -> list[MigrationConsistencyFinding]:
     findings: list[MigrationConsistencyFinding] = []
+    migration_root = migration_dir.resolve()
     for phase in manifest.phases:
-        ref = Path(phase.file)
-        if _invalid_phase_file_reference(ref):
-            findings.append(
-                _finding(
-                    mode,
-                    "error",
-                    "invalid-phase-file-reference",
-                    migration_dir / phase.file,
-                    f"Phase file reference {phase.file!r} must stay inside the migration directory.",
-                )
+        phase_path = migration_dir / phase.file
+        findings.extend(
+            _single_phase_file_findings(
+                migration_root=migration_root,
+                phase_path=phase_path,
+                phase_file=phase.file,
+                mode=mode,
             )
-            continue
-
-        phase_path = migration_dir / ref
-        if phase_path.is_symlink():
-            findings.extend(_symlink_phase_file_findings(migration_dir, phase_path, mode))
-            continue
-
-        if not phase_path.exists():
-            findings.append(
-                _finding(
-                    mode,
-                    "error",
-                    "missing-phase-file",
-                    phase_path,
-                    f"Manifest phase file {phase.file!r} is missing.",
-                )
-            )
-            continue
-
-        if not _is_inside(phase_path.resolve(), migration_dir.resolve()):
-            findings.append(
-                _finding(
-                    mode,
-                    "error",
-                    "phase-file-escapes-migration",
-                    phase_path,
-                    f"Manifest phase file {phase.file!r} resolves outside the migration directory.",
-                )
-            )
-            continue
-
-        if not phase_path.is_file():
-            findings.append(
-                _finding(
-                    mode,
-                    "error",
-                    "phase-file-not-regular",
-                    phase_path,
-                    f"Manifest phase file {phase.file!r} is not a regular file.",
-                )
-            )
+        )
     return findings
+
+
+def _single_phase_file_findings(
+    *,
+    migration_root: Path,
+    phase_path: Path,
+    phase_file: str,
+    mode: ConsistencyMode,
+) -> list[MigrationConsistencyFinding]:
+    ref = Path(phase_file)
+    if _invalid_phase_file_reference(ref):
+        return [
+            _finding(
+                mode,
+                "error",
+                "invalid-phase-file-reference",
+                phase_path,
+                f"Phase file reference {phase_file!r} must stay inside the migration directory.",
+            )
+        ]
+
+    if phase_path.is_symlink():
+        return _symlink_phase_file_findings(migration_root, phase_path, mode)
+
+    if not phase_path.exists():
+        return [
+            _finding(
+                mode,
+                "error",
+                "missing-phase-file",
+                phase_path,
+                f"Manifest phase file {phase_file!r} is missing.",
+            )
+        ]
+
+    if not _is_inside(phase_path.resolve(), migration_root):
+        return [
+            _finding(
+                mode,
+                "error",
+                "phase-file-escapes-migration",
+                phase_path,
+                f"Manifest phase file {phase_file!r} resolves outside the migration directory.",
+            )
+        ]
+
+    if not phase_path.is_file():
+        return [
+            _finding(
+                mode,
+                "error",
+                "phase-file-not-regular",
+                phase_path,
+                f"Manifest phase file {phase_file!r} is not a regular file.",
+            )
+        ]
+
+    return []
 
 
 def _manifest_phase_metadata_findings(
@@ -311,51 +346,9 @@ def _manifest_phase_metadata_findings(
         return []
 
     findings: list[MigrationConsistencyFinding] = []
-    phase_names = {phase.name for phase in manifest.phases}
-    if not phase_names:
-        findings.append(
-            _finding(
-                mode,
-                "error",
-                "missing-manifest-phases",
-                migration_dir / "manifest.json",
-                "Ready migrations require at least one manifest phase.",
-            )
-        )
-    elif manifest.current_phase not in phase_names:
-        findings.append(
-            _finding(
-                mode,
-                "error",
-                "invalid-current-phase",
-                migration_dir / "manifest.json",
-                (
-                    f"Current phase {manifest.current_phase!r} does not match "
-                    "any manifest phase."
-                ),
-            )
-        )
-
-    doc_phase_names = {
-        match.group("name")
-        for path in _phase_doc_paths(migration_dir)
-        if (match := _PHASE_DOC_RE.match(path.name)) is not None
-    }
-    for doc_phase_name in sorted(doc_phase_names - phase_names):
-        findings.append(
-            _finding(
-                mode,
-                "error",
-                "phase-doc-not-in-manifest",
-                migration_dir / f"phase-*-{doc_phase_name}.md",
-                f"Phase doc {doc_phase_name!r} is not represented in manifest phases.",
-            )
-        )
-
-    for phase in manifest.phases:
-        phase_path = migration_dir / phase.file
-        if phase_path.is_file() and not phase_path.is_symlink():
-            findings.extend(_phase_doc_contract_findings(phase_path, mode))
+    findings.extend(_manifest_phase_membership_findings(migration_dir, manifest, mode))
+    findings.extend(_phase_doc_manifest_coverage_findings(migration_dir, manifest, mode))
+    findings.extend(_phase_doc_contract_findings_for_manifest(migration_dir, manifest, mode))
     return findings
 
 
@@ -366,6 +359,76 @@ def _requires_ready_publish_metadata(
     return mode == "ready-publish" or (
         mode == "doctor" and manifest.status in ("ready", "in-progress")
     )
+
+
+def _manifest_phase_membership_findings(
+    migration_dir: Path,
+    manifest: MigrationManifest,
+    mode: ConsistencyMode,
+) -> list[MigrationConsistencyFinding]:
+    phase_names = {phase.name for phase in manifest.phases}
+    if not phase_names:
+        return [
+            _finding(
+                mode,
+                "error",
+                "missing-manifest-phases",
+                migration_dir / "manifest.json",
+                "Ready migrations require at least one manifest phase.",
+            )
+        ]
+
+    if manifest.current_phase in phase_names:
+        return []
+
+    return [
+        _finding(
+            mode,
+            "error",
+            "invalid-current-phase",
+            migration_dir / "manifest.json",
+            (
+                f"Current phase {manifest.current_phase!r} does not match "
+                "any manifest phase."
+            ),
+        )
+    ]
+
+
+def _phase_doc_manifest_coverage_findings(
+    migration_dir: Path,
+    manifest: MigrationManifest,
+    mode: ConsistencyMode,
+) -> list[MigrationConsistencyFinding]:
+    phase_names = {phase.name for phase in manifest.phases}
+    doc_phase_names = {
+        match.group("name")
+        for path in _phase_doc_paths(migration_dir)
+        if (match := _PHASE_DOC_RE.match(path.name)) is not None
+    }
+    return [
+        _finding(
+            mode,
+            "error",
+            "phase-doc-not-in-manifest",
+            migration_dir / f"phase-*-{doc_phase_name}.md",
+            f"Phase doc {doc_phase_name!r} is not represented in manifest phases.",
+        )
+        for doc_phase_name in sorted(doc_phase_names - phase_names)
+    ]
+
+
+def _phase_doc_contract_findings_for_manifest(
+    migration_dir: Path,
+    manifest: MigrationManifest,
+    mode: ConsistencyMode,
+) -> list[MigrationConsistencyFinding]:
+    findings: list[MigrationConsistencyFinding] = []
+    for phase in manifest.phases:
+        phase_path = migration_dir / phase.file
+        if phase_path.is_file() and not phase_path.is_symlink():
+            findings.extend(_phase_doc_contract_findings(phase_path, mode))
+    return findings
 
 
 def _phase_doc_contract_findings(
@@ -408,19 +471,15 @@ def _phase_doc_contract_findings(
 
 
 def _invalid_phase_file_reference(ref: Path) -> bool:
-    return (
-        str(ref) in ("", ".")
-        or ref.is_absolute()
-        or ".." in ref.parts
-    )
+    return str(ref) in ("", ".") or ref.is_absolute() or ".." in ref.parts
 
 
 def _symlink_phase_file_findings(
-    migration_dir: Path,
+    migration_root: Path,
     phase_path: Path,
     mode: ConsistencyMode,
 ) -> list[MigrationConsistencyFinding]:
-    if not _is_inside(phase_path.resolve(), migration_dir.resolve()):
+    if not _is_inside(phase_path.resolve(), migration_root):
         return [
             _finding(
                 mode,

@@ -2,9 +2,9 @@
   "awaiting_human_review": false,
   "cooldown_until": null,
   "created_at": "2026-05-07T14:01:52.769-07:00",
-  "current_phase": "extract-rule-groups-behind-stable-api",
+  "current_phase": "normalize-shared-internal-policy-predicates",
   "human_review_reason": null,
-  "last_touch": "2026-05-07T14:15:30.148-07:00",
+  "last_touch": "2026-05-07T14:19:58.151-07:00",
   "name": "src-continuous-refactoring-migration-con-20260507T140152",
   "phases": [
     {
@@ -16,7 +16,7 @@
       "required_effort": "low"
     },
     {
-      "done": false,
+      "done": true,
       "effort_reason": "Structural extraction at an execution gate needs careful behavior preservation.",
       "file": "phase-2-extract-rule-groups-behind-stable-api.md",
       "name": "extract-rule-groups-behind-stable-api",

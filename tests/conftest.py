@@ -108,16 +108,16 @@ def make_taste_agent_writer(
     captured: dict[str, str] | None = None,
 ) -> Callable[..., int]:
     def fake(
-        agent: str,
-        model: str,
-        effort: str,
+        _agent: str,
+        _model: str,
+        _effort: str,
         prompt: str,
-        repo_root: Path,
+        _repo_root: Path,
         *,
         content_path: Path,
         settle_path: Path,
-        settle_window_seconds: float = 2.0,
-        poll_interval_seconds: float = 0.1,
+        _settle_window_seconds: float = 2.0,
+        _poll_interval_seconds: float = 0.1,
     ) -> int:
         assert content_path == extract_taste_path(prompt)
         assert settle_path == extract_settle_path(prompt)

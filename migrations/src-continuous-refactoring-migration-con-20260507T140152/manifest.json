@@ -2,11 +2,44 @@
   "awaiting_human_review": false,
   "cooldown_until": null,
   "created_at": "2026-05-07T14:01:52.769-07:00",
-  "current_phase": "",
+  "current_phase": "characterize-current-contracts",
   "human_review_reason": null,
-  "last_touch": "2026-05-07T14:03:08.688-07:00",
+  "last_touch": "2026-05-07T14:04:33.466-07:00",
   "name": "src-continuous-refactoring-migration-con-20260507T140152",
-  "phases": [],
+  "phases": [
+    {
+      "done": false,
+      "effort_reason": "Primarily additive characterization tests with low structural risk.",
+      "file": "phase-1-characterize-current-contracts.md",
+      "name": "characterize-current-contracts",
+      "precondition": "- No earlier phase is required. - `src/continuous_refactoring/migration_consistency.py` still exposes current public functions and finding structures used by existing tests. - Migration workspace paths and test fixtures referenced by these tests are intact.",
+      "required_effort": "low"
+    },
+    {
+      "done": false,
+      "effort_reason": "Structural extraction in a sensitive execution gate requires careful behavior preservation.",
+      "file": "phase-2-extract-rule-groups-behind-stable-api.md",
+      "name": "extract-rule-groups-behind-stable-api",
+      "precondition": "- Phase 1 is complete and merged into this migration branch. - Characterization tests for current contracts are present and passing. - Existing call sites still depend on current public function names/signatures.",
+      "required_effort": "medium"
+    },
+    {
+      "done": false,
+      "effort_reason": "Logic normalization across gating predicates is subtle and regression-prone without careful checks.",
+      "file": "phase-3-normalize-shared-internal-policy-predicates.md",
+      "name": "normalize-shared-internal-policy-predicates",
+      "precondition": "- Phase 2 is complete and has introduced stable rule-group helper structure. - Existing finding contracts remain locked by tests. - No caller API changes are pending for this migration.",
+      "required_effort": "medium"
+    },
+    {
+      "done": false,
+      "effort_reason": "Primarily validation and focused test additions with minimal production edits.",
+      "file": "phase-4-integration-verification-sweep.md",
+      "name": "integration-verification-sweep",
+      "precondition": "- Phases 1\u20133 are complete. - Refactored `migration_consistency` internals are stable and all direct module tests pass. - Consistency call sites still route through existing public APIs.",
+      "required_effort": "low"
+    }
+  ],
   "status": "planning",
   "wake_up_on": null
 }

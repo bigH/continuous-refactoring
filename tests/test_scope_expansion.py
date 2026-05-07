@@ -17,6 +17,7 @@ from continuous_refactoring.artifacts import (
 from continuous_refactoring.scope_candidates import ScopeCandidate, ScopeCandidateKind
 from continuous_refactoring.scope_expansion import (
     ScopeSelection,
+    parse_scope_selection,
     select_scope_candidate,
     scope_candidate_to_target,
     scope_expansion_bypass_reason,
@@ -257,6 +258,27 @@ def test_select_scope_candidate_rejects_duplicate_candidate_kinds(
             effort="low",
             timeout=None,
         )
+
+
+def test_parse_scope_selection_accepts_case_insensitive_prefix_and_kind() -> None:
+    selection = parse_scope_selection(
+        "SELECTED-CANDIDATE: LOCAL-CLUSTER - stronger locality\n",
+        ("seed", "local-cluster"),
+    )
+
+    assert selection == ScopeSelection(
+        kind="local-cluster",
+        reason="stronger locality",
+    )
+
+
+def test_parse_scope_selection_defaults_reason_to_kind_when_separator_missing_text() -> None:
+    selection = parse_scope_selection(
+        "selected-candidate: seed - \n",
+        ("seed", "local-cluster"),
+    )
+
+    assert selection == ScopeSelection(kind="seed", reason="seed")
 
 
 def test_select_scope_candidate_multi_candidate_logs_call_events_with_effort(

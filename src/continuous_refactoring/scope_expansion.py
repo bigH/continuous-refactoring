@@ -48,11 +48,14 @@ def write_scope_selection_logs(selection_dir: Path, selection: ScopeSelection) -
 
 
 def _parse_selection_line(line: str) -> tuple[ScopeCandidateKind, str] | None:
-    if not line[: len(_SCOPE_SELECTION_PREFIX)].lower() == _SCOPE_SELECTION_PREFIX:
+    line = line.strip()
+    lowered = line.lower()
+    if not lowered.startswith(_SCOPE_SELECTION_PREFIX):
         return None
     body = line[len(_SCOPE_SELECTION_PREFIX):].strip()
+    body_lower = body.lower()
     for kind in _KNOWN_SCOPE_SELECTION_KINDS:
-        if not body.lower().startswith(kind):
+        if not body_lower.startswith(kind):
             continue
         reason = body[len(kind):].strip()
         if not reason:

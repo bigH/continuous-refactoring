@@ -72,6 +72,8 @@ continuous-refactoring run \
 ```
 
 That keeps sweeping targets until it runs out, hits your caps, or starts failing.
+Use `run --focus-on-live-migrations` when you want the loop to work only on
+eligible live migrations; it bypasses target selection and `--max-refactors`.
 
 ## What it does
 
@@ -122,7 +124,7 @@ continuous-refactoring run \
 | `init` | Registers this directory as a project, creates a default `taste.md`, and can store `--live-migrations-dir` or `--in-repo-taste`. |
 | `taste` | Prints the active taste file path. Add `--interview` to have an agent author it, `--refine` to iteratively improve an existing taste doc, `--upgrade` to refresh stale taste dimensions, `--global` for the shared file, and `--force` to let `--interview` overwrite custom content after writing a `.bak`. |
 | `run-once` | Single pass on one resolved target. No retry. If there is a diff and validation passes, it commits locally and prints the diffstat. |
-| `run` | The loop. Iterates targets, retries on failure, and commits successful targets locally. |
+| `run` | The loop. Iterates targets, retries on failure, and commits successful targets locally. Add `--focus-on-live-migrations` to bypass targeting and work only on eligible live migrations. |
 | `upgrade` | Checks that the global config manifest is current, rewrites it idempotently, and warns if the global taste file is stale. |
 | `migration list` | Lists visible migrations. Add `--status <status>` or `--awaiting-review` to filter. |
 | `migration doctor <slug-or-path>` | Validates one visible migration's consistency. |
@@ -141,13 +143,16 @@ Target resolution is first-match-wins:
 
 These flags are not mutually exclusive, but only the highest-priority populated source is used.
 
-- `--targets path/to/targets.jsonl` — explicit list; one JSON object per line with `description`, `files`, optional `scoping`, `model-override`, `effort-override`. Effort overrides use `low`, `medium`, `high`, or `xhigh`.
-- `--globs 'src/**/*.py:tests/**/*.py'` — colon-separated globs; each matched file becomes its own target.
-- `--extensions .py,.ts` — shorthand that expands to `**/*.py`, `**/*.ts`; each matched file becomes its own target.
-- `--paths a.py:b.py` — literal paths, all treated as one target.
-- `--scope-instruction "clean up the auth module"` — extra free-text scoping. If file-based targeting resolves nothing, this becomes the useful fallback context.
+- `--targets path/to/targets.jsonl` — explicit user-provided list; one JSON object per line with `description`, `files`, optional `scoping`, `model-override`, `effort-override`. Effort overrides use `low`, `medium`, `high`, or `xhigh`.
+- `--globs 'src/**/*.py:tests/**/*.py'` — colon-separated globs matched against tracked files from `git ls-files`; each matched file becomes its own target.
+- `--extensions .py,.ts` — shorthand that expands to `**/*.py`, `**/*.ts` against tracked files from `git ls-files`; each matched file becomes its own target.
+- `--paths a.py:b.py` — literal user-provided paths, all treated as one target.
+- `--scope-instruction "clean up the auth module"` — extra free-text scoping. If selected file patterns resolve nothing, this becomes the useful fallback context.
 
-If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`, then `run` and `run-once` require `--scope-instruction`.
+If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`,
+then `run` and `run-once` require `--scope-instruction`; the driver still
+random-samples tracked files from `git ls-files` first and uses the scope text as
+context for that target.
 
 ### Migrations & taste flags
 
@@ -189,7 +194,8 @@ continuous-refactoring migration refine <slug-or-path> --file feedback.md --with
 ### `run`-only flags
 
 - `--max-attempts N` — per-target retry budget. `1` = no retry, `0` = unlimited (which means permanently broken targets will never give up).
-- `--max-refactors N` — cap the number of targets per run. Required unless you use `--targets`.
+- `--max-refactors N` — cap the number of targets per run. Required unless you use `--targets` or `--focus-on-live-migrations`.
+- `--focus-on-live-migrations` — bypass target selection and `--max-refactors`; iterate eligible live migrations until they are done, deferred, blocked, or the failure budget trips.
 - `--max-consecutive-failures N` — bail after N targets fail in a row. Default 3.
 - `--sleep SECONDS` — pause between completed targets. Useful when you want a long batch without hammering the repo or your agent budget.
 - `--commit-message-prefix TEXT` — subject prefix for successful refactor or migration-plan commits. Default `continuous refactor`.
@@ -208,13 +214,27 @@ continuous-refactoring migration refine <slug-or-path> --file feedback.md --with
 Each run writes to `$TMPDIR/continuous-refactoring/<run-id>/`:
 
 - `summary.json` — rolling status, counts, per-attempt stats
-- `events.jsonl` — structured event log
+- `events.jsonl` — structured event log with call roles such as `classify`,
+  `planning.<step>`, `phase.ready-check`, `phase.execute`, and
+  `phase.validation`
 - `run.log` — human-readable log
 - `attempt-NNN/[retry-NN/]refactor/` — per-attempt agent + test stdout/stderr
+- `baseline/initial/` — baseline validation stdout/stderr before work starts
+- `classify/` — classifier agent stdout/stderr
+- `scope-expansion/` — scope candidates, selection, and bypass reason
+- `attempt-NNN/[retry-NN/]planning/<step>/` — planning agent stdout/stderr for
+  migration planning steps
+- `phase-ready-check/` — phase precondition agent stdout/stderr
+- `attempt-NNN/[retry-NN/]phase-execute/` — phase agent and validation logs
+- `migration-probes/action-NNN/` — migration probe logs during normal `run`
+  actions, including planning, phase ready-checks, and phase execution
 
 Mixed-effort runs are auditable: summaries and call events record the default effort, max allowed effort, requested effort, effective effort, source, and whether the request was capped.
 
-The path prints at startup. Grep it when something goes sideways.
+The path prints at startup. Grep it when something goes sideways. Failed
+non-commit decisions also write durable XDG snapshots under the project failure
+directory, usually
+`~/.local/share/continuous-refactoring/projects/<uuid>/failures/`.
 
 ## Taste files
 

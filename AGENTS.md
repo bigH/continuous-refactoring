@@ -20,11 +20,30 @@ Treat `AGENTS.md` as part of the codebase's invariants, not documentation. A dri
 - Test one: `uv run pytest tests/test_x.py::test_name`
 - Entry: `continuous-refactoring --help` / `continuous-refactoring --version`
   (or `python -m continuous_refactoring`)
-- Inspect migrations: `continuous-refactoring migration list` /
+- Init: `continuous-refactoring init [--path PATH]
+  [--live-migrations-dir DIR] [--in-repo-taste [PATH]] [--force]`
+- Taste: `continuous-refactoring taste [--global]
+  [--interview|--upgrade|--refine]
+  [--with codex|claude --model <model> --effort <low|medium|high|xhigh>]
+  [--force]`
+- Run once: `continuous-refactoring run-once --with codex|claude
+  --model <model> [common targeting/validation flags]`
+- Run loop: `continuous-refactoring run --with codex|claude --model <model>
+  [--max-attempts N] [--max-refactors N] [--focus-on-live-migrations]
+  [--commit-message-prefix TEXT] [--max-consecutive-failures N] [--sleep N]`
+  Requires targeting flags or `--scope-instruction` unless
+  `--focus-on-live-migrations`; `--max-refactors` is required unless using
+  `--targets` or `--focus-on-live-migrations`.
+- Upgrade config: `continuous-refactoring upgrade`
+- Inspect migrations: `continuous-refactoring migration list
+  [--status planning|ready|in-progress|skipped|done]
+  [--awaiting-review]` /
   `continuous-refactoring migration doctor <slug-or-path>` /
   `continuous-refactoring migration doctor --all`
-- Review migrations: `continuous-refactoring migration review <slug-or-path>`
-  (top-level `review perform <slug>` remains a compatibility wrapper)
+- Review migrations: `continuous-refactoring migration review <slug-or-path>
+  --with codex|claude --model <model> --effort <low|medium|high|xhigh>`
+  (top-level `review list` / `review perform <slug> --with ... --model ...
+  --effort ...` remain compatibility wrappers)
 - Refine migration planning: `continuous-refactoring migration refine <slug-or-path>
   (--message <text>|--file <path>) --with codex|claude --model <model>
   --effort <low|medium|high|xhigh>`
@@ -37,17 +56,17 @@ runs `uv run pytest`. **Pytest is the only code gate.** GitHub Actions
 
 - `src/continuous_refactoring/` — flat module layout, no subpackages
 - `tests/` — flat, `test_<module>.py` per source module plus behavior bundles (`test_e2e.py`, `test_run.py`, `test_run_once.py`)
-- `migrations/` — live multi-phase plans (dog-food output)
+- `<live-migrations-dir>/` — configurable live multi-phase plans (dog-food output); a checkout may not have `migrations/`
 - `.scratchpad/` — ephemeral agent state, gitignored
 - Durable user state: `~/.local/share/continuous-refactoring/…` (XDG)
 
 ## 5. Project vocabulary
 
-- **Target** — a source path the driver is working on this iteration.
+- **Target** — the refactoring unit the driver is working on this iteration: a JSONL target, one matched tracked file, literal path set, random tracked-file bundle, or fallback scoped prompt.
 - **Taste** — project or global prose that shapes every prompt. Project taste is XDG by default, or a repo-relative path stored as `repo_taste_path` after `init --in-repo-taste [PATH]`.
 - **Scope expansion** — deciding the set of files edited together with the target (`scope_expansion.py`).
-- **Classifier / routing** — picks which agent handles a target (`routing.py`).
-- **Migration** — a multi-phase plan living under `migrations/<slug>/`.
+- **Classifier / routing** — chooses a target route: `cohesive-cleanup` vs `needs-plan` (`routing.py`).
+- **Migration** — a multi-phase plan living under `<live-migrations-dir>/<slug>/`.
 - **Visible migration directory** — direct child migration dir that is not hidden, dotted, symlinked, or internal/transactional; enumerate through `iter_visible_migration_dirs()`.
 - **Consistency finding** — structured migration integrity result with shared `info | warning | error` severity and `planning-snapshot | ready-publish | execution-gate | doctor` mode.
 - **Planning state** — durable resume/audit cursor at `<migration>/.planning/state.json`; it records accepted planning steps and their repo-relative stage outputs.
@@ -61,14 +80,14 @@ runs `uv run pytest`. **Pytest is the only code gate.** GitHub Actions
 - **Wake-up rule** — schedule for when the driver reconsiders an idle target.
 - **Eligibility cooldown** — `manifest.cooldown_until` gates re-checks after a migration was deferred or blocked; `last_touch` records activity only.
 - **Settle protocol** — `<file>.done` + sha256 handshake confirming an interactive agent is finished.
-- **Status block** — the driver's end-of-attempt summary written to artifacts.
-- **Call role** — prompt slot recorded in artifacts, including `classifier`, `editor`, dotted planning roles such as `planning.<step>`, `planning.state`, `planning.publish`, and phase roles such as `phase.ready-check` or `phase.execute`.
+- **Status block** — the agent-emitted final-message block parsed by `decisions.py`.
+- **Call role** — prompt slot recorded in artifacts, including `classify`, `refactor`, dotted planning roles such as `planning.<step>`, `planning.state`, `planning.publish`, and phase roles such as `phase.ready-check` or `phase.execute`.
 - **Effort budget** — shared nominal tiers `low < medium < high < xhigh`; `--default-effort` is the normal call effort, `--max-allowed-effort` caps target overrides and phase escalation.
 - **Failure snapshot** — per-attempt failure record at `…/projects/<uuid>/failures/<run_id>-attempt-NNN-retry-NN-<role>.md`. One file per failed attempt; sort to find the latest.
 
 ## 6. Code conventions
 
-- `from __future__ import annotations` at the top of every src file.
+- `from __future__ import annotations` at the top of every src file, after an optional module docstring.
 - Frozen dataclasses for value types; `Literal[…]` for state machines.
 - Explicit `__all__` per module.
 - Full-path imports (`from continuous_refactoring.X import Y`). **Never relative.**
@@ -84,10 +103,10 @@ runs `uv run pytest`. **Pytest is the only code gate.** GitHub Actions
 
 ## 8. Testing idioms
 
-- `pytest>=8.0` only. No coverage, no hypothesis, no markers.
+- `pytest>=8.0` only. No coverage, no hypothesis, no custom pytest markers; `pytest.mark.parametrize` is normal.
 - Monkeypatching is idiomatic — not a smell.
 - `tests/conftest.py` provides:
-  - `write_fake_codex` — drops a Python stub for `codex` on PATH. Controlled by `FAKE_CODEX_STDOUT`, `FAKE_CODEX_LAST_MESSAGE`, `FAKE_CODEX_TOUCH_FILE`, `FAKE_CODEX_EXIT_CODE`.
+  - `write_fake_codex` — drops a Python stub for `codex` on PATH. Controlled by `FAKE_CODEX_STDOUT`, `FAKE_CODEX_STDERR`, `FAKE_CODEX_LAST_MESSAGE`, `FAKE_CODEX_TOUCH_FILE`, `FAKE_CODEX_TOUCH_CONTENT`, `FAKE_CODEX_EXIT_CODE`.
   - `_prepare_run_env` — `git init -b main` in `tmp_path`; redirects `TMPDIR` and `XDG_DATA_HOME` to the sandbox.
   - `make_run_once_args` / `make_run_loop_args` — build argparse `Namespace`s so tests bypass the CLI layer.
 - Claude stream-json parsing is covered with recorded NDJSON at `tests/fixtures/claude_stream_json/selection.stdout.log`.
@@ -129,6 +148,7 @@ active phase explicitly names `loop.py` in scope.
 ## 11. Surprising CLI semantics
 
 - Targeting is **first-match-wins** across `--targets > --globs > --extensions > --paths`. Multiple flags silently use the highest.
+- `run` requires targeting or `--scope-instruction`, and also requires `--max-refactors` unless `--targets` or `--focus-on-live-migrations` is set.
 - `--max-attempts 0` means **unlimited**, not zero. A WARN fires at startup.
 - `run-once` and `run` both create local commits only; the driver never publishes branch updates.
 
@@ -171,7 +191,7 @@ active phase explicitly names `loop.py` in scope.
 ## 15. Read-first pointers
 
 - `README.md` — feature tour and CLI reference.
-- `migrations/<live>/plan.md` — active structural work.
+- `<live-migrations-dir>/<live>/plan.md` — active structural work, when this checkout has a live migrations dir.
 - `src/continuous_refactoring/__init__.py` — public surface and uniqueness check.
 - `tests/conftest.py` — test env patterns and fake agents.
 - `src/continuous_refactoring/prompts.py` — prompt templates and taste injection.

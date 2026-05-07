@@ -1,34 +1,31 @@
 # Migration Plan: Incremental Validator Extraction
 
 ## Goal
-Refactor `src/continuous_refactoring/migration_consistency.py` into clearer, smaller validator rule groups while preserving current external behavior, finding contracts, and call-site interfaces.
+Refactor `src/continuous_refactoring/migration_consistency.py` into smaller, domain-focused validator rule groups while preserving all current public behavior and interfaces.
 
 ## Constraints and Safety Model
 - Preserve exported API and behavior of:
   - `check_migration_consistency()`
   - `has_blocking_consistency_findings()`
   - `iter_visible_migration_dirs()`
-- Preserve existing finding structure expectations (code/severity/mode/path semantics) unless a phase explicitly documents a reviewed interface change.
-- Keep each phase shippable with repository-level validation passing.
+- Preserve consistency-finding contracts (severity, mode, code, and path semantics) consumed by migration scheduling, review, doctor, and CLI flows.
+- Keep each phase independently verifiable and shippable.
+- No phase may introduce public interface changes.
 
-## Phase Breakdown
+## Numbered Phases
 1. **Phase 1 — Characterize Current Contracts** (`phase-1-characterize-current-contracts.md`)
-- Expand focused tests for current behavior in `tests/test_migration_consistency.py`.
-- Lock down mode gating, visibility/symlink filtering, phase doc section checks, and duplicate-doc detection semantics.
+- Lock in current behavior with focused tests for mode gating, visible-directory filtering, phase-doc contract checks, and duplicate-doc detection.
 
 2. **Phase 2 — Extract Rule Groups Behind Stable API** (`phase-2-extract-rule-groups-behind-stable-api.md`)
-- Refactor `check_migration_consistency()` internals into small helpers grouped by concern.
-- Keep public function signatures and outputs unchanged.
+- Reorganize `check_migration_consistency()` internals into small rule-group helpers with unchanged outputs and signatures.
 
 3. **Phase 3 — Normalize Shared Internal Policy Predicates** (`phase-3-normalize-shared-internal-policy-predicates.md`)
-- Consolidate duplicated mode/status policy checks into explicit internal helpers.
-- Tighten naming and remove dead/duplicated branches while preserving behavior.
+- Consolidate duplicated internal policy predicates and simplify control flow using explicit, domain-meaningful helpers.
 
 4. **Phase 4 — Integration Verification Sweep** (`phase-4-integration-verification-sweep.md`)
-- Add/adjust integration-focused tests across caller paths (`migration_tick`, migration CLI doctor/list flows, planning publish/readiness gates) where needed.
-- Confirm refactor does not alter user-visible behavior.
+- Verify integration behavior across consistency consumers and add narrow coverage only where cross-module guarantees are still implicit.
 
-## Dependency Graph
+## Dependencies
 ```mermaid
 graph TD
   P1[Phase 1: Characterize Current Contracts] --> P2[Phase 2: Extract Rule Groups Behind Stable API]
@@ -36,23 +33,21 @@ graph TD
   P3 --> P4[Phase 4: Integration Verification Sweep]
 ```
 
-## Why This Order
-- Phase 1 reduces regression risk by locking expected behavior before structural change.
-- Phase 2 performs the core extraction with strong contract safety.
-- Phase 3 cleans duplicated policy internals once structure is clearer.
-- Phase 4 validates cross-module behavior after all internals are stabilized.
+## Why This Order Reduces Risk
+- Phase 1 creates a behavior safety net before production refactoring.
+- Phase 2 performs structural extraction with behavior locked.
+- Phase 3 removes duplication only after rule-group seams exist.
+- Phase 4 confirms cross-module behavior after internals settle.
 
 ## Validation Strategy
-- Per phase:
-  - Run targeted tests for changed behavior first.
-  - Run full configured validation command before phase completion.
-- Suggested targeted progression:
-  - `uv run pytest tests/test_migration_consistency.py`
-  - Additional targeted suites per touched call path (for example `tests/test_migration_tick.py`, `tests/test_migration_cli.py`, `tests/test_planning_publish.py`) when changes affect those areas.
-- Completion gate for every phase:
-  - Full configured validation command passes.
+- For every phase:
+  1. Run targeted suites for touched scope first.
+  2. Run the full configured validation command as completion gate.
+- Expected targeted suites by phase:
+  - Phase 1–3: `uv run pytest tests/test_migration_consistency.py` plus directly affected consumers when touched.
+  - Phase 4: `uv run pytest tests/test_migration_tick.py tests/test_migration_cli.py tests/test_review_cli.py tests/test_planning_publish.py` (or the subset actually touched).
 
-## Shippability Contract Per Phase
-- No phase leaves partially migrated interfaces.
-- No phase introduces temporary compatibility shims that outlive the phase.
-- Every phase preserves a coherent, releasable repository state.
+## Shippability Contract
+- Every phase leaves the repo in a releasable state.
+- No temporary compatibility shims that persist beyond phase completion.
+- No changes to CLI behavior, XDG state shape, migration manifest structure, or other public interfaces in this migration.

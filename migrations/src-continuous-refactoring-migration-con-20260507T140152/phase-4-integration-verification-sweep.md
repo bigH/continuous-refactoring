@@ -1,37 +1,38 @@
 # Phase 4: Integration Verification Sweep
 
 ## Objective
-Verify that the refactored consistency engine preserves behavior across integration call paths and automation gates.
+Confirm the refactored consistency engine preserves behavior across integration call paths.
 
 ## Scope
 - Files in scope:
-  - Integration-focused tests touching consistency usage, such as:
-    - `tests/test_migration_tick.py`
-    - `tests/test_migration_cli.py`
-    - `tests/test_review_cli.py`
-    - `tests/test_planning_publish.py`
-  - Additional targeted tests only where behavior confidence is missing.
-- No intended production behavior changes in this phase; verification-first.
+  - `tests/test_migration_tick.py`
+  - `tests/test_migration_cli.py`
+  - `tests/test_review_cli.py`
+  - `tests/test_planning_publish.py`
+  - `tests/test_migration_consistency.py` (only if integration assertions require shared fixtures)
+- Production code edits are out of scope unless a validated regression fix is required.
 
 ## Precondition
-- Phases 1–3 are complete.
-- Refactored `migration_consistency` internals are stable and all direct module tests pass.
-- Consistency call sites still route through existing public APIs.
+- Phases 1, 2, and 3 are complete.
+- `src/continuous_refactoring/migration_consistency.py` still exposes the unchanged public consistency API used by integration callers.
+- Integration caller modules (`migration_tick`, `migration_cli`, `review_cli`, `planning_publish`) still consume consistency findings via existing contracts.
 
 ## Implementation Instructions
-1. Audit current integration coverage for consistency-gated behavior.
-2. Add narrow tests where cross-module behavior was previously implicit.
-3. Prefer example-based integration assertions on outcomes (blocking vs non-blocking, visibility behavior, readiness gates).
-4. Avoid altering production logic unless a true regression is found.
+1. Audit integration coverage for consistency-driven outcomes.
+2. Add narrow, outcome-focused tests where behavior is still implicit.
+3. Keep assertions centered on blocking vs non-blocking behavior and expected finding visibility semantics.
+4. Avoid production changes unless needed to fix a demonstrated regression.
 
 ## Validation
-1. Run targeted integration suites affected by consistency consumers.
-2. Run full configured validation command before marking complete.
+1. Run targeted integration tests:
+- `uv run pytest tests/test_migration_tick.py tests/test_migration_cli.py tests/test_review_cli.py tests/test_planning_publish.py`
+2. Run full configured validation command before marking the phase complete.
 
 ## Definition of Done
-- Integration paths depending on migration consistency checks have explicit, passing coverage for expected outcomes.
-- No user-visible behavior drift is introduced by the refactor.
+- Integration paths that depend on consistency findings have explicit passing outcome coverage.
+- Refactor introduces no behavior drift in integration consumers.
+- No public interface changes are introduced.
 - Full configured validation command passes.
 
 required_effort: low
-effort_reason: Primarily validation and focused test additions with minimal production edits.
+effort_reason: Primarily integration test hardening with minimal production risk.

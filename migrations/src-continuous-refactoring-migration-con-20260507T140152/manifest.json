@@ -4,39 +4,39 @@
   "created_at": "2026-05-07T14:01:52.769-07:00",
   "current_phase": "characterize-current-contracts",
   "human_review_reason": null,
-  "last_touch": "2026-05-07T14:05:20.302-07:00",
+  "last_touch": "2026-05-07T14:07:02.601-07:00",
   "name": "src-continuous-refactoring-migration-con-20260507T140152",
   "phases": [
     {
       "done": false,
-      "effort_reason": "Primarily additive characterization tests with low structural risk.",
+      "effort_reason": "Additive characterization work with low structural risk.",
       "file": "phase-1-characterize-current-contracts.md",
       "name": "characterize-current-contracts",
-      "precondition": "- No earlier phase is required. - `src/continuous_refactoring/migration_consistency.py` still exposes current public functions and finding structures used by existing tests. - Migration workspace paths and test fixtures referenced by these tests are intact.",
+      "precondition": "- Migration manifest still lists this phase as the current executable phase. - `src/continuous_refactoring/migration_consistency.py` still defines `check_migration_consistency()`, `has_blocking_consistency_findings()`, and `iter_visible_migration_dirs()`. - `tests/test_migration_consistency.py` exists and remains the ownership location for module-level consistency behavior tests.",
       "required_effort": "low"
     },
     {
       "done": false,
-      "effort_reason": "Structural extraction in a sensitive execution gate requires careful behavior preservation.",
+      "effort_reason": "Structural extraction at an execution gate needs careful behavior preservation.",
       "file": "phase-2-extract-rule-groups-behind-stable-api.md",
       "name": "extract-rule-groups-behind-stable-api",
-      "precondition": "- Phase 1 is complete and merged into this migration branch. - Characterization tests for current contracts are present and passing. - Existing call sites still depend on current public function names/signatures.",
+      "precondition": "- Phase 1 is complete. - `tests/test_migration_consistency.py` contains the characterization assertions added in Phase 1. - Callers in the repository still consume consistency checks through the current public functions (no parallel interface migration in progress).",
       "required_effort": "medium"
     },
     {
       "done": false,
-      "effort_reason": "Logic normalization across gating predicates is subtle and regression-prone without careful checks.",
+      "effort_reason": "Predicate normalization is subtle and can regress gating semantics without careful checks.",
       "file": "phase-3-normalize-shared-internal-policy-predicates.md",
       "name": "normalize-shared-internal-policy-predicates",
-      "precondition": "- Phase 2 is complete and has introduced stable rule-group helper structure. - Existing finding contracts remain locked by tests. - No caller API changes are pending for this migration.",
+      "precondition": "- Phase 2 is complete. - Rule-group helper seams from Phase 2 exist in `migration_consistency.py` and are the active execution path. - No concurrent phase is modifying consistency finding schema or public consistency entrypoints.",
       "required_effort": "medium"
     },
     {
       "done": false,
-      "effort_reason": "Primarily validation and focused test additions with minimal production edits.",
+      "effort_reason": "Primarily integration test hardening with minimal production risk.",
       "file": "phase-4-integration-verification-sweep.md",
       "name": "integration-verification-sweep",
-      "precondition": "- Phases 1\u20133 are complete. - Refactored `migration_consistency` internals are stable and all direct module tests pass. - Consistency call sites still route through existing public APIs.",
+      "precondition": "- Phases 1, 2, and 3 are complete. - `src/continuous_refactoring/migration_consistency.py` still exposes the unchanged public consistency API used by integration callers. - Integration caller modules (`migration_tick`, `migration_cli`, `review_cli`, `planning_publish`) still consume consistency findings via existing contracts.",
       "required_effort": "low"
     }
   ],

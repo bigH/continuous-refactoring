@@ -1,39 +1,38 @@
 # Phase 1: Characterize Current Contracts
 
 ## Objective
-Capture current `migration_consistency` behavior in focused tests before refactoring internals.
+Capture current observable behavior of `migration_consistency` before internal refactoring.
 
 ## Scope
 - Files in scope:
   - `tests/test_migration_consistency.py`
-  - Minimal fixture/test helpers only if necessary.
-- Behavior to characterize:
-  - Mode-specific finding gating.
-  - Visible migration directory filtering, including symlink exclusion behavior.
-  - Phase document section contract checks (`## Precondition`, `## Definition of Done`).
-  - Duplicate phase document detection semantics.
+- Optional minimal fixture updates only when needed by the new/updated assertions.
+- Characterize these contracts:
+  - Mode-specific blocking semantics.
+  - Visible migration directory filtering, including hidden/dotted/internal/symlink exclusion behavior.
+  - Phase-doc section requirements (`## Precondition`, `## Definition of Done`).
+  - Duplicate phase-doc detection semantics.
 
 ## Precondition
-- No earlier phase is required.
-- `src/continuous_refactoring/migration_consistency.py` still exposes current public functions and finding structures used by existing tests.
-- Migration workspace paths and test fixtures referenced by these tests are intact.
+- Migration manifest still lists this phase as the current executable phase.
+- `src/continuous_refactoring/migration_consistency.py` still defines `check_migration_consistency()`, `has_blocking_consistency_findings()`, and `iter_visible_migration_dirs()`.
+- `tests/test_migration_consistency.py` exists and remains the ownership location for module-level consistency behavior tests.
 
 ## Implementation Instructions
-1. Add or refine focused tests that assert observable outcomes, not helper implementation details.
-2. Prefer deterministic assertions on finding code/severity/mode/path semantics.
-3. Keep fixtures small and local to the tested contract.
-4. Avoid broad rewrites of unrelated tests.
+1. Add or refine assertions against outcomes (finding content and blocking behavior), not implementation details.
+2. Keep fixtures compact and local.
+3. Avoid unrelated suite rewrites.
 
 ## Validation
 1. Run targeted tests:
 - `uv run pytest tests/test_migration_consistency.py`
-2. If helper fixtures impact adjacent suites, run affected targeted suites.
-3. Run full configured validation command before marking complete.
+2. Run full configured validation command before marking the phase complete.
 
 ## Definition of Done
-- `tests/test_migration_consistency.py` explicitly captures the key current contracts required by later refactor phases.
-- New/updated tests fail if those contracts regress.
+- Module-level consistency contracts needed by downstream phases are explicitly asserted in `tests/test_migration_consistency.py`.
+- Added/updated tests fail on contract regressions.
+- No public interface changes are introduced.
 - Full configured validation command passes.
 
 required_effort: low
-effort_reason: Primarily additive characterization tests with low structural risk.
+effort_reason: Additive characterization work with low structural risk.

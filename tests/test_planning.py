@@ -579,6 +579,74 @@ def test_review_two_findings_fail_without_publish(
     assert load_planning_state(repo_root, planning_state_path(mig_root)).next_step == "review-2"
 
 
+def test_failed_review_two_outputs_are_attempt_scoped_and_not_durable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, live_dir, mig_root = _planning_repo_context(tmp_path, monkeypatch)
+    _seed_planning_snapshot(
+        repo_root,
+        live_dir,
+        [
+            ("approaches", "completed", "Generated approaches.\n"),
+            ("pick-best", "completed", "Chose incremental.\n"),
+            ("expand", "completed", "Expanded.\n"),
+            ("review", "findings", "1. Missing rollback step.\n"),
+            ("revise", "completed", "Revised.\n"),
+        ],
+        plan_text="# Plan v2\n",
+        phase_text=_phase_doc("always", "Setup is complete."),
+    )
+    artifacts = _make_artifacts(repo_root)
+
+    for attempt, stdout in (
+        (1, "1. first failed finding\n"),
+        (2, "1. second failed finding\n"),
+    ):
+        monkeypatch.setattr(
+            "continuous_refactoring.planning.maybe_run_agent",
+            _WorkspaceAgent([_workspace_response(stdout)]),
+        )
+        with pytest.raises(
+            ContinuousRefactorError,
+            match="planning.review-2 failed: revised plan still has findings",
+        ):
+            run_next_planning_step(
+                _MIGRATION,
+                _TARGET,
+                _TASTE,
+                repo_root,
+                live_dir,
+                artifacts,
+                attempt=attempt,
+                retry=1,
+                agent="codex",
+                model="fake",
+                effort="low",
+                timeout=None,
+            )
+
+    first_stdout = (
+        artifacts.root
+        / "attempt-001"
+        / "planning"
+        / "review-2"
+        / "agent.stdout.log"
+    )
+    second_stdout = (
+        artifacts.root
+        / "attempt-002"
+        / "planning"
+        / "review-2"
+        / "agent.stdout.log"
+    )
+    assert first_stdout.read_text(encoding="utf-8") == "1. first failed finding\n"
+    assert second_stdout.read_text(encoding="utf-8") == "1. second failed finding\n"
+    assert not (artifacts.root / "planning" / "review-2" / "agent.stdout.log").exists()
+    assert not planning_stage_stdout_path(mig_root, "review-2").exists()
+    assert load_planning_state(repo_root, planning_state_path(mig_root)).next_step == "review-2"
+
+
 def test_final_ready_rejects_inconsistent_manifest_docs_before_publish(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -968,7 +1036,12 @@ def test_planning_context_reconstructs_from_durable_stage_outputs(
 ) -> None:
     live_dir, mig_root = _planning_context(tmp_path, monkeypatch)
     artifacts = _make_artifacts(tmp_path)
-    transient_stdout = artifacts.root / "planning" / "pick-best" / "agent.stdout.log"
+    transient_stdout = (
+        artifacts.attempt_dir(1)
+        / "planning"
+        / "pick-best"
+        / "agent.stdout.log"
+    )
     transient_stdout.parent.mkdir(parents=True)
     transient_stdout.write_text("wrong transient output\n", encoding="utf-8")
 

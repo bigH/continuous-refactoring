@@ -28,7 +28,9 @@ from continuous_refactoring.migrations import (
 )
 from continuous_refactoring.planning import PlanningStepResult
 from continuous_refactoring.planning_state import (
+    complete_planning_step,
     new_planning_state,
+    planning_stage_stdout_path,
     planning_state_path,
     save_planning_state,
 )
@@ -177,6 +179,38 @@ def _save_planning(
     elif state != "missing":
         raise AssertionError(f"unknown state fixture: {state}")
     return path
+
+
+def _save_review_two_planning_state(
+    repo_root: Path,
+    migration_dir: Path,
+    *,
+    now: str,
+) -> None:
+    state = new_planning_state(f"Target {migration_dir.name}", now=now)
+    for step, outcome in (
+        ("approaches", "completed"),
+        ("pick-best", "completed"),
+        ("expand", "completed"),
+        ("review", "findings"),
+        ("revise", "completed"),
+    ):
+        stdout_path = planning_stage_stdout_path(migration_dir, step)
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text(f"{step} output\n", encoding="utf-8")
+        state = complete_planning_step(
+            state,
+            step,
+            outcome,
+            {"stdout": stdout_path.relative_to(repo_root).as_posix()},
+            completed_at=now,
+        )
+    save_planning_state(
+        state,
+        planning_state_path(migration_dir),
+        repo_root=repo_root,
+        published_migration_root=migration_dir,
+    )
 
 
 def _seed_manifest(
@@ -661,6 +695,122 @@ def test_try_migration_tick_does_not_call_ready_check_for_planning_status(
     assert outcome == "commit"
     assert record is not None
     assert record.target == "only-plan"
+
+
+def test_planning_tick_failed_review_two_record_includes_attempt_artifact_paths(
+    run_once_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    now = _utc_now()
+    manifest_path = _save_planning(
+        live_dir,
+        run_once_env,
+        "review-plan",
+        last_touch=now - timedelta(days=1),
+    )
+    _save_review_two_planning_state(
+        run_once_env,
+        manifest_path.parent,
+        now=now.isoformat(timespec="milliseconds"),
+    )
+    artifacts = create_run_artifacts(
+        repo_root=run_once_env,
+        agent="codex",
+        model="fake-model",
+        effort="xhigh",
+        test_command="uv run pytest",
+    )
+
+    def fake_planning(*_args: object, **_kwargs: object) -> object:
+        raise ContinuousRefactorError(
+            "planning.review-2 failed: revised plan still has findings"
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.run_next_planning_step",
+        fake_planning,
+    )
+
+    outcome, record = try_planning_tick(
+        live_dir,
+        "runtime taste",
+        run_once_env,
+        artifacts,
+        agent="codex",
+        model="fake-model",
+        effort="xhigh",
+        timeout=123,
+        commit_message_prefix="continuous refactor",
+        attempt=7,
+        finalize_commit=lambda *_args, **_kwargs: None,
+    )
+
+    stage_dir = artifacts.root / "attempt-007" / "planning" / "review-2"
+    assert outcome == "abandon"
+    assert record is not None
+    assert record.call_role == "planning.review-2"
+    assert record.failure_kind == "planning-step-failed"
+    assert record.agent_stdout_path == stage_dir / "agent.stdout.log"
+    assert record.agent_stderr_path == stage_dir / "agent.stderr.log"
+    assert record.agent_last_message_path == stage_dir / "agent-last-message.md"
+
+
+def test_planning_tick_review_two_timeout_uses_timeout_failure_kind(
+    run_once_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = _migrations_dir(run_once_env)
+    now = _utc_now()
+    manifest_path = _save_planning(
+        live_dir,
+        run_once_env,
+        "review-plan",
+        last_touch=now - timedelta(days=1),
+    )
+    _save_review_two_planning_state(
+        run_once_env,
+        manifest_path.parent,
+        now=now.isoformat(timespec="milliseconds"),
+    )
+    artifacts = create_run_artifacts(
+        repo_root=run_once_env,
+        agent="codex",
+        model="fake-model",
+        effort="xhigh",
+        test_command="uv run pytest",
+    )
+
+    def fake_planning(*_args: object, **_kwargs: object) -> object:
+        raise ContinuousRefactorError("planning.review-2 failed: agent timed out")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.run_next_planning_step",
+        fake_planning,
+    )
+
+    outcome, record = try_planning_tick(
+        live_dir,
+        "runtime taste",
+        run_once_env,
+        artifacts,
+        agent="codex",
+        model="fake-model",
+        effort="xhigh",
+        timeout=123,
+        commit_message_prefix="continuous refactor",
+        attempt=7,
+        finalize_commit=lambda *_args, **_kwargs: None,
+    )
+
+    stage_dir = artifacts.root / "attempt-007" / "planning" / "review-2"
+    assert outcome == "abandon"
+    assert record is not None
+    assert record.call_role == "planning.review-2"
+    assert record.failure_kind == "timeout"
+    assert record.agent_stdout_path == stage_dir / "agent.stdout.log"
+    assert record.agent_stderr_path == stage_dir / "agent.stderr.log"
+    assert record.agent_last_message_path == stage_dir / "agent-last-message.md"
 
 
 def test_try_planning_tick_skips_requested_planning_migrations(

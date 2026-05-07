@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -24,6 +25,7 @@ __all__ = [
 
 _PLANNING_CALL_ROLE_PREFIX = "planning."
 _INTERNAL_PLANNING_CALL_ROLES = frozenset({"state", "publish", "resume"})
+_MAX_INLINE_ARTIFACT_CHARS = 4000
 
 
 @dataclass(frozen=True)
@@ -161,6 +163,7 @@ def _snapshot_body_lines(
     record: DecisionRecord,
     artifacts: RunArtifacts,
     artifact_paths: SnapshotArtifactPaths,
+    repo_root: Path,
 ) -> list[str]:
     return [
         "# Reason for Failure",
@@ -181,6 +184,7 @@ def _snapshot_body_lines(
         "## Evidence",
         f"- Run artifacts: {artifacts.root}",
         *artifact_paths.evidence_lines(),
+        *_inline_artifact_sections(record, repo_root),
         "",
     ]
 
@@ -210,7 +214,7 @@ def _snapshot_content(
         ),
         "---",
         "",
-        *_snapshot_body_lines(record, artifacts, artifact_paths),
+        *_snapshot_body_lines(record, artifacts, artifact_paths, repo_root),
     ])
 
 
@@ -262,6 +266,37 @@ def _next_step_text(record: DecisionRecord) -> str:
     if record.decision == "blocked":
         return "Pause for human review before attempting more automated work."
     return "Commit the validated result and continue normally."
+
+
+def _inline_artifact_sections(record: DecisionRecord, repo_root: Path) -> list[str]:
+    sections: list[str] = []
+    for title, path in (
+        ("Latest Agent Message", record.agent_last_message_path),
+        ("Agent Stdout", record.agent_stdout_path),
+        ("Agent Stderr", record.agent_stderr_path),
+    ):
+        excerpt = _artifact_excerpt(path, repo_root)
+        if excerpt is None:
+            continue
+        sections.extend(["", f"### {title}", "```text", excerpt, "```"])
+    return sections
+
+
+def _artifact_excerpt(path: Path | None, repo_root: Path) -> str | None:
+    if path is None or not path.exists() or not path.is_file():
+        return None
+    content = path.read_text(encoding="utf-8", errors="replace")
+    if not content.strip():
+        return None
+    sanitized = _sanitize_artifact_text(content, repo_root)
+    if len(sanitized) <= _MAX_INLINE_ARTIFACT_CHARS:
+        return sanitized
+    return sanitized[:_MAX_INLINE_ARTIFACT_CHARS].rstrip() + "\n...[truncated]"
+
+
+def _sanitize_artifact_text(content: str, repo_root: Path) -> str:
+    sanitized = content.replace(str(repo_root), "<repo>")
+    return re.sub(r"/tmp/[^ \n]+", "<tmp>", sanitized)
 
 
 def _planning_step(record: DecisionRecord) -> str | None:

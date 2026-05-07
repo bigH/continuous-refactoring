@@ -54,7 +54,11 @@ from continuous_refactoring.phases import (
     check_phase_ready,
     execute_phase,
 )
-from continuous_refactoring.planning import PlanningStepResult, run_next_planning_step
+from continuous_refactoring.planning import (
+    PlanningStepResult,
+    planning_artifact_paths,
+    run_next_planning_step,
+)
 from continuous_refactoring.planning_state import (
     PlanningState,
     is_executable_planning_step,
@@ -72,6 +76,10 @@ _BASELINE_VALIDATION_UNCERTAINTY_PHRASES = (
     "full test suite passes",
     "tests pass now",
 )
+_REVIEW_TWO_FINDINGS_FAILURE = (
+    "planning.review-2 failed: revised plan still has findings"
+)
+
 
 class _FinalizeCommit(Protocol):
     def __call__(
@@ -462,12 +470,22 @@ def try_planning_tick(
                 timeout=timeout,
             )
         except ContinuousRefactorError as error:
+            paths = planning_artifact_paths(
+                artifacts,
+                attempt=attempt,
+                retry=1,
+                label=step,
+                agent=agent,
+            )
             return "abandon", _planning_error_record(
                 str(error),
                 repo_root,
                 manifest.name,
                 call_role=_planning_call_role(step),
-                failure_kind=error_failure_kind(str(error)),
+                failure_kind=_planning_failure_kind(str(error)),
+                agent_last_message_path=paths.agent_last_message_path,
+                agent_stdout_path=paths.agent_stdout_path,
+                agent_stderr_path=paths.agent_stderr_path,
             )
 
         outcome = _planning_route_outcome(result)
@@ -560,6 +578,12 @@ def _planning_call_role(step: object) -> str:
     return "planning.resume"
 
 
+def _planning_failure_kind(message: str) -> str:
+    if message == _REVIEW_TWO_FINDINGS_FAILURE:
+        return "planning-step-failed"
+    return error_failure_kind(message)
+
+
 def _describe_planning_outcome(result: PlanningStepResult) -> str:
     if result.terminal_outcome is None:
         return f"{result.step} accepted"
@@ -595,6 +619,9 @@ def _planning_error_record(
     *,
     call_role: str,
     failure_kind: str,
+    agent_last_message_path: Path | None = None,
+    agent_stdout_path: Path | None = None,
+    agent_stderr_path: Path | None = None,
 ) -> DecisionRecord:
     return DecisionRecord(
         decision="abandon",
@@ -604,6 +631,9 @@ def _planning_error_record(
         phase_reached=call_role,
         failure_kind=failure_kind,
         summary=sanitized_text_or(message, repo_root, message),
+        agent_last_message_path=agent_last_message_path,
+        agent_stdout_path=agent_stdout_path,
+        agent_stderr_path=agent_stderr_path,
     )
 
 

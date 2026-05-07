@@ -34,7 +34,11 @@ from continuous_refactoring.migration_tick import (
     try_migration_tick as _try_migration_tick,
     try_planning_tick as _try_planning_tick,
 )
-from continuous_refactoring.planning import PlanningStepResult, run_next_planning_step
+from continuous_refactoring.planning import (
+    PlanningStepResult,
+    planning_artifact_paths,
+    run_next_planning_step,
+)
 from continuous_refactoring.prompts import describe_scope_candidate
 from continuous_refactoring.routing import classify_target
 from continuous_refactoring.scope_expansion import (
@@ -47,6 +51,11 @@ from continuous_refactoring.scope_expansion import (
 )
 from continuous_refactoring.scope_candidates import build_scope_candidates
 from continuous_refactoring.targeting import Target
+
+
+_REVIEW_TWO_FINDINGS_FAILURE = (
+    "planning.review-2 failed: revised plan still has findings"
+)
 
 
 def migration_name_from_target(target: Target) -> str:
@@ -75,6 +84,9 @@ def _abandon_result(
     repo_root: Path,
     error: ContinuousRefactorError,
     call_role: str,
+    agent_last_message_path: Path | None = None,
+    agent_stdout_path: Path | None = None,
+    agent_stderr_path: Path | None = None,
 ) -> RouteResult:
     summary = _sanitized_summary(str(error), repo_root)
     return RouteResult(
@@ -87,8 +99,11 @@ def _abandon_result(
             target=target.description,
             call_role=call_role,
             phase_reached=call_role,
-            failure_kind=error_failure_kind(str(error)),
+            failure_kind=_planning_failure_kind(str(error)),
             summary=summary,
+            agent_last_message_path=agent_last_message_path,
+            agent_stdout_path=agent_stdout_path,
+            agent_stderr_path=agent_stderr_path,
         ),
     )
 
@@ -132,6 +147,12 @@ def _planning_route_outcome(result: PlanningStepResult) -> RouteOutcome:
     if result.status == "blocked":
         return "blocked"
     return "abandon"
+
+
+def _planning_failure_kind(message: str) -> str:
+    if message == _REVIEW_TWO_FINDINGS_FAILURE:
+        return "planning-step-failed"
+    return error_failure_kind(message)
 
 
 def _scope_bypass_context(target: Target, reason: str) -> str:
@@ -326,12 +347,23 @@ def route_and_run(
         match = re.match(r"^(planning\.[a-z0-9-]+)\s+failed:", str(error))
         if match:
             call_role = match.group(1)
+        label = call_role.removeprefix("planning.")
+        paths = planning_artifact_paths(
+            artifacts,
+            attempt=attempt,
+            retry=1,
+            label=label,
+            agent=agent,
+        )
         return _abandon_result(
             target=target,
             planning_context=planning_context,
             repo_root=repo_root,
             error=error,
             call_role=call_role,
+            agent_last_message_path=paths.agent_last_message_path,
+            agent_stdout_path=paths.agent_stdout_path,
+            agent_stderr_path=paths.agent_stderr_path,
         )
 
     route_outcome = _planning_route_outcome(outcome)

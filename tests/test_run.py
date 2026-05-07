@@ -2156,6 +2156,7 @@ def test_run_planning_failure_writes_reason_doc_and_logs_stage(
     reason_doc = snapshots[-1].read_text(encoding="utf-8")
     assert 'call_role: "planning.approaches"' in reason_doc
     assert 'decision: "abandon"' in reason_doc
+    assert 'agent_stdout: "attempt-001/planning/approaches/agent.stdout.log"' in reason_doc
 
 
 def test_run_migration_work_does_not_print_target_banner_first(

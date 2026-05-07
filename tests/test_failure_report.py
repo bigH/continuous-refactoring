@@ -335,6 +335,59 @@ def test_planning_step_failure_snapshot_names_step_and_resume_behavior(
     assert '"event": "failure_doc_written"' not in events
 
 
+def test_planning_snapshot_inlines_bounded_reviewer_output(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    artifacts = _artifacts(tmp_path / "artifacts")
+    stage_dir = artifacts.root / "attempt-001" / "planning" / "review-2"
+    stage_dir.mkdir(parents=True)
+    long_tail = "x" * 5000
+    stdout_path = stage_dir / "agent.stdout.log"
+    stdout_path.write_text(
+        f"1. still missing rollback in {repo_root}/src/auth.py\n{long_tail}",
+        encoding="utf-8",
+    )
+    stderr_path = stage_dir / "agent.stderr.log"
+    stderr_path.write_text("warning from /tmp/planning-agent/session\n", encoding="utf-8")
+    last_message_path = stage_dir / "agent-last-message.md"
+    last_message_path.write_text("final reviewer note\n", encoding="utf-8")
+    record = _record(
+        decision="abandon",
+        retry_recommendation="new-target",
+        target="auth-cleanup",
+        call_role="planning.review-2",
+        phase_reached="planning.review-2",
+        failure_kind="planning-step-failed",
+        summary="Revised plan still has findings",
+        next_retry_focus=None,
+        agent_last_message_path=last_message_path,
+        agent_stdout_path=stdout_path,
+        agent_stderr_path=stderr_path,
+    )
+
+    result = write(
+        repo_root,
+        artifacts,
+        attempt=1,
+        retry=1,
+        validation_command="uv run pytest",
+        record=record,
+    )
+
+    content = result.read_text(encoding="utf-8")
+    assert 'agent_last_message: "attempt-001/planning/review-2/agent-last-message.md"' in content
+    assert 'agent_stdout: "attempt-001/planning/review-2/agent.stdout.log"' in content
+    assert "### Latest Agent Message\n```text\nfinal reviewer note\n" in content
+    assert "1. still missing rollback in <repo>/src/auth.py" in content
+    assert "warning from <tmp>" in content
+    assert "\n...[truncated]\n```" in content
+    assert long_tail not in content
+
+
 def test_planning_call_role_gets_planning_resume_wording_for_infra_failure_kind(
     tmp_path: Path,
     monkeypatch,

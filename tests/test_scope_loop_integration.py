@@ -308,6 +308,51 @@ def test_planning_failure_uses_stage_label_in_abandon_record(
         Target(description="seed", files=("src/foo.py",), provenance="globs"),
     )
 
+    stage_dir = artifacts.root / "attempt-001" / "planning" / "review-2"
+    assert result.outcome == "abandon"
+    assert result.decision_record == DecisionRecord(
+        decision="abandon",
+        retry_recommendation="new-target",
+        target="seed",
+        call_role="planning.review-2",
+        phase_reached="planning.review-2",
+        failure_kind="planning-step-failed",
+        summary="planning.review-2 failed: revised plan still has findings",
+        agent_last_message_path=stage_dir / "agent-last-message.md",
+        agent_stdout_path=stage_dir / "agent.stdout.log",
+        agent_stderr_path=stage_dir / "agent.stderr.log",
+    )
+
+
+def test_review_two_transport_failure_uses_infra_failure_kind(
+    routing_env: tuple[Path, RunArtifacts],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, artifacts = routing_env
+
+    _patch_scope_expansion(
+        monkeypatch,
+        files=("src/foo.py",),
+        context="Selected scope candidate: local-cluster",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        lambda *_args, **_kwargs: "needs-plan",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.run_next_planning_step",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ContinuousRefactorError("planning.review-2 failed: transport failed")
+        ),
+    )
+
+    result = _invoke_route_and_run(
+        repo_root,
+        artifacts,
+        Target(description="seed", files=("src/foo.py",), provenance="globs"),
+    )
+
+    stage_dir = artifacts.root / "attempt-001" / "planning" / "review-2"
     assert result.outcome == "abandon"
     assert result.decision_record == DecisionRecord(
         decision="abandon",
@@ -316,7 +361,10 @@ def test_planning_failure_uses_stage_label_in_abandon_record(
         call_role="planning.review-2",
         phase_reached="planning.review-2",
         failure_kind="agent-infra-failure",
-        summary="planning.review-2 failed: revised plan still has findings",
+        summary="planning.review-2 failed: transport failed",
+        agent_last_message_path=stage_dir / "agent-last-message.md",
+        agent_stdout_path=stage_dir / "agent.stdout.log",
+        agent_stderr_path=stage_dir / "agent.stderr.log",
     )
 
 

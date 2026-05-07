@@ -112,6 +112,13 @@ class PlanningRefineRequest:
 
 
 @dataclass(frozen=True)
+class _PlanningArtifactPaths:
+    agent_stdout_path: Path
+    agent_stderr_path: Path
+    agent_last_message_path: Path | None
+
+
+@dataclass(frozen=True)
 class _PhaseMetadata:
     precondition: str
     required_effort: str | None
@@ -309,6 +316,33 @@ def _write_skip_file(
 # ---------------------------------------------------------------------------
 
 
+def _planning_stage_dir(
+    artifacts: RunArtifacts,
+    attempt: int,
+    retry: int,
+    label: str,
+) -> Path:
+    return artifacts.attempt_dir(attempt, retry) / "planning" / label
+
+
+def planning_artifact_paths(
+    artifacts: RunArtifacts,
+    *,
+    attempt: int,
+    retry: int,
+    label: str,
+    agent: str,
+) -> _PlanningArtifactPaths:
+    stage_dir = _planning_stage_dir(artifacts, attempt, retry, label)
+    return _PlanningArtifactPaths(
+        agent_stdout_path=stage_dir / "agent.stdout.log",
+        agent_stderr_path=stage_dir / "agent.stderr.log",
+        agent_last_message_path=(
+            stage_dir / "agent-last-message.md" if agent == "codex" else None
+        ),
+    )
+
+
 def _run_stage(
     stage: PlanningStage,
     migration_name: str,
@@ -337,8 +371,14 @@ def _run_stage(
     )
     label = stage_label or stage
     call_role = f"planning.{label}"
-    stage_dir = artifacts.root / "planning" / label
-    stage_dir.mkdir(parents=True, exist_ok=True)
+    paths = planning_artifact_paths(
+        artifacts,
+        attempt=attempt,
+        retry=retry,
+        label=label,
+        agent=agent,
+    )
+    paths.agent_stdout_path.parent.mkdir(parents=True, exist_ok=True)
 
     artifacts.log_call_started(
         attempt=attempt,
@@ -355,11 +395,9 @@ def _run_stage(
             effort=effort,
             prompt=prompt,
             repo_root=repo_root,
-            stdout_path=stage_dir / "agent.stdout.log",
-            stderr_path=stage_dir / "agent.stderr.log",
-            last_message_path=(
-                stage_dir / "agent-last-message.md" if agent == "codex" else None
-            ),
+            stdout_path=paths.agent_stdout_path,
+            stderr_path=paths.agent_stderr_path,
+            last_message_path=paths.agent_last_message_path,
             mirror_to_terminal=False,
             timeout=timeout,
         )

@@ -157,6 +157,15 @@ def test_consistency_reports_duplicate_phase_doc_indexes(tmp_path: Path) -> None
     assert "duplicate-phase-doc-index" in _codes(findings)
 
 
+def test_consistency_reports_duplicate_phase_doc_names(tmp_path: Path) -> None:
+    migration_dir = _write_migration(tmp_path, "duplicate-phase-name")
+    (migration_dir / "phase-1-setup.md").write_text("# Other\n", encoding="utf-8")
+
+    findings = check_migration_consistency(migration_dir, mode="doctor")
+
+    assert "duplicate-phase-doc-name" in _codes(findings)
+
+
 def test_consistency_reports_manifest_phase_missing_doc(tmp_path: Path) -> None:
     migration_dir = _write_migration(tmp_path, "missing-phase-doc", write_phase=False)
 
@@ -213,3 +222,54 @@ def test_consistency_modes_share_severity_blocking_contract(tmp_path: Path) -> N
     assert set(CONSISTENCY_SEVERITIES) == {"info", "warning", "error"}
     assert not has_blocking_consistency_findings([info, warning])
     assert has_blocking_consistency_findings([info, warning, error])
+
+
+def test_ready_publish_requires_precondition_and_definition_of_done_sections(
+    tmp_path: Path,
+) -> None:
+    phase = PhaseSpec(
+        name="setup",
+        file="phase-0-setup.md",
+        done=False,
+        precondition="always",
+    )
+    migration_dir = _write_migration(tmp_path, "phase-doc-contract", phase=phase)
+    (migration_dir / phase.file).write_text("# Setup\n", encoding="utf-8")
+
+    findings = check_migration_consistency(migration_dir, mode="ready-publish")
+
+    assert "missing-phase-precondition" in _codes(findings)
+    assert "missing-phase-definition-of-done" in _codes(findings)
+    assert has_blocking_consistency_findings(findings)
+
+
+def test_planning_snapshot_skips_phase_doc_section_requirements(tmp_path: Path) -> None:
+    phase = PhaseSpec(
+        name="setup",
+        file="phase-0-setup.md",
+        done=False,
+        precondition="always",
+    )
+    migration_dir = _write_migration(tmp_path, "planning-snapshot-no-phase-doc-check", phase=phase)
+    (migration_dir / phase.file).write_text("# Setup\n", encoding="utf-8")
+
+    findings = check_migration_consistency(migration_dir, mode="planning-snapshot")
+
+    assert "missing-phase-precondition" not in _codes(findings)
+    assert "missing-phase-definition-of-done" not in _codes(findings)
+
+
+def test_execution_gate_skips_phase_doc_section_requirements(tmp_path: Path) -> None:
+    phase = PhaseSpec(
+        name="setup",
+        file="phase-0-setup.md",
+        done=False,
+        precondition="always",
+    )
+    migration_dir = _write_migration(tmp_path, "execution-gate-no-phase-doc-check", phase=phase)
+    (migration_dir / phase.file).write_text("# Setup\n", encoding="utf-8")
+
+    findings = check_migration_consistency(migration_dir, mode="execution-gate")
+
+    assert "missing-phase-precondition" not in _codes(findings)
+    assert "missing-phase-definition-of-done" not in _codes(findings)

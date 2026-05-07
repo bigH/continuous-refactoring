@@ -93,6 +93,17 @@ def test_reverse_reference_can_add_local_sibling(tmp_path: Path) -> None:
     )
 
 
+def test_reference_matching_respects_identifier_boundaries(tmp_path: Path) -> None:
+    init_repo(tmp_path)
+    _write(tmp_path, "src/foo.py", "VALUE = 1\n")
+    _write(tmp_path, "src/consumer.py", "from .foobar import VALUE\n")
+    _commit_all(tmp_path, "add boundary mismatch")
+
+    candidates = build_scope_candidates(_seed_target("src/foo.py"), tmp_path)
+
+    assert [candidate.kind for candidate in candidates] == ["seed"]
+
+
 def test_local_git_cochange_alone_does_not_add_noisy_local_sibling(
     tmp_path: Path,
 ) -> None:

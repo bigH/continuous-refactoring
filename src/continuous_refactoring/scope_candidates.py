@@ -5,6 +5,7 @@ import subprocess
 from collections import Counter, defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 
@@ -94,10 +95,14 @@ def _reference_aliases(path: str) -> tuple[str, ...]:
 def _text_mentions_alias(text: str, alias: str) -> bool:
     if not alias:
         return False
-    pattern = re.compile(
+    return _alias_pattern(alias).search(text) is not None
+
+
+@lru_cache(maxsize=4096)
+def _alias_pattern(alias: str) -> re.Pattern[str]:
+    return re.compile(
         rf"(?<!{_IDENTIFIER_BOUNDARY}){re.escape(alias)}(?!{_IDENTIFIER_BOUNDARY})"
     )
-    return pattern.search(text) is not None
 
 
 def _safe_read_text(path: Path) -> str:

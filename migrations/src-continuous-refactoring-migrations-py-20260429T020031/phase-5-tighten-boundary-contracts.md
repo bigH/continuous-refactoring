@@ -22,8 +22,9 @@ preserves the locked compatibility export set.
   `load_manifest()` and `save_manifest()` for filesystem and manifest-file I/O,
   `migration_manifest_codec.py` for payload decoding and encoding semantics.
 - Preserve exception nesting with `from error` when translation is warranted.
-- Delete transitional wrappers or duplicate helpers that no longer earn their
-  keep once the seam is stable.
+- Inventory transitional wrappers and duplicate helpers left by the extraction.
+  Delete each one unless it is part of the Phase 1 locked export set or is named
+  and justified as a downstream contract still used by internal callers.
 - Stop short of a hard compatibility cut. If a helper is still part of the
   locked public surface, keep that export from `continuous_refactoring.migrations`.
 
@@ -34,7 +35,8 @@ preserves the locked compatibility export set.
 - Filesystem and JSON failures are wrapped once at the true boundary, with
   preserved nested causes.
 - No dead transitional code remains from the split, except compatibility
-  exports that intentionally preserve the shipped surface.
+  exports in the Phase 1 locked export set or named downstream contracts with
+  an explicit retention reason.
 - The locked compatibility export set from Phase 1 still passes unchanged.
 - The configured broad validation command passes.
 

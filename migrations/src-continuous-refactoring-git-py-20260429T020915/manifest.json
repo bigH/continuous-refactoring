@@ -33,7 +33,7 @@
     },
     {
       "done": false,
-      "effort_reason": "final cleanup is limited to transitional private helpers and",
+      "effort_reason": "final cleanup is limited to transitional private helpers and surface verification",
       "file": "phase-4-trim-helper-shapes-and-verify-surface.md",
       "name": "trim-helper-shapes-and-verify-surface",
       "precondition": "Phase 3 is marked complete, and the Phase 1 export-lock coverage that pins the `src/continuous_refactoring/git.py` `__all__` symbol set still exists as the artifact this phase will preserve.",

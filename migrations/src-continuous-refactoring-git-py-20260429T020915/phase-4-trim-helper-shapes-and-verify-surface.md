@@ -3,13 +3,11 @@
 ## Scope
 - `src/continuous_refactoring/git.py`
 - `tests/test_git.py`
-- If package-root export checks are needed:
-  - `src/continuous_refactoring/__init__.py`
-  - `tests/test_continuous_refactoring.py`
+- Optional verification-only coverage in `tests/test_continuous_refactoring.py`
+  if package-root export assertions are still missing.
 
 required_effort: low
-effort_reason: final cleanup is limited to transitional private helpers and
-surface verification
+effort_reason: final cleanup is limited to transitional private helpers and surface verification
 
 ## Precondition
 Phase 3 is marked complete, and the Phase 1 export-lock coverage that pins the
@@ -19,19 +17,23 @@ artifact this phase will preserve.
 ## Instructions
 - Remove only private helpers or naming that were introduced or retained solely
   to stage phases 2 or 3.
-- If phases 2 or 3 introduced a private staging helper or alias that did not
-  exist at migration start, either delete it here or explicitly keep it by
-  folding it into the final `git.py` structure and covering the retained shape
-  with focused tests.
+- Inventory private helpers and aliases introduced during phases 2 or 3. Delete
+  each one by default unless it is explicitly named in the phase output,
+  justified as part of the final `git.py` structure, and covered by focused
+  tests.
 - Do not reopen module structure or error-boundary design in this phase.
 - Verify that `continuous_refactoring.git` and package-root re-export still
   expose the same git helper surface after cleanup.
 - If explicit export coverage is still missing, add the smallest assertion set
   that will catch symbol drift.
+- If preserving the package-root surface appears to require editing
+  `src/continuous_refactoring/__init__.py`, stop and report the contradiction
+  instead of widening this phase.
 
 ## Definition of Done
-- No private staging helper or alias introduced during phases 2 or 3 remains
-  unless this phase intentionally keeps it as part of the final file shape.
+- Every private staging helper or alias introduced during phases 2 or 3 has
+  been deleted, or is named in the phase output with final-shape justification
+  and focused test coverage.
 - The public symbol set exposed from `git.py.__all__` is unchanged from the
   symbol set pinned by the Phase 1 export-lock coverage.
 - Any package-root re-export coverage needed to catch symbol drift is present.

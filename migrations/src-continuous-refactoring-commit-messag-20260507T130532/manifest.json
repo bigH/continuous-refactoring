@@ -4,7 +4,7 @@
   "created_at": "2026-05-07T13:05:32.749-07:00",
   "current_phase": "lock-behavioral-baseline",
   "human_review_reason": null,
-  "last_touch": "2026-05-07T13:08:14.758-07:00",
+  "last_touch": "2026-05-07T13:09:24.585-07:00",
   "name": "src-continuous-refactoring-commit-messag-20260507T130532",
   "phases": [
     {
@@ -12,15 +12,15 @@
       "effort_reason": null,
       "file": "phase-1-lock-behavioral-baseline.md",
       "name": "lock-behavioral-baseline",
-      "precondition": "- The migration exists and this phase is the first incomplete phase. - `tests/test_commit_messages.py` and `src/continuous_refactoring/commit_messages.py` exist at expected paths. - No in-progress edits are pending review within this migration workspace.",
+      "precondition": "- This migration exists and Phase 1 is the next incomplete phase. - `tests/test_commit_messages.py` and `src/continuous_refactoring/commit_messages.py` exist in the workspace. - Target symbols covered by the focused tests are present in `commit_messages.py`.",
       "required_effort": null
     },
     {
       "done": false,
-      "effort_reason": "Local single-module refactor with behavior pinned by focused tests.",
+      "effort_reason": "Single-module internal refactor with behavior constrained by Phase 1 tests.",
       "file": "phase-2-refactor-local-control-flow.md",
       "name": "refactor-local-control-flow",
-      "precondition": "- Phase 1 is complete. - Phase 1 focused tests exist and pass in the workspace. - Target symbols used by `tests/test_commit_messages.py` are still present in `commit_messages.py`. - Required effort tier (`low`) is within the run's allowed effort budget.",
+      "precondition": "- Phase 1 is complete. - `tests/test_commit_messages.py` contains the Phase 1 behavior-lock coverage. - Target symbols exercised by Phase 1 tests are still present in `commit_messages.py`. - Required effort tier (`low`) is within the run's allowed effort budget.",
       "required_effort": "low"
     },
     {
@@ -28,7 +28,7 @@
       "effort_reason": null,
       "file": "phase-3-regression-proof-and-final-validation.md",
       "name": "regression-proof-and-final-validation",
-      "precondition": "- Phase 2 is complete. - Phase 1/2 artifacts are present (tests and refactored module). - No unresolved migration-internal TODOs remain for this target module.",
+      "precondition": "- Phase 2 is complete. - Phase 1 tests and Phase 2 refactor edits are present in the workspace. - No unresolved migration-internal blockers remain for this target.",
       "required_effort": null
     }
   ],

@@ -1,40 +1,40 @@
 # Migration Plan: Minimal Rationale Hardening
 
 ## Goal
-Refactor `src/continuous_refactoring/commit_messages.py` for clearer, deterministic rationale/message flow while preserving module boundaries and user-visible behavior.
+Refactor `src/continuous_refactoring/commit_messages.py` for clearer, deterministic rationale/message flow while preserving behavior and module ownership.
 
 ## Scope
 - In scope: `src/continuous_refactoring/commit_messages.py`, `tests/test_commit_messages.py`.
-- Out of scope: CLI wiring, manifest/state formats, migration scheduling, and cross-module contract reshaping.
+- Out of scope: CLI behavior, XDG/project state, migration manifest structure, and cross-module ownership changes.
 
 ## Phase Breakdown
-1. **Phase 1 — Lock Behavioral Baseline with Focused Tests**
-   - Add/extend example-based tests that codify current behavior and edge-case expectations for commit rationale and message formatting.
-2. **Phase 2 — Local Control-Flow Refactor in `commit_messages.py`**
-   - Refactor internals for readability and deterministic branching only, without changing signatures or ownership boundaries.
-3. **Phase 3 — Regression Proof and Final Validation**
-   - Re-run focused and full validation, and confirm no unintended contract drift remains.
+1. **Phase 1 — Codify Current Behavior in Focused Tests**
+   - Extend `tests/test_commit_messages.py` with explicit examples for punctuation/casing variants, whitespace-only inputs, and trimming/normalization outcomes.
+2. **Phase 2 — Refactor Local Control Flow Only**
+   - Improve readability and determinism in `commit_messages.py` internals only, keeping signatures and external behavior unchanged.
+3. **Phase 3 — Regression Validation and Closeout**
+   - Re-run focused and full validation and apply only minimal fixes required to satisfy established phase contracts.
 
 ## Dependencies
 - Phase 1 has no migration-internal blockers.
-- Phase 2 depends on Phase 1 completion (tests define the behavioral contract).
+- Phase 2 depends on Phase 1 completion.
 - Phase 3 depends on Phase 2 completion.
 
 ## Dependency Graph
 ```mermaid
 graph TD
-  P1[Phase 1: Lock Behavioral Baseline with Focused Tests] --> P2[Phase 2: Local Control-Flow Refactor]
-  P2 --> P3[Phase 3: Regression Proof and Final Validation]
+  P1[Phase 1: Codify Current Behavior in Focused Tests] --> P2[Phase 2: Refactor Local Control Flow Only]
+  P2 --> P3[Phase 3: Regression Validation and Closeout]
 ```
 
 ## Validation Strategy
-- Phase-level validation is incremental:
-  - During behavior lock-in and refactor: run `uv run pytest tests/test_commit_messages.py`.
-  - At migration close: run `uv run pytest`.
-- Each phase has explicit, outcome-based Definition of Done requirements and leaves the repository shippable.
-- No phase precondition restates baseline-green invariants enforced by the harness.
+- Incremental checks by phase:
+  - Focused: `uv run pytest tests/test_commit_messages.py`
+  - Final full-suite: `uv run pytest`
+- Preconditions remain phase-local and state-based.
+- Definitions of Done carry verification outcomes, so each phase is independently verifiable and leaves the repository shippable.
 
 ## Risk Controls
-- Test-first ordering reduces behavior-drift risk before control-flow edits.
-- Refactor is constrained to a single module boundary, preserving sanitization and policy ownership in existing collaborators.
+- Test-first phase constrains behavior before refactor edits.
+- Refactor phase is limited to one module to minimize blast radius.
 - Final phase requires full-suite confirmation to catch non-local regressions.

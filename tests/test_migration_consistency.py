@@ -190,6 +190,36 @@ def test_consistency_requires_plan_for_ready_and_in_progress(tmp_path: Path) -> 
     assert has_blocking_consistency_findings(execution_findings)
 
 
+@pytest.mark.parametrize("status", ["ready", "in-progress"])
+def test_doctor_requires_plan_only_for_ready_or_in_progress_statuses(
+    tmp_path: Path,
+    status: str,
+) -> None:
+    migration_dir = _write_migration(
+        tmp_path,
+        f"doctor-missing-plan-{status}",
+        status=status,
+        write_plan=False,
+    )
+
+    findings = check_migration_consistency(migration_dir, mode="doctor")
+
+    assert "missing-plan" in _codes(findings)
+
+
+def test_doctor_skips_missing_plan_for_non_ready_statuses(tmp_path: Path) -> None:
+    migration_dir = _write_migration(
+        tmp_path,
+        "doctor-planning-status",
+        status="planning",
+        write_plan=False,
+    )
+
+    findings = check_migration_consistency(migration_dir, mode="doctor")
+
+    assert "missing-plan" not in _codes(findings)
+
+
 def test_consistency_modes_share_severity_blocking_contract(tmp_path: Path) -> None:
     info = MigrationConsistencyFinding(
         severity="info",

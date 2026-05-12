@@ -253,9 +253,9 @@ def _manifest_plan_findings(
 
 
 def _requires_plan(manifest: MigrationManifest, mode: ConsistencyMode) -> bool:
-    return mode == "ready-publish" or (
-        mode in ("doctor", "execution-gate")
-        and manifest.status in ("ready", "in-progress")
+    return _is_ready_publish_mode(mode) or (
+        _is_doctor_or_execution_gate_mode(mode)
+        and _is_ready_or_in_progress_status(manifest.status)
     )
 
 
@@ -356,9 +356,29 @@ def _requires_ready_publish_metadata(
     manifest: MigrationManifest,
     mode: ConsistencyMode,
 ) -> bool:
-    return mode == "ready-publish" or (
-        mode == "doctor" and manifest.status in ("ready", "in-progress")
+    return _is_ready_publish_mode(mode) or (
+        _is_doctor_mode(mode) and _is_ready_or_in_progress_status(manifest.status)
     )
+
+
+def _is_ready_publish_mode(mode: ConsistencyMode) -> bool:
+    return mode == "ready-publish"
+
+
+def _is_doctor_mode(mode: ConsistencyMode) -> bool:
+    return mode == "doctor"
+
+
+def _is_execution_gate_mode(mode: ConsistencyMode) -> bool:
+    return mode == "execution-gate"
+
+
+def _is_doctor_or_execution_gate_mode(mode: ConsistencyMode) -> bool:
+    return _is_doctor_mode(mode) or _is_execution_gate_mode(mode)
+
+
+def _is_ready_or_in_progress_status(status: str) -> bool:
+    return status in ("ready", "in-progress")
 
 
 def _manifest_phase_membership_findings(

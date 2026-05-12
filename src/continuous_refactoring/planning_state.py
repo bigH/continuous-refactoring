@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import tempfile
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Literal, TypeGuard, cast, get_args
 
@@ -218,28 +218,15 @@ def complete_planning_step(
     )
     _validate_output_refs_syntax(completed)
     updated_steps = (*state.completed_steps, completed)
-    updated = PlanningState(
-        schema_version=state.schema_version,
-        target=state.target,
-        next_step=state.next_step,
+    updated = _replace_planning_state(
+        state,
         completed_steps=updated_steps,
-        started_at=state.started_at,
         updated_at=completed.completed_at,
-        feedback=state.feedback,
-        review_findings=state.review_findings,
-        final_decision=state.final_decision,
-        final_reason=state.final_reason,
-        revision_base_step_counts=state.revision_base_step_counts,
     )
     replay = _replay_details(updated)
-    return PlanningState(
-        schema_version=updated.schema_version,
-        target=updated.target,
+    return _replace_planning_state(
+        updated,
         next_step=replay.next_step,
-        completed_steps=updated.completed_steps,
-        started_at=updated.started_at,
-        updated_at=updated.updated_at,
-        feedback=updated.feedback,
         review_findings=replay.review_findings,
         final_decision=replay.final_decision,
         final_reason=_next_final_reason(
@@ -247,7 +234,6 @@ def complete_planning_step(
             replay.final_decision,
             final_reason,
         ),
-        revision_base_step_counts=updated.revision_base_step_counts,
     )
 
 
@@ -264,18 +250,10 @@ def append_planning_feedback(
         source=feedback_source,
         text=text,
     )
-    updated = PlanningState(
-        schema_version=state.schema_version,
-        target=state.target,
-        next_step=state.next_step,
-        completed_steps=state.completed_steps,
-        started_at=state.started_at,
+    updated = _replace_planning_state(
+        state,
         updated_at=feedback.received_at,
         feedback=(*state.feedback, feedback),
-        review_findings=state.review_findings,
-        final_decision=state.final_decision,
-        final_reason=state.final_reason,
-        revision_base_step_counts=state.revision_base_step_counts,
     )
     _validate_replay_metadata(updated, _replay_details(updated))
     return updated
@@ -291,14 +269,10 @@ def reopen_planning_for_revise(
         raise ContinuousRefactorError(
             f"Cannot reopen planning state at {replay.next_step!r} for revise"
         )
-    updated = PlanningState(
-        schema_version=state.schema_version,
-        target=state.target,
+    updated = _replace_planning_state(
+        state,
         next_step="revise",
-        completed_steps=state.completed_steps,
-        started_at=state.started_at,
         updated_at=now or iso_timestamp(),
-        feedback=state.feedback,
         review_findings=None,
         final_decision=None,
         final_reason=None,
@@ -499,6 +473,10 @@ def _next_planning_stage_stdout_path(mig_root: Path, step: str) -> Path:
         if not candidate.exists():
             return candidate
         index += 1
+
+
+def _replace_planning_state(state: PlanningState, **changes: object) -> PlanningState:
+    return replace(state, **changes)
 
 
 def _replay_details(state: PlanningState) -> _ReplayResult:

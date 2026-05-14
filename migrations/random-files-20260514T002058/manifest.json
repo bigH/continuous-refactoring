@@ -2,11 +2,36 @@
   "awaiting_human_review": false,
   "cooldown_until": null,
   "created_at": "2026-05-14T00:20:58.882-07:00",
-  "current_phase": "",
+  "current_phase": "freeze-interface-contracts",
   "human_review_reason": null,
-  "last_touch": "2026-05-14T00:22:20.952-07:00",
+  "last_touch": "2026-05-14T00:23:29.416-07:00",
   "name": "random-files-20260514T002058",
-  "phases": [],
+  "phases": [
+    {
+      "done": false,
+      "effort_reason": "External contract lock-in is narrow and test-first.",
+      "file": "phase-1-freeze-interface-contracts.md",
+      "name": "freeze-interface-contracts",
+      "precondition": "- Migration status is ready for execution and this phase is the manifest current phase. - No incomplete edits from earlier aborted attempts remain in scoped files. - Expected interface files and tests listed in Scope exist at their known paths. - No unresolved review/human-decision hold specific to this phase\u2019s interface contracts.",
+      "required_effort": "low"
+    },
+    {
+      "done": false,
+      "effort_reason": "Internal cleanup must preserve subtle boundary semantics while reducing repetition.",
+      "file": "phase-2-boundary-focused-routing-cleanup.md",
+      "name": "boundary-focused-routing-cleanup",
+      "precondition": "- Phase 1 is complete. - Contracts locked in Phase 1 still exist and are unchanged in intent. - `routing.py` structure still contains the targeted repetition/error-handling hotspots this phase is meant to clean up. - No active conflicting edits in routing boundary code paths.",
+      "required_effort": "medium"
+    },
+    {
+      "done": false,
+      "effort_reason": "This is a constrained alignment pass with change-only-if-mismatch policy.",
+      "file": "phase-3-release-pipeline-consistency-check.md",
+      "name": "release-pipeline-consistency-check",
+      "precondition": "- Phase 2 is complete. - Phase 1 interface contracts remain the intended canonical behavior. - Release workflow file exists and is readable in this checkout. - Any planned workflow change is traceable to a concrete contract mismatch, not preference.",
+      "required_effort": "low"
+    }
+  ],
   "status": "planning",
   "wake_up_on": null
 }

@@ -1,10 +1,10 @@
 {
-  "awaiting_human_review": false,
+  "awaiting_human_review": true,
   "cooldown_until": null,
   "created_at": "2026-05-14T00:20:58.882-07:00",
   "current_phase": "freeze-interface-contracts",
-  "human_review_reason": null,
-  "last_touch": "2026-05-14T00:26:25.194-07:00",
+  "human_review_reason": "automation is safe, but interface-visible behavior changes are correctly marked as human-review territory",
+  "last_touch": "2026-05-14T00:27:02.972-07:00",
   "name": "random-files-20260514T002058",
   "phases": [
     {
@@ -32,6 +32,6 @@
       "required_effort": "low"
     }
   ],
-  "status": "planning",
+  "status": "ready",
   "wake_up_on": null
 }

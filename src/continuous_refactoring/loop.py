@@ -4,9 +4,10 @@ import os
 import random
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import argparse
@@ -81,6 +82,15 @@ import continuous_refactoring.migration_tick as migration_tick
 import continuous_refactoring.refactor_attempts as refactor_attempts_module
 import continuous_refactoring.routing_pipeline as routing_pipeline
 from continuous_refactoring.targeting import Target, parse_paths_arg, resolve_targets
+
+
+_RunSourceKind = Literal["finite", "pool", "group", "ambient", "empty"]
+
+
+@dataclass(frozen=True)
+class _RunSource:
+    kind: _RunSourceKind
+    targets: tuple[Target, ...] = ()
 
 
 def run_baseline_checks(
@@ -212,6 +222,35 @@ def _resolve_targets_from_args(
     )
 
 
+def _has_selector(args: argparse.Namespace) -> bool:
+    return bool(args.targets or args.globs or args.extensions or args.paths)
+
+
+def _build_run_source(
+    args: argparse.Namespace,
+    repo_root: Path,
+) -> tuple[_RunSource, bool]:
+    if not _has_selector(args):
+        return _RunSource("ambient"), False
+
+    targets = _resolve_targets_from_args(args, repo_root)
+    if args.targets:
+        random.shuffle(targets)
+        return _RunSource("finite", tuple(targets)), False
+
+    if targets:
+        source_kind: _RunSourceKind = "group" if args.paths else "pool"
+        return _RunSource(source_kind, tuple(targets)), False
+
+    if args.scope_instruction and (args.globs or args.extensions or args.paths):
+        return (
+            _RunSource("group", (_build_target_fallback(args.scope_instruction),)),
+            True,
+        )
+
+    return _RunSource("empty"), False
+
+
 def _action_limit(
     args: argparse.Namespace,
     targets: list[Target],
@@ -223,8 +262,54 @@ def _action_limit(
     return args.max_refactors
 
 
+def _require_run_loop_action_limit(args: argparse.Namespace) -> None:
+    if args.max_refactors is None and not args.targets:
+        raise ContinuousRefactorError("--max-refactors required when no --targets")
+
+
 def _has_action_budget(actions_completed: int, action_limit: int | None) -> bool:
     return action_limit is None or actions_completed < action_limit
+
+
+def _has_available_source_target(source: _RunSource, source_index: int) -> bool:
+    if source.kind == "finite":
+        return source_index < len(source.targets)
+    return source.kind in {"pool", "group", "ambient"}
+
+
+def _has_more_actions(
+    source: _RunSource,
+    source_index: int,
+    actions_completed: int,
+    action_limit: int | None,
+) -> bool:
+    return _has_action_budget(
+        actions_completed,
+        action_limit,
+    ) and _has_available_source_target(source, source_index)
+
+
+def _select_source_target(
+    source: _RunSource,
+    source_index: int,
+    args: argparse.Namespace,
+    repo_root: Path,
+) -> tuple[Target, int]:
+    if source.kind == "finite":
+        return source.targets[source_index], source_index + 1
+    if source.kind == "pool":
+        return random.choice(source.targets), source_index
+    if source.kind == "group":
+        return source.targets[0], source_index
+
+    if source.kind != "ambient":
+        raise ContinuousRefactorError("no source target is available")
+
+    targets = _resolve_targets_from_args(args, repo_root)
+    target = random.choice(targets) if targets else _build_target_fallback(
+        args.scope_instruction
+    )
+    return target, source_index
 
 
 def _action_banner(action_index: int, action_limit: int | None) -> str:
@@ -618,6 +703,7 @@ def run_once(args: argparse.Namespace) -> int:
 
 def run_loop(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
+    _require_run_loop_action_limit(args)
     timeout = args.timeout or 1800
     log_mirroring = _log_mirroring_from_args(args)
     sleep_seconds = getattr(args, "sleep", 0.0)
@@ -628,14 +714,8 @@ def run_loop(args: argparse.Namespace) -> int:
     )
     taste = _load_taste_safe(repo_root)
 
-    targets = _resolve_targets_from_args(args, repo_root)
-    random.shuffle(targets)
-
-    fell_back_to_scope = False
-    if not targets:
-        targets = [_build_target_fallback(args.scope_instruction)]
-        fell_back_to_scope = bool(args.extensions or args.globs or args.paths)
-    action_limit = _action_limit(args, targets)
+    source, fell_back_to_scope = _build_run_source(args, repo_root)
+    action_limit = _action_limit(args, list(source.targets))
     live_dir = _resolve_live_migrations_dir(repo_root)
 
     base_prompt = _resolve_base_prompt(args)
@@ -687,10 +767,7 @@ def run_loop(args: argparse.Namespace) -> int:
                 f"Baseline validation failed\n{baseline_context}"
             )
 
-        while (
-            source_index < len(targets)
-            and _has_action_budget(actions_completed, action_limit)
-        ):
+        while _has_more_actions(source, source_index, actions_completed, action_limit):
             action_index = actions_completed + 1
             print(_action_banner(action_index, action_limit))
 
@@ -743,9 +820,11 @@ def run_loop(args: argparse.Namespace) -> int:
                         sleep_seconds,
                         artifacts=artifacts,
                         action_index=action_index,
-                        has_more_actions=(
-                            source_index < len(targets)
-                            and _has_action_budget(actions_completed, action_limit)
+                        has_more_actions=_has_more_actions(
+                            source,
+                            source_index,
+                            actions_completed,
+                            action_limit,
                         ),
                     )
                     continue
@@ -798,9 +877,11 @@ def run_loop(args: argparse.Namespace) -> int:
                         sleep_seconds,
                         artifacts=artifacts,
                         action_index=action_index,
-                        has_more_actions=(
-                            source_index < len(targets)
-                            and _has_action_budget(actions_completed, action_limit)
+                        has_more_actions=_has_more_actions(
+                            source,
+                            source_index,
+                            actions_completed,
+                            action_limit,
                         ),
                     )
                     continue
@@ -818,8 +899,12 @@ def run_loop(args: argparse.Namespace) -> int:
                         f"{migration_record.summary}"
                     )
 
-            target = targets[source_index]
-            source_index += 1
+            target, source_index = _select_source_target(
+                source,
+                source_index,
+                args,
+                repo_root,
+            )
             artifacts.mark_attempt_started(action_index)
             model = target.model_override or args.model
             target_effort_budget, effort_resolution = resolve_target_effort_budget(
@@ -873,9 +958,11 @@ def run_loop(args: argparse.Namespace) -> int:
                     sleep_seconds,
                     artifacts=artifacts,
                     action_index=action_index,
-                    has_more_actions=(
-                        source_index < len(targets)
-                        and _has_action_budget(actions_completed, action_limit)
+                    has_more_actions=_has_more_actions(
+                        source,
+                        source_index,
+                        actions_completed,
+                        action_limit,
                     ),
                 )
                 continue
@@ -900,9 +987,11 @@ def run_loop(args: argparse.Namespace) -> int:
                     sleep_seconds,
                     artifacts=artifacts,
                     action_index=action_index,
-                    has_more_actions=(
-                        source_index < len(targets)
-                        and _has_action_budget(actions_completed, action_limit)
+                    has_more_actions=_has_more_actions(
+                        source,
+                        source_index,
+                        actions_completed,
+                        action_limit,
                     ),
                 )
                 continue
@@ -992,9 +1081,11 @@ def run_loop(args: argparse.Namespace) -> int:
                 sleep_seconds,
                 artifacts=artifacts,
                 action_index=action_index,
-                has_more_actions=(
-                    source_index < len(targets)
-                    and _has_action_budget(actions_completed, action_limit)
+                has_more_actions=_has_more_actions(
+                    source,
+                    source_index,
+                    actions_completed,
+                    action_limit,
                 ),
             )
 

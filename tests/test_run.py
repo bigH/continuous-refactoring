@@ -1248,7 +1248,7 @@ def test_run_extensions_targeting(
     assert len(matched) == 1, matched
 
 
-def test_run_extensions_expands_to_multiple_targets(
+def test_run_extensions_reuses_resolved_target_pool(
     run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1264,15 +1264,16 @@ def test_run_extensions_expands_to_multiple_targets(
     _patch_run_loop_agent(monkeypatch, capture_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    args = make_run_loop_args(repo_root, extensions=".py", max_refactors=99)
+    args = make_run_loop_args(repo_root, extensions=".py", max_refactors=5)
     continuous_refactoring.run_loop(args)
 
-    assert len(captured_prompts) == len(tracked)
-    hit = {f for f in tracked if any(f in p for p in captured_prompts)}
-    assert hit == set(tracked)
+    assert len(captured_prompts) == 5
+    for prompt in captured_prompts:
+        matched = [f for f in tracked if f in prompt]
+        assert len(matched) == 1, matched
 
 
-def test_run_globs_targeting(
+def test_run_globs_reuses_resolved_target_pool(
     run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1288,14 +1289,14 @@ def test_run_globs_targeting(
     _patch_run_loop_agent(monkeypatch, capture_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    args = make_run_loop_args(repo_root, globs="src/**/*.py", max_refactors=1)
+    args = make_run_loop_args(repo_root, globs="src/**/*.py", max_refactors=4)
     continuous_refactoring.run_loop(args)
 
-    assert len(captured_prompts) == 1
-    prompt = captured_prompts[0]
-    matched = [f for f in ("src/foo.py", "src/bar.py") if f in prompt]
-    assert len(matched) == 1, matched
-    assert "tests/test_foo.py" not in prompt
+    assert len(captured_prompts) == 4
+    for prompt in captured_prompts:
+        matched = [f for f in ("src/foo.py", "src/bar.py") if f in prompt]
+        assert len(matched) == 1, matched
+        assert "tests/test_foo.py" not in prompt
 
 
 def test_run_paths_targeting_keeps_non_empty_target_list_shape(
@@ -1317,15 +1318,15 @@ def test_run_paths_targeting_keeps_non_empty_target_list_shape(
     args = make_run_loop_args(
         repo_root,
         paths="src/foo.py: src/bar.py",
-        max_refactors=1,
+        max_refactors=3,
     )
     continuous_refactoring.run_loop(args)
 
-    assert len(captured_prompts) == 1
-    prompt = captured_prompts[0]
-    assert "## Target Files" in prompt
-    assert "- src/foo.py" in prompt
-    assert "- src/bar.py" in prompt
+    assert len(captured_prompts) == 3
+    for prompt in captured_prompts:
+        assert "## Target Files" in prompt
+        assert "- src/foo.py" in prompt
+        assert "- src/bar.py" in prompt
 
 
 def test_run_targets_precedence_over_other_selectors(
@@ -1486,6 +1487,19 @@ def test_cli_run_requires_max_refactors_for_scope_only_run(
     assert calls == []
 
 
+def test_run_loop_requires_max_refactors_without_targets(
+    run_loop_env: Path,
+) -> None:
+    args = make_run_loop_args(
+        run_loop_env,
+        extensions=".py",
+        max_refactors=None,
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="--max-refactors required"):
+        continuous_refactoring.run_loop(args)
+
+
 def test_cli_run_allows_targets_without_max_refactors(
     run_loop_env: Path,
     tmp_path: Path,
@@ -1515,6 +1529,35 @@ def test_cli_run_allows_targets_without_max_refactors(
         _handle_run(args)
     assert exc_info.value.code == 0
     assert calls == [args]
+
+
+def test_run_loop_allows_finite_targets_without_max_refactors(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    targets_file = write_targets_file(tmp_path, count=2)
+    agent_calls = 0
+
+    def counting_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        return noop_agent(**kwargs)
+
+    _patch_run_loop_agent(monkeypatch, counting_agent)
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+
+    args = make_run_loop_args(
+        repo_root,
+        targets=targets_file,
+        max_refactors=None,
+        scope_instruction=None,
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert agent_calls == 2
 
 
 def test_cli_run_once_validates_targeting_before_dispatch(
@@ -1567,16 +1610,24 @@ def test_cli_loop_errors_exit_one_with_cause(
     assert capsys.readouterr().err == "loop broke\n"
 
 
-def test_run_random_fallback_targeting(
+def test_run_ambient_source_resamples_random_files(
     run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = run_loop_env
-    # Add a Python file so there's something to find
-    (repo_root / "hello.py").write_text("print('hi')\n", encoding="utf-8")
-    continuous_refactoring.run_command(["git", "add", "hello.py"], cwd=repo_root)
+    (repo_root / "first.py").write_text("print('first')\n", encoding="utf-8")
+    (repo_root / "second.py").write_text("print('second')\n", encoding="utf-8")
     continuous_refactoring.run_command(
-        ["git", "commit", "-m", "add hello"], cwd=repo_root,
+        ["git", "add", "first.py", "second.py"],
+        cwd=repo_root,
+    )
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "add py files"], cwd=repo_root,
+    )
+    selections = iter((("first.py",), ("second.py",)))
+    monkeypatch.setattr(
+        "continuous_refactoring.targeting.select_random_files",
+        lambda _repo_root: next(selections),
     )
 
     captured_prompts: list[str] = []
@@ -1588,14 +1639,46 @@ def test_run_random_fallback_targeting(
     _patch_run_loop_agent(monkeypatch, capture_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    args = make_run_loop_args(repo_root, max_refactors=1, scope_instruction=None)
-    # With no targeting args and no scope_instruction, resolve_targets falls back to
-    # random files from git ls-files
+    args = make_run_loop_args(repo_root, max_refactors=2, scope_instruction=None)
     continuous_refactoring.run_loop(args)
 
-    assert len(captured_prompts) == 1
-    # Should have target files from the random selection
-    assert "## Target Files" in captured_prompts[0]
+    assert len(captured_prompts) == 2
+    assert "- first.py" in captured_prompts[0]
+    assert "- second.py" in captured_prompts[1]
+
+
+def test_run_ambient_source_reuses_scope_fallback_without_tracked_files(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    continuous_refactoring.run_command(["git", "rm", "README.md"], cwd=repo_root)
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "remove tracked files"], cwd=repo_root,
+    )
+
+    captured_prompts: list[str] = []
+
+    def capture_agent(**kwargs: object) -> CommandCapture:
+        captured_prompts.append(str(kwargs.get("prompt", "")))
+        return noop_agent(**kwargs)
+
+    _patch_run_loop_agent(monkeypatch, capture_agent)
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+
+    args = make_run_loop_args(
+        repo_root,
+        max_refactors=2,
+        scope_instruction="clean the project shape",
+    )
+    continuous_refactoring.run_loop(args)
+
+    assert len(captured_prompts) == 2
+    assert all("## Target Files" not in prompt for prompt in captured_prompts)
+    assert all(
+        "## Scope\nclean the project shape" in prompt
+        for prompt in captured_prompts
+    )
 
 
 def test_run_ctrl_c_discards_and_summarizes(
@@ -1650,6 +1733,36 @@ def test_cli_errors_when_no_targets_and_no_scope_instruction(
     assert exc_info.value.code == 2
 
 
+def test_run_no_match_selector_without_scope_completes_zero_actions(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    agent_calls = 0
+
+    def counting_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        return noop_agent(**kwargs)
+
+    _patch_run_loop_agent(monkeypatch, counting_agent)
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+
+    args = make_run_loop_args(
+        repo_root,
+        extensions=".missing",
+        max_refactors=3,
+        scope_instruction=None,
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    summary = _read_single_run_summary(repo_root)
+    assert exit_code == 0
+    assert agent_calls == 0
+    assert summary["final_status"] == "completed"
+    assert summary["counts"]["attempts_started"] == 0
+
+
 def test_run_samples_targets_when_max_refactors_lt_total(
     run_loop_env: Path,
     tmp_path: Path,
@@ -1679,6 +1792,35 @@ def test_run_samples_targets_when_max_refactors_lt_total(
 
     assert exit_code == 0
     assert agent_calls == 3
+
+
+def test_run_targets_jsonl_remains_finite_with_larger_action_budget(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    targets_file = write_targets_file(tmp_path, count=2)
+    agent_calls = 0
+
+    def counting_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        return noop_agent(**kwargs)
+
+    _patch_run_loop_agent(monkeypatch, counting_agent)
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+
+    args = make_run_loop_args(
+        repo_root,
+        targets=targets_file,
+        max_refactors=5,
+        scope_instruction=None,
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert agent_calls == 2
 
 
 def _count_validation_calls(stdout_path: object) -> bool:
@@ -2588,6 +2730,84 @@ def test_run_loop_counts_completed_planning_as_action(
     assert exit_code == 0
     assert planning_calls == 1
     assert summary["counts"]["attempts_started"] == 1
+    assert summary["attempts"][0]["commit_phase"] == "planning"
+
+
+def test_run_loop_counts_planning_before_reusable_source_action(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    live_dir = tmp_path / "live-migrations"
+    live_dir.mkdir()
+    _repo_with_py_files(repo_root)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+    planning_calls = 0
+    captured_targets: list[str] = []
+
+    def fake_planning_tick(
+        live_dir: Path,
+        taste: str,
+        repo_root: Path,
+        artifacts: object,
+        **kwargs: object,
+    ) -> tuple[RouteOutcome, DecisionRecord | None]:
+        nonlocal planning_calls
+        planning_calls += 1
+        if planning_calls == 1:
+            _commit_fake_planning_step(
+                repo_root,
+                artifacts,
+                attempt=int(kwargs["attempt"]),
+                finalize_commit=kwargs["finalize_commit"],
+            )
+            return ("commit", _planning_record("commit"))
+        return ("not-routed", None)
+
+    def no_migration_tick(
+        *_args: object,
+        **_kwargs: object,
+    ) -> tuple[RouteOutcome, DecisionRecord | None]:
+        return ("not-routed", None)
+
+    def capture_source_route(*args: object, **_kwargs: object) -> object:
+        target = args[0]
+        captured_targets.append(target.description)  # type: ignore[attr-defined]
+        return continuous_refactoring.routing_pipeline.RouteResult(
+            outcome="commit",
+            target=target,
+            decision_record=_migration_record(
+                "commit",
+                target=target.description,  # type: ignore[attr-defined]
+            ),
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_planning_tick",
+        fake_planning_tick,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_migration_tick",
+        no_migration_tick,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.route_and_run",
+        capture_source_route,
+    )
+
+    args = make_run_loop_args(repo_root, extensions=".py", max_refactors=2)
+    exit_code = continuous_refactoring.run_loop(args)
+
+    summary = _read_single_run_summary(repo_root)
+    assert exit_code == 0
+    assert planning_calls == 2
+    assert len(captured_targets) == 1
+    assert summary["counts"]["attempts_started"] == 2
     assert summary["attempts"][0]["commit_phase"] == "planning"
 
 

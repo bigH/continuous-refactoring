@@ -229,7 +229,7 @@ def _add_run_parser(subparsers: argparse._SubParsersAction) -> None:
         "--max-refactors",
         type=int,
         default=None,
-        help="Distinct targets to process.",
+        help="Refactor actions to run.",
     )
     run_parser.add_argument(
         "--focus-on-live-migrations",
@@ -254,7 +254,7 @@ def _add_run_parser(subparsers: argparse._SubParsersAction) -> None:
         "--sleep",
         type=parse_sleep_seconds,
         default=0.0,
-        help="Seconds to sleep between completed targets.",
+        help="Seconds to sleep between completed actions.",
     )
 
 

@@ -71,17 +71,18 @@ continuous-refactoring run \
   --max-attempts 2
 ```
 
-That keeps sweeping targets until it runs out, hits your caps, or starts failing.
-Use `run --focus-on-live-migrations` when you want the loop to work only on
-eligible live migrations; it bypasses target selection and `--max-refactors`.
+That runs up to 10 refactor actions, then stops sooner if the finite target file
+runs out or the loop starts failing. Use `run --focus-on-live-migrations` when
+you want the loop to work only on eligible live migrations; it bypasses target
+selection and `--max-refactors`.
 
 ## What it does
 
-- Resolves a target from `--targets`, `--globs`, `--extensions`, or `--paths`, with optional natural-language scoping via `--scope-instruction`.
+- Resolves each source action from `--targets`, `--globs`, `--extensions`, or `--paths`, with optional natural-language scoping via `--scope-instruction`.
 - Runs the agent with a refactoring prompt + your "taste" guidelines.
 - Runs your validation command (default: `uv run pytest`).
 - If green and there's a diff, it commits locally and leaves the branch for you to inspect.
-- Repeats until it runs out of targets, hits the retry budget, or stacks too many failures.
+- Repeats until it spends the action budget, exhausts a finite target file, hits the retry budget, or stacks too many failures.
 
 ## Requirements
 
@@ -124,7 +125,7 @@ continuous-refactoring run \
 | `init` | Registers this directory as a project, creates a default `taste.md`, and can store `--live-migrations-dir` or `--in-repo-taste`. |
 | `taste` | Prints the active taste file path. Add `--interview` to have an agent author it, `--refine` to iteratively improve an existing taste doc, `--upgrade` to refresh stale taste dimensions, `--global` for the shared file, and `--force` to let `--interview` overwrite custom content after writing a `.bak`. |
 | `run-once` | Single pass on one resolved target. No retry. If there is a diff and validation passes, it commits locally and prints the diffstat. |
-| `run` | The loop. Iterates targets, retries on failure, and commits successful targets locally. Add `--focus-on-live-migrations` to bypass targeting and work only on eligible live migrations. |
+| `run` | The loop. Iterates refactor actions, retries on failure, and commits successful changes locally. Add `--focus-on-live-migrations` to bypass targeting and work only on eligible live migrations. |
 | `upgrade` | Checks that the global config manifest is current, rewrites it idempotently, and warns if the global taste file is stale. |
 | `migration list` | Lists visible migrations. Add `--status <status>` or `--awaiting-review` to filter. |
 | `migration doctor <slug-or-path>` | Validates one visible migration's consistency. |
@@ -143,16 +144,20 @@ Target resolution is first-match-wins:
 
 These flags are not mutually exclusive, but only the highest-priority populated source is used.
 
-- `--targets path/to/targets.jsonl` — explicit user-provided list; one JSON object per line with `description`, `files`, optional `scoping`, `model-override`, `effort-override`. Effort overrides use `low`, `medium`, `high`, or `xhigh`.
-- `--globs 'src/**/*.py:tests/**/*.py'` — colon-separated globs matched against tracked files from `git ls-files`; each matched file becomes its own target.
-- `--extensions .py,.ts` — shorthand that expands to `**/*.py`, `**/*.ts` against tracked files from `git ls-files`; each matched file becomes its own target.
-- `--paths a.py:b.py` — literal user-provided paths, all treated as one target.
+- `--targets path/to/targets.jsonl` — explicit finite list; one JSON object per line with `description`, `files`, optional `scoping`, `model-override`, `effort-override`. Effort overrides use `low`, `medium`, `high`, or `xhigh`. If `--max-refactors` is omitted, `run` processes the file once and stops.
+- `--globs 'src/**/*.py:tests/**/*.py'` — colon-separated globs matched once against tracked files from `git ls-files`; each refactor action samples one matched file, so files can repeat.
+- `--extensions .py,.ts` — shorthand that expands to `**/*.py`, `**/*.ts` against tracked files from `git ls-files`; each refactor action samples one matched file, so files can repeat.
+- `--paths a.py:b.py` — literal user-provided paths, all treated as one grouped target; each refactor action reuses that group.
 - `--scope-instruction "clean up the auth module"` — extra free-text scoping. If selected file patterns resolve nothing, this becomes the useful fallback context.
+
+If `--globs` or `--extensions` match no tracked files and there is no
+`--scope-instruction`, `run` completes successfully with zero refactor actions.
+`--paths` is literal input and is not filtered through `git ls-files`.
 
 If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`,
 then `run` and `run-once` require `--scope-instruction`; the driver still
-random-samples tracked files from `git ls-files` first and uses the scope text as
-context for that target.
+random-samples tracked files from `git ls-files` for each action and uses the
+scope text as context for that target.
 
 ### Migrations & taste flags
 
@@ -193,11 +198,11 @@ continuous-refactoring migration refine <slug-or-path> --file feedback.md --with
 
 ### `run`-only flags
 
-- `--max-attempts N` — per-target retry budget. `1` = no retry, `0` = unlimited (which means permanently broken targets will never give up).
-- `--max-refactors N` — cap the number of targets per run. Required unless you use `--targets` or `--focus-on-live-migrations`.
+- `--max-attempts N` — per-action retry budget. `1` = no retry, `0` = unlimited (which means permanently broken actions will never give up).
+- `--max-refactors N` — cap the number of refactor actions per run. Required unless you use `--targets` or `--focus-on-live-migrations`.
 - `--focus-on-live-migrations` — bypass target selection and `--max-refactors`; iterate eligible live migrations until they are done, deferred, blocked, or the failure budget trips.
-- `--max-consecutive-failures N` — bail after N targets fail in a row. Default 3.
-- `--sleep SECONDS` — pause between completed targets. Useful when you want a long batch without hammering the repo or your agent budget.
+- `--max-consecutive-failures N` — bail after N actions fail in a row. Default 3.
+- `--sleep SECONDS` — pause between completed actions. Useful when you want a long batch without hammering the repo or your agent budget.
 - `--commit-message-prefix TEXT` — subject prefix for successful refactor or migration-plan commits. Default `continuous refactor`.
 
 ## Safety behaviors

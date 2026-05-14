@@ -1,0 +1,12 @@
+{
+  "awaiting_human_review": false,
+  "cooldown_until": null,
+  "created_at": "2026-05-13T23:14:24.244-07:00",
+  "current_phase": "",
+  "human_review_reason": null,
+  "last_touch": "2026-05-13T23:15:50.012-07:00",
+  "name": "random-files-20260513T231424",
+  "phases": [],
+  "status": "planning",
+  "wake_up_on": null
+}

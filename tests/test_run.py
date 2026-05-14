@@ -867,6 +867,84 @@ def test_e2e_source_target_then_focused_run_resumes_planning_to_ready(
     assert (mig_root / ".planning" / "stages" / "final-review.stdout.md").is_file()
 
 
+def test_run_source_target_planning_continues_to_action_budget(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    live_dir = repo_root / ".migrations"
+    live_dir.mkdir()
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        lambda *_args, **_kwargs: "needs-plan",
+    )
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+
+    stage_labels: list[str] = []
+
+    def planning_agent(**kwargs: object) -> CommandCapture:
+        stage_label = Path(str(kwargs["stdout_path"])).parent.name
+        stage_labels.append(stage_label)
+        migration_dir = _prompt_migration_dir(
+            str(kwargs["prompt"]),
+            Path(str(kwargs["repo_root"])),
+        )
+        if stage_label == "approaches":
+            (migration_dir / "approaches").mkdir(parents=True, exist_ok=True)
+            (migration_dir / "approaches" / "incremental.md").write_text(
+                "# Incremental\n",
+                encoding="utf-8",
+            )
+            return _planning_agent_result(kwargs, "Generated approaches.\n")
+        if stage_label == "pick-best":
+            return _planning_agent_result(kwargs, "Chose incremental.\n")
+        if stage_label == "expand":
+            (migration_dir / "plan.md").write_text("# Plan\n", encoding="utf-8")
+            (migration_dir / "phase-0-setup.md").write_text(
+                "## Precondition\n\nalways\n\n"
+                "## Definition of Done\n\nSetup is complete.\n",
+                encoding="utf-8",
+            )
+            return _planning_agent_result(kwargs, "Expanded plan.\n")
+        if stage_label == "review":
+            return _planning_agent_result(kwargs, "no findings\n")
+        if stage_label == "final-review":
+            return _planning_agent_result(
+                kwargs,
+                "final-decision: approve-auto - ready\n",
+            )
+        raise AssertionError(f"unexpected planning stage {stage_label}")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.planning.maybe_run_agent",
+        planning_agent,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.check_phase_ready",
+        lambda *_args, **_kwargs: ("no", "wait for operator"),
+    )
+
+    exit_code = continuous_refactoring.run_loop(
+        make_run_loop_args(repo_root, max_refactors=5)
+    )
+
+    summary = _read_single_run_summary(repo_root)
+    assert exit_code == 0
+    assert stage_labels == [
+        "approaches",
+        "pick-best",
+        "expand",
+        "review",
+        "final-review",
+    ]
+    assert summary["counts"]["attempts_started"] == 5
+    assert summary["counts"]["commits_created"] == 5
+
+
 def _prompt_migration_dir(prompt: str, repo_root: Path) -> Path:
     for line in prompt.splitlines():
         if line.startswith("Migration directory:"):

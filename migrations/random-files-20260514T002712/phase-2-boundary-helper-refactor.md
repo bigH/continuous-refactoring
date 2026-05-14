@@ -1,7 +1,7 @@
 # Phase 2: Boundary Helper Refactor
 
 required_effort: medium
-effort_reason: Scheduler/eligibility sequencing is easy to regress without careful equivalence checks.
+effort_reason: This phase touches ordering-sensitive candidate enumeration and deferred-manifest write timing in `migration_tick.py`; preserving equivalence across those paths requires deliberate multi-slice verification beyond low-effort edits.
 
 ## Goal
 Simplify and clarify boundary helper decomposition and call flow in migration boundary modules while preserving established contracts.

@@ -4,7 +4,7 @@
   "created_at": "2026-05-14T00:27:12.066-07:00",
   "current_phase": "boundary-contract-tests",
   "human_review_reason": null,
-  "last_touch": "2026-05-14T00:30:27.028-07:00",
+  "last_touch": "2026-05-14T00:31:33.241-07:00",
   "name": "random-files-20260514T002712",
   "phases": [
     {
@@ -17,7 +17,7 @@
     },
     {
       "done": false,
-      "effort_reason": "Scheduler/eligibility sequencing is easy to regress without careful equivalence checks.",
+      "effort_reason": "This phase touches ordering-sensitive candidate enumeration and deferred-manifest write timing in `migration_tick.py`; preserving equivalence across those paths requires deliberate multi-slice verification beyond low-effort edits.",
       "file": "phase-2-boundary-helper-refactor.md",
       "name": "boundary-helper-refactor",
       "precondition": "- Phase 1 is complete and its contract tests are present in the branch. - The target helper/function entry points to be refactored still match the contracts locked in Phase 1. - No newly introduced migration-interface contract change is pending unresolved human review for this migration.",
@@ -25,11 +25,11 @@
     },
     {
       "done": false,
-      "effort_reason": null,
+      "effort_reason": "Scope is narrowly constrained to contract-alignment test updates with no planned production-path refactor.",
       "file": "phase-3-prompt-test-consistency-reconciliation.md",
       "name": "prompt-test-consistency-reconciliation",
       "precondition": "- Phases 1 and 2 are complete and published for this migration. - Prompt/test contract files targeted in this phase still represent active migration semantics (including taste injection and planning publish expectations). - No pending unresolved edits in this phase scope that would invalidate consistency verification.",
-      "required_effort": null
+      "required_effort": "low"
     }
   ],
   "status": "planning",

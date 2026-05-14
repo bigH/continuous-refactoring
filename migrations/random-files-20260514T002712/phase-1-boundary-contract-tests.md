@@ -33,7 +33,11 @@ Lock externally visible boundary behavior for migration discovery, eligibility, 
 3. If failures expose ambiguous legacy behavior, resolve ambiguity by tightening contract assertions before moving to refactor phases.
 
 ## Definition of Done
-- Boundary contract tests exist and reliably fail when those boundary behaviors are intentionally broken.
+- New or updated tests cover all three boundary surfaces in this phase with at least one explicit assertion each:
+  - visible migration directory filtering;
+  - candidate eligibility/ordering behavior;
+  - boundary error surfacing/translation behavior.
+- For each covered surface, tests assert concrete externally observable outcomes (returned candidates/order, skipped/selected behavior, raised error type/message shape, or persisted manifest side effects where applicable).
 - New/updated tests assert externally observable outcomes, not incidental internal structure.
 - No production behavior changes are introduced beyond test hardening support.
 - `uv run pytest` passes.

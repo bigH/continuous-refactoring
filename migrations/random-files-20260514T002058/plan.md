@@ -1,7 +1,7 @@
 # Migration Plan — random-files-20260514T002058
 
 ## Goal
-Tighten and protect shipped CLI/module-entry interfaces first, then perform bounded internal routing cleanup, then verify release-workflow assumptions still match those contracts.
+Lock externally visible CLI/module-entry contracts first, then perform bounded internal routing cleanup, then verify release workflow smoke assumptions still match those locked contracts.
 
 ## Phase Order
 1. [phase-1-freeze-interface-contracts.md](phase-1-freeze-interface-contracts.md)
@@ -23,15 +23,15 @@ graph TD
 ```
 
 ## Validation Strategy
-- Baseline is harness-owned and enforced outside phase content.
-- Per phase, execute the configured validation command as the final completion gate.
-- Keep each phase independently verifiable with scoped checks first, then full configured validation command before marking complete.
-- If any phase discovers intentional user-visible CLI behavior change, document that in phase artifacts for explicit human review.
+- The harness enforces baseline validation before refactoring and after each completed phase.
+- Each phase runs scoped checks first (targeted tests or file-level consistency checks), then the configured full validation command as the final completion gate.
+- Each phase has objective completion criteria tied to specific files and observable outcomes.
+- If a phase intentionally changes user-visible interface behavior, phase notes must explicitly name the behavior change for human review.
 
 ## Risk Reduction Rationale
-- Phase 1 locks external behavior early to prevent accidental drift.
-- Phase 2 is limited to internal readability/flow improvements at the routing boundary with preserved exception semantics.
-- Phase 3 runs last because workflow edits carry disproportionate blast radius and should only happen after contracts are stable.
+- Phase 1 pins observable contract behavior before internals change.
+- Phase 2 is constrained to `routing.py` and directly covering routing tests, with explicit criteria for duplication reduction and unchanged outcomes.
+- Phase 3 is last because workflow edits are high-blast-radius and should happen only after contracts are locked.
 
 ## Shippability Rule Per Phase
-- Every phase must leave repository behavior coherent and releasable, with no partial contract shifts.
+- Every completed phase must leave the repository in a releasable state with coherent behavior and passing configured full validation.

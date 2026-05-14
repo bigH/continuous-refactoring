@@ -1,35 +1,36 @@
 # Phase 2 — Boundary-Focused Routing Cleanup
 
 required_effort: medium
-effort_reason: Internal cleanup must preserve subtle boundary semantics while reducing repetition.
+effort_reason: Cleanup is local but must preserve subtle boundary semantics while removing duplication.
 
 ## Scope
 - `src/continuous_refactoring/routing.py`
-- Routing-focused tests under `tests/` that directly cover touched behavior
+- `tests/test_routing.py`
 
 ## Objectives
-- Improve readability and local abstraction quality inside routing logic.
-- Remove unnecessary repetition in classify parsing/error handling paths.
-- Preserve boundary semantics: exception nesting signal and finished-call expectations.
+- Improve readability and flow in routing classification parsing/failure paths.
+- Remove concrete duplication in parse/failure handling without changing observable outcomes.
+- Preserve boundary exception semantics and call-finished event expectations.
 
 ## Precondition
 - Phase 1 is complete.
-- Contracts locked in Phase 1 still exist and are unchanged in intent.
-- `routing.py` structure still contains the targeted repetition/error-handling hotspots this phase is meant to clean up.
-- No active conflicting edits in routing boundary code paths.
+- `tests/test_cli_version.py` and `tests/test_routing.py` still exist at the Phase 1 paths.
+- `src/continuous_refactoring/routing.py` still contains the parse and classify failure paths targeted by this phase.
+- No unresolved human-review hold is blocking routing-internal cleanup.
 
 ## Implementation Instructions
-1. Identify small, domain-meaningful abstractions that reduce duplication without hiding control flow.
-2. Keep exception translation at module boundaries and preserve causal chains.
-3. Delete dead/legacy branches uncovered by refactor when proven unused by tests.
-4. Update/add tests to verify outcomes and boundary behavior, not call internals.
+1. Refactor only within `src/continuous_refactoring/routing.py`.
+2. Extract or consolidate duplicated parse/failure logic into small domain-meaningful helpers only where duplication is direct.
+3. Keep boundary error translation with exception nesting intact; do not change external status/event contracts.
+4. Update `tests/test_routing.py` only as needed to preserve/clarify outcome assertions.
 
 ## Validation Steps
-1. Run routing-focused targeted tests for touched behavior.
+1. Run `uv run pytest tests/test_routing.py`.
 2. Run the configured full validation command.
 
 ## Definition of Done
-- `routing.py` is measurably simpler in duplicated parse/error-handling paths.
-- Boundary exception semantics and observable routing outcomes remain intact.
-- No speculative interface changes were introduced.
+- `src/continuous_refactoring/routing.py` no longer duplicates parse/failure handling across multiple branches where one helper/path can express the same behavior.
+- Observable routing outcomes remain unchanged for existing Phase 1 routing contract assertions in `tests/test_routing.py`.
+- Boundary exception chaining behavior is preserved for routing translation failures.
+- No files outside Scope were changed.
 - Configured full validation command passes.

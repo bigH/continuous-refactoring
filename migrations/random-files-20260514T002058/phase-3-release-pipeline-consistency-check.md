@@ -1,34 +1,35 @@
 # Phase 3 — Release Pipeline Consistency Check
 
 required_effort: low
-effort_reason: This is a constrained alignment pass with change-only-if-mismatch policy.
+effort_reason: Constrained consistency audit with change-only-if-mismatch policy.
 
 ## Scope
 - `.github/workflows/release.yml`
-- Any directly related release-smoke assertions/config lines required for consistency
+- `tests/test_cli_version.py`
+- `src/continuous_refactoring/__main__.py`
 
 ## Objectives
-- Confirm release workflow smoke assumptions align with locked CLI/module-entry contracts.
-- Apply minimal workflow correction only if mismatch is identified.
+- Confirm release smoke commands in the release workflow match the locked module-entry/version contract.
+- Apply the smallest possible workflow correction only when a concrete mismatch exists.
 
 ## Precondition
 - Phase 2 is complete.
-- Phase 1 interface contracts remain the intended canonical behavior.
-- Release workflow file exists and is readable in this checkout.
-- Any planned workflow change is traceable to a concrete contract mismatch, not preference.
+- `.github/workflows/release.yml` exists at the expected path.
+- `tests/test_cli_version.py` and `src/continuous_refactoring/__main__.py` still represent the Phase 1 locked contract surface.
+- No unresolved human-review hold is blocking release workflow edits.
 
 ## Implementation Instructions
-1. Compare release workflow smoke/entrypoint assumptions against Phase 1 contract tests.
-2. If no mismatch exists, keep workflow unchanged and record no-op consistency confirmation in phase notes/commit context.
-3. If mismatch exists, make smallest safe workflow edit to restore alignment.
-4. Avoid broad CI restructuring or unrelated workflow cleanup.
+1. Compare release workflow smoke invocation/assertion lines to Phase 1 contract behavior in `tests/test_cli_version.py` and module entry behavior in `src/continuous_refactoring/__main__.py`.
+2. If aligned, make no workflow change.
+3. If mismatched, edit only the specific smoke command/assertion lines in `.github/workflows/release.yml` needed to restore alignment.
+4. Do not perform unrelated CI/workflow cleanup.
 
 ## Validation Steps
-1. Validate syntax/coherence of workflow edits (if any) with repository-standard checks.
+1. Re-read changed workflow lines to confirm they map directly to contract behavior under test.
 2. Run the configured full validation command.
 
 ## Definition of Done
-- Release workflow assumptions are confirmed consistent with locked interface contracts.
-- Any workflow edit is minimal and directly justified by a discovered mismatch.
-- No unrelated CI behavior changes were introduced.
+- Release workflow smoke behavior is confirmed aligned with Phase 1 locked module-entry/version contract.
+- Any workflow edit is limited to directly mismatched smoke command/assertion lines in `.github/workflows/release.yml`.
+- No files outside Scope were changed.
 - Configured full validation command passes.

@@ -463,6 +463,9 @@ def test_enumerate_eligible_manifests_ignores_noise_and_sorts_by_created_at(
 
     assert [manifest.name for manifest, _ in candidates] == ["older", "newer"]
     assert [path.parent.name for _, path in candidates] == ["older", "newer"]
+    assert all(manifest.name != "__internal" for manifest, _ in candidates)
+    assert all(manifest.name != "awaiting-review" for manifest, _ in candidates)
+    assert all(manifest.name != "no-current-phase" for manifest, _ in candidates)
 
 
 def test_try_planning_tick_forwards_log_mirroring(
@@ -1260,6 +1263,7 @@ def test_ready_check_wrapped_failure_keeps_root_cause_in_summary(
 
     assert outcome == "abandon"
     assert record is not None
+    assert record.failure_kind == "agent-infra-failure"
     assert record.summary == (
         "Failed to start codex in <repo>: No such file or directory: 'codex'"
     )

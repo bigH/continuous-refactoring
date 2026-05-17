@@ -6,7 +6,7 @@ from collections.abc import Collection
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Callable, Protocol
 
 if TYPE_CHECKING:
     from continuous_refactoring.artifacts import RunArtifacts
@@ -101,10 +101,11 @@ def enumerate_eligible_manifests(
     now: datetime,
     effort_budget: EffortBudget | None = None,
 ) -> list[tuple[MigrationManifest, Path]]:
-    candidates: list[tuple[MigrationManifest, Path]] = []
-    for manifest, manifest_path in _iter_candidate_manifests(live_dir):
-        if _is_normally_eligible(manifest, now):
-            candidates.append((manifest, manifest_path))
+    candidates = _eligible_manifest_candidates(
+        live_dir,
+        now,
+        predicate=_is_normally_eligible,
+    )
     if effort_budget is not None:
         seen_paths = {path for _, path in candidates}
         for manifest, manifest_path in _cooling_effort_candidates(
@@ -112,21 +113,40 @@ def enumerate_eligible_manifests(
         ):
             if manifest_path not in seen_paths:
                 candidates.append((manifest, manifest_path))
-    candidates.sort(key=lambda pair: datetime.fromisoformat(pair[0].created_at))
-    return candidates
+    return _sort_manifests_by_created_at(candidates)
 
 
 def enumerate_eligible_planning_manifests(
     live_dir: Path,
     now: datetime,
 ) -> list[tuple[MigrationManifest, Path]]:
-    candidates = [
+    return _sort_manifests_by_created_at(
+        _eligible_manifest_candidates(
+            live_dir,
+            now,
+            predicate=_is_planning_candidate,
+        )
+    )
+
+
+def _eligible_manifest_candidates(
+    live_dir: Path,
+    now: datetime,
+    *,
+    predicate: Callable[[MigrationManifest, datetime], bool],
+) -> list[tuple[MigrationManifest, Path]]:
+    return [
         (manifest, manifest_path)
         for manifest, manifest_path in _iter_candidate_manifests(live_dir)
-        if _is_planning_candidate(manifest, now)
+        if predicate(manifest, now)
     ]
-    candidates.sort(key=lambda pair: datetime.fromisoformat(pair[0].created_at))
-    return candidates
+
+
+def _sort_manifests_by_created_at(
+    manifests: list[tuple[MigrationManifest, Path]],
+) -> list[tuple[MigrationManifest, Path]]:
+    manifests.sort(key=lambda pair: datetime.fromisoformat(pair[0].created_at))
+    return manifests
 
 
 def _cooling_effort_candidates(
@@ -291,16 +311,13 @@ def try_migration_tick(
                 reason,
                 max_allowed_effort=resolved_budget.max_allowed_effort,
             )
-            pending_defers.append(
-                (
-                    _defer_manifest(
-                        manifest,
-                        now,
-                        verdict="effort-over-budget",
-                        reason=reason,
-                    ),
-                    manifest_path,
-                )
+            _queue_deferred_manifest(
+                pending_defers,
+                manifest,
+                manifest_path,
+                now,
+                verdict="effort-over-budget",
+                reason=reason,
             )
             deferred_record = _effort_deferred_record(reason, repo_root, target_label)
             continue
@@ -377,11 +394,13 @@ def try_migration_tick(
                 return "abandon", _phase_failure_record(outcome, repo_root, target_label)
             return "commit", _phase_commit_record(outcome, repo_root, target_label)
 
-        pending_defers.append(
-            (
-                _defer_manifest(manifest, now, verdict=verdict, reason=reason),
-                manifest_path,
-            )
+        _queue_deferred_manifest(
+            pending_defers,
+            manifest,
+            manifest_path,
+            now,
+            verdict=verdict,
+            reason=reason,
         )
         if verdict == "unverifiable":
             _save_pending_defers(pending_defers)
@@ -723,6 +742,23 @@ def _save_pending_defers(
 ) -> None:
     for deferred_manifest, manifest_path in pending_defers:
         save_manifest(deferred_manifest, manifest_path)
+
+
+def _queue_deferred_manifest(
+    pending_defers: list[tuple[MigrationManifest, Path]],
+    manifest: MigrationManifest,
+    manifest_path: Path,
+    now: datetime,
+    *,
+    verdict: str,
+    reason: str,
+) -> None:
+    pending_defers.append(
+        (
+            _defer_manifest(manifest, now, verdict=verdict, reason=reason),
+            manifest_path,
+        )
+    )
 
 
 def _effort_defer_reason(

@@ -54,16 +54,27 @@
       "outputs": {
         "stdout": "migrations/random-files-20260514T002712/.planning/stages/revise.stdout.md"
       }
+    },
+    {
+      "agent": "codex",
+      "completed_at": "2026-05-16T20:55:27.720-07:00",
+      "effort": "low",
+      "model": "gpt-5.3-codex",
+      "name": "review-2",
+      "outcome": "clear",
+      "outputs": {
+        "stdout": "migrations/random-files-20260514T002712/.planning/stages/review-2.stdout.md"
+      }
     }
   ],
   "feedback": [],
   "final_decision": null,
   "final_reason": null,
-  "next_step": "review-2",
+  "next_step": "final-review",
   "review_findings": "migrations/random-files-20260514T002712/.planning/stages/review.stdout.md",
   "revision_base_step_counts": [],
   "schema_version": 1,
   "started_at": "2026-05-14T00:27:12.066-07:00",
   "target": "random files",
-  "updated_at": "2026-05-14T00:31:33.243-07:00"
+  "updated_at": "2026-05-16T20:55:27.720-07:00"
 }

@@ -65,16 +65,27 @@
       "outputs": {
         "stdout": "migrations/random-files-20260514T002712/.planning/stages/review-2.stdout.md"
       }
+    },
+    {
+      "agent": "codex",
+      "completed_at": "2026-05-16T20:56:06.285-07:00",
+      "effort": "low",
+      "model": "gpt-5.3-codex",
+      "name": "final-review",
+      "outcome": "approve-auto",
+      "outputs": {
+        "stdout": "migrations/random-files-20260514T002712/.planning/stages/final-review.stdout.md"
+      }
     }
   ],
   "feedback": [],
-  "final_decision": null,
-  "final_reason": null,
-  "next_step": "final-review",
+  "final_decision": "approve-auto",
+  "final_reason": "Contracts are explicit, phase sequencing is safe, effort labels are minimal credible (`low/medium/low`), and preconditions avoid baseline/fresh-validation requirements while DoD correctly requires full validation.",
+  "next_step": "terminal-ready",
   "review_findings": "migrations/random-files-20260514T002712/.planning/stages/review.stdout.md",
   "revision_base_step_counts": [],
   "schema_version": 1,
   "started_at": "2026-05-14T00:27:12.066-07:00",
   "target": "random files",
-  "updated_at": "2026-05-16T20:55:27.720-07:00"
+  "updated_at": "2026-05-16T20:56:06.285-07:00"
 }

@@ -1,1 +1,0 @@
-final-decision: approve-auto — Contracts are explicit, phase sequencing is safe, effort labels are minimal credible (`low/medium/low`), and preconditions avoid baseline/fresh-validation requirements while DoD correctly requires full validation.

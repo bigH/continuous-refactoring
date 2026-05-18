@@ -1,9 +1,9 @@
 {
-  "awaiting_human_review": true,
+  "awaiting_human_review": false,
   "cooldown_until": null,
   "created_at": "2026-05-12T16:10:21.712-07:00",
   "current_phase": "map-exception-boundaries",
-  "human_review_reason": "safe for automation, with explicit human gate only if interface-contract changes surface",
+  "human_review_reason": null,
   "last_touch": "2026-05-13T23:14:15.549-07:00",
   "name": "random-files-20260512T161021",
   "phases": [
@@ -12,7 +12,7 @@
       "effort_reason": null,
       "file": "phase-1-map-exception-boundaries.md",
       "name": "map-exception-boundaries",
-      "precondition": "- No active phase remains incomplete before this phase in the migration sequence. - The expected source and test files listed in Scope exist at their current paths. - Migration status remains `planning`/in-progress for this migration and the phase is selected as the current execution target.",
+      "precondition": "- No active phase remains incomplete before this phase in the migration sequence. - The expected source and test files listed in Scope exist at their current paths. - Migration status remains `ready`/in-progress for this migration, the human-review gate is cleared, and the phase is selected as the current execution target.",
       "required_effort": null
     },
     {

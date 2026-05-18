@@ -17,7 +17,7 @@
 ## Precondition
 - No active phase remains incomplete before this phase in the migration sequence.
 - The expected source and test files listed in Scope exist at their current paths.
-- Migration status remains `planning`/in-progress for this migration and the phase is selected as the current execution target.
+- Migration status remains `ready`/in-progress for this migration, the human-review gate is cleared, and the phase is selected as the current execution target.
 
 ## Implementation Instructions
 1. Read each scoped source module and list every boundary function that converts lower-level exceptions into `ContinuousRefactorError` or equivalent boundary error types.
@@ -28,6 +28,7 @@
    - whether `__cause__` is preserved.
 3. Cross-check existing tests for each boundary path and note what is already asserted vs. missing.
 4. Record the inventory in this phase file under an added section `## Boundary Inventory` (concise bullets), without changing runtime code yet.
+5. If the inventory shows a necessary CLI behavior, XDG state, repo-written file, migration manifest structure, public exception type, or top-level message-anchor change, stop and surface that exact old/new interface behavior for human review before implementation.
 
 ## Validation Steps
 1. Confirm inventory references only real call paths and symbols currently present in scope.

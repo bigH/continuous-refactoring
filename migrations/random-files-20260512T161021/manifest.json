@@ -2,13 +2,13 @@
   "awaiting_human_review": false,
   "cooldown_until": null,
   "created_at": "2026-05-12T16:10:21.712-07:00",
-  "current_phase": "map-exception-boundaries",
+  "current_phase": "normalize-boundary-wrapping",
   "human_review_reason": null,
-  "last_touch": "2026-05-13T23:14:15.549-07:00",
+  "last_touch": "2026-05-18T21:18:13.821-07:00",
   "name": "random-files-20260512T161021",
   "phases": [
     {
-      "done": false,
+      "done": true,
       "effort_reason": null,
       "file": "phase-1-map-exception-boundaries.md",
       "name": "map-exception-boundaries",

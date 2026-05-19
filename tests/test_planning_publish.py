@@ -97,6 +97,18 @@ def _stable_token(monkeypatch: pytest.MonkeyPatch, token: str) -> None:
     monkeypatch.setattr(planning_publish, "_new_transaction_token", lambda: token)
 
 
+def _assert_publish_error(
+    exc: pytest.ExceptionInfo[planning_publish.PlanningPublishError],
+    *,
+    status: str,
+    message_fragments: tuple[str, ...],
+) -> None:
+    error = exc.value
+    assert error.result.status == status
+    for fragment in message_fragments:
+        assert fragment in str(error)
+
+
 def test_publish_creates_new_live_migration_from_staged_snapshot(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -173,9 +185,11 @@ def test_publish_requires_same_device_final_staging(
         planning_publish.publish_planning_workspace(
             _request(repo, live_dir, "auth-cleanup", workspace)
         )
-
-    assert exc.value.result.status == "blocked"
-    assert "same filesystem" in str(exc.value)
+    _assert_publish_error(
+        exc,
+        status="blocked",
+        message_fragments=("same filesystem",),
+    )
     assert seen == [(_tx(live_dir, "tx-device") / "staged", live_dir)]
     assert _tree(old_live) == old_tree
     assert (_tx(live_dir, "tx-device") / "staged").is_dir()
@@ -212,9 +226,11 @@ def test_staged_validation_failure_leaves_live_snapshot_unchanged(
         planning_publish.publish_planning_workspace(
             _request(repo, live_dir, "auth-cleanup", workspace)
         )
-
-    assert exc.value.result.status == "blocked"
-    assert "staged invalid" in str(exc.value)
+    _assert_publish_error(
+        exc,
+        status="blocked",
+        message_fragments=("staged invalid",),
+    )
     assert validated == [workspace, _tx(live_dir, "tx-stage-invalid") / "staged"]
     assert _tree(old_live) == old_tree
     assert (_tx(live_dir, "tx-stage-invalid") / "staged").is_dir()
@@ -252,10 +268,11 @@ def test_publish_rejects_stale_base_snapshot(
                 base_snapshot_id=stale_base,
             )
         )
-
-    assert exc.value.result.status == "blocked"
-    assert "stale base snapshot" in str(exc.value)
-    assert "base_snapshot_id" in str(exc.value)
+    _assert_publish_error(
+        exc,
+        status="blocked",
+        message_fragments=("stale base snapshot", "base_snapshot_id"),
+    )
     assert (old_live / "plan.md").read_text(encoding="utf-8") == "# human edit\n"
     assert (_tx(live_dir, "tx-stale") / "staged").is_dir()
     assert not (_tx(live_dir, "tx-stale") / "rollback").exists()

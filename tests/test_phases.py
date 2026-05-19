@@ -137,6 +137,22 @@ END_CONTINUOUS_REFACTORING_STATUS
 """
 
 
+def _assert_boundary_error(
+    exc: pytest.ExceptionInfo[ContinuousRefactorError],
+    *,
+    message_fragments: tuple[str, ...],
+    cause_type: type[BaseException] | None,
+) -> None:
+    error = exc.value
+    assert isinstance(error, ContinuousRefactorError)
+    for fragment in message_fragments:
+        assert fragment in str(error)
+    if cause_type is None:
+        assert error.__cause__ is None
+    else:
+        assert isinstance(error.__cause__, cause_type)
+
+
 def _patch_status_agent(
     monkeypatch: pytest.MonkeyPatch,
     stdout: str,
@@ -313,8 +329,11 @@ def test_check_ready_propagates_agent_cause(tmp_path: Path, monkeypatch: pytest.
             _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
             taste=_TASTE, agent="codex", model="fake", effort="low", timeout=None,
         )
-
-    assert exc_info.value.__cause__ is failure
+    _assert_boundary_error(
+        exc_info,
+        message_fragments=("agent command failed",),
+        cause_type=OSError,
+    )
 
 
 def test_check_ready_nonzero_exit_wraps_called_process_error(
@@ -332,9 +351,13 @@ def test_check_ready_nonzero_exit_wraps_called_process_error(
             taste=_TASTE, agent="codex", model="fake", effort="low", timeout=None,
         )
 
-    cause = exc_info.value.__cause__
-    assert isinstance(cause, subprocess.CalledProcessError)
-    assert cause.returncode == 7
+    _assert_boundary_error(
+        exc_info,
+        message_fragments=("Phase ready-check agent failed with exit code 7",),
+        cause_type=subprocess.CalledProcessError,
+    )
+    assert isinstance(exc_info.value.__cause__, subprocess.CalledProcessError)
+    assert exc_info.value.__cause__.returncode == 7
 
 
 def test_check_ready_no(
@@ -1296,7 +1319,11 @@ def test_execute_phase_unknown_phase_does_not_mark_manifest_complete(
             max_attempts=1,
         )
 
-    assert exc_info.value.__cause__ is None
+    _assert_boundary_error(
+        exc_info,
+        message_fragments=("not found in manifest",),
+        cause_type=None,
+    )
     assert manifest_path.read_text(encoding="utf-8") == original
 
 

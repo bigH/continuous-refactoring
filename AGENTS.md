@@ -24,7 +24,7 @@ Treat `AGENTS.md` as part of the codebase's invariants, not documentation. A dri
   [--live-migrations-dir DIR] [--in-repo-taste [PATH]] [--force]`
 - Taste: `continuous-refactoring taste [--global]
   [--interview|--upgrade|--refine]
-  [--with codex|claude --model <model> --effort <low|medium|high|xhigh>]
+  [--with codex|claude --model <model> --effort EFFORT]
   [--force]`
 - Run once: `continuous-refactoring run-once --with codex|claude
   --model <model> [common targeting/validation flags]`

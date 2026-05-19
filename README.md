@@ -46,6 +46,10 @@ uv pip install -e .
 
 That gives you the `continuous-refactoring` command.
 
+The CLI itself can be installed without `uv`, but the default validation command
+is `uv run pytest`. Pass `--validation-command pytest` or a project-specific
+script when the target repo does not use `uv`.
+
 Maintainers: see the [release checklist](https://github.com/bigH/continuous-refactoring/blob/main/docs/release.md).
 
 ## Fastest way to get one refactor
@@ -151,8 +155,9 @@ These flags are not mutually exclusive, but only the highest-priority populated 
 - `--scope-instruction "clean up the auth module"` — extra free-text scoping. If selected file patterns resolve nothing, this becomes the useful fallback context.
 
 If `--globs` or `--extensions` match no tracked files and there is no
-`--scope-instruction`, `run` completes successfully with zero refactor actions.
-`--paths` is literal input and is not filtered through `git ls-files`.
+`--scope-instruction`, `run` completes successfully with zero refactor actions;
+`run-once` falls back to a no-file `general refactoring` target. `--paths` is
+literal input and is not filtered through `git ls-files`.
 
 If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`,
 then `run` and `run-once` require `--scope-instruction`; the driver still
@@ -190,7 +195,7 @@ continuous-refactoring migration refine <slug-or-path> --file feedback.md --with
 - `--default-effort` — default effort for run calls. Defaults to `low`. Valid labels are `low`, `medium`, `high`, `xhigh`.
 - `--max-allowed-effort` — cap for target overrides and migration escalation. Defaults to `xhigh`.
 - `--repo-root PATH` — repository root; defaults to the current directory.
-- `--validation-command` — defaults to `uv run pytest`. Swap it for whatever keeps your repo honest.
+- `--validation-command` — defaults to `uv run pytest`. This is parsed with `shlex.split` and run without a shell, so simple commands like `pytest -q` work, but shell syntax such as `cmd && cmd`, pipes, redirects, or leading `VAR=value` assignments is not interpreted. Put compound validation in a script.
 - `--timeout` — per-agent-call timeout in seconds.
 - `--show-agent-logs` / `--show-command-logs` — mirror output to your terminal instead of just logging.
 - `--refactoring-prompt` — override the default refactoring prompt.
@@ -219,9 +224,9 @@ continuous-refactoring migration refine <slug-or-path> --file feedback.md --with
 Each run writes to `$TMPDIR/continuous-refactoring/<run-id>/`:
 
 - `summary.json` — rolling status, counts, per-attempt stats
-- `events.jsonl` — structured event log with call roles such as `classify`,
-  `planning.<step>`, `phase.ready-check`, `phase.execute`, and
-  `phase.validation`
+- `events.jsonl` — structured event log with call roles such as
+  `scope-expansion`, `classify`, `planning.<step>`, `planning.publish`,
+  `phase.ready-check`, `phase.execute`, and `phase.validation`
 - `run.log` — human-readable log
 - `attempt-NNN/[retry-NN/]refactor/` — per-attempt agent + test stdout/stderr
 - `baseline/initial/` — baseline validation stdout/stderr before work starts

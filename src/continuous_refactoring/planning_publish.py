@@ -5,6 +5,7 @@ import json
 import os
 import shutil
 import stat
+import subprocess
 import uuid
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -520,11 +521,17 @@ def _dirty_live_migration_paths(repo_root: Path, live_dir: Path) -> tuple[str, .
         check=False,
     )
     if result.returncode != 0:
+        process_error = subprocess.CalledProcessError(
+            result.returncode,
+            result.args,
+            output=result.stdout,
+            stderr=result.stderr,
+        )
         raise ContinuousRefactorError(
             "Could not inspect live migration git status.\n"
             f"stdout:\n{result.stdout}\n"
             f"stderr:\n{result.stderr}"
-        )
+        ) from process_error
     return tuple(
         line[3:] if len(line) > 3 else line
         for line in result.stdout.splitlines()

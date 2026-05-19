@@ -103,6 +103,74 @@ def _retry_context(record: DecisionRecord) -> str:
     return "\n".join(lines)
 
 
+def _decision_record(
+    *,
+    decision: str,
+    retry_recommendation: str,
+    target: str,
+    call_role: str,
+    phase_reached: str,
+    failure_kind: str,
+    summary: str,
+    next_retry_focus: str | None = None,
+    agent_last_message_path: Path | None = None,
+    agent_stdout_path: Path | None = None,
+    agent_stderr_path: Path | None = None,
+    tests_stdout_path: Path | None = None,
+    tests_stderr_path: Path | None = None,
+) -> DecisionRecord:
+    return DecisionRecord(
+        decision=decision,
+        retry_recommendation=retry_recommendation,
+        target=target,
+        call_role=call_role,
+        phase_reached=phase_reached,
+        failure_kind=failure_kind,
+        summary=summary,
+        next_retry_focus=next_retry_focus,
+        agent_last_message_path=agent_last_message_path,
+        agent_stdout_path=agent_stdout_path,
+        agent_stderr_path=agent_stderr_path,
+        tests_stdout_path=tests_stdout_path,
+        tests_stderr_path=tests_stderr_path,
+    )
+
+
+def _restore_and_retry(
+    *,
+    repo_root: Path,
+    head_before: str,
+    preserved_workspace: _PreservedWorkspaceTree | None,
+    target: str,
+    call_role: str,
+    phase_reached: str,
+    failure_kind: str,
+    summary: str,
+    next_retry_focus: str | None,
+    agent_last_message_path: Path | None,
+    agent_stdout_path: Path | None,
+    agent_stderr_path: Path | None,
+    tests_stdout_path: Path | None = None,
+    tests_stderr_path: Path | None = None,
+) -> DecisionRecord:
+    _reset_to_source_baseline(repo_root, head_before, preserved_workspace)
+    return _decision_record(
+        decision="retry",
+        retry_recommendation="same-target",
+        target=target,
+        call_role=call_role,
+        phase_reached=phase_reached,
+        failure_kind=failure_kind,
+        summary=summary,
+        next_retry_focus=next_retry_focus,
+        agent_last_message_path=agent_last_message_path,
+        agent_stdout_path=agent_stdout_path,
+        agent_stderr_path=agent_stderr_path,
+        tests_stdout_path=tests_stdout_path,
+        tests_stderr_path=tests_stderr_path,
+    )
+
+
 def _finalize_commit(
     repo_root: Path,
     head_before: str,
@@ -194,7 +262,6 @@ def _run_refactor_attempt(
             summary=str(error),
             effort=effort_metadata,
         )
-        _reset_to_source_baseline(repo_root, head_before, preserved_workspace)
         agent_status = read_status(
             agent,
             last_message_path=last_message_path,
@@ -205,9 +272,10 @@ def _run_refactor_attempt(
             fallback=sanitize_text(str(error), repo_root) or str(error),
             repo_root=repo_root,
         )
-        return DecisionRecord(
-            decision="retry",
-            retry_recommendation="same-target",
+        return _restore_and_retry(
+            repo_root=repo_root,
+            head_before=head_before,
+            preserved_workspace=preserved_workspace,
             target=target.description,
             call_role=call_role,
             phase_reached=resolved_phase_reached(agent_status, phase_reached),
@@ -241,10 +309,10 @@ def _run_refactor_attempt(
             summary=summary,
             effort=effort_metadata,
         )
-        _reset_to_source_baseline(repo_root, head_before, preserved_workspace)
-        return DecisionRecord(
-            decision="retry",
-            retry_recommendation="same-target",
+        return _restore_and_retry(
+            repo_root=repo_root,
+            head_before=head_before,
+            preserved_workspace=preserved_workspace,
             target=target.description,
             call_role=call_role,
             phase_reached=resolved_phase_reached(agent_status, phase_reached),
@@ -293,15 +361,15 @@ def _run_refactor_attempt(
             level="WARN",
             summary=str(error),
         )
-        _reset_to_source_baseline(repo_root, head_before, preserved_workspace)
         summary, focus = status_summary(
             agent_status,
             fallback=sanitize_text(str(error), repo_root) or str(error),
             repo_root=repo_root,
         )
-        return DecisionRecord(
-            decision="retry",
-            retry_recommendation="same-target",
+        return _restore_and_retry(
+            repo_root=repo_root,
+            head_before=head_before,
+            preserved_workspace=preserved_workspace,
             target=target.description,
             call_role=validation_role,
             phase_reached=resolved_phase_reached(agent_status, phase_reached),
@@ -332,10 +400,10 @@ def _run_refactor_attempt(
             returncode=validation_result.returncode,
             summary=summary,
         )
-        _reset_to_source_baseline(repo_root, head_before, preserved_workspace)
-        return DecisionRecord(
-            decision="retry",
-            retry_recommendation="same-target",
+        return _restore_and_retry(
+            repo_root=repo_root,
+            head_before=head_before,
+            preserved_workspace=preserved_workspace,
             target=target.description,
             call_role=validation_role,
             phase_reached=resolved_phase_reached(agent_status, phase_reached),
@@ -371,7 +439,7 @@ def _run_refactor_attempt(
             agent_status.retry_recommendation
             or default_retry_recommendation(decision)
         )
-        return DecisionRecord(
+        return _decision_record(
             decision=decision,
             retry_recommendation=retry_recommendation,
             target=target.description,
@@ -408,7 +476,7 @@ def _run_refactor_attempt(
         phase="refactor",
     )
 
-    return DecisionRecord(
+    return _decision_record(
         decision="commit",
         retry_recommendation="none",
         target=target.description,

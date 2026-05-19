@@ -86,15 +86,11 @@ def test_xdg_data_home_falls_back(
 # Manifest
 # ---------------------------------------------------------------------------
 
-def test_load_manifest_empty(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_manifest_empty() -> None:
     assert load_manifest() == {}
 
 
-def test_load_manifest_rejects_non_object_payload(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_manifest_rejects_non_object_payload(tmp_path: Path) -> None:
 
     manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
@@ -104,9 +100,7 @@ def test_load_manifest_rejects_non_object_payload(
         load_manifest()
 
 
-def test_load_config_version_rejects_non_object_payload(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_config_version_rejects_non_object_payload(tmp_path: Path) -> None:
     manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
     manifest.write_text("[]", encoding="utf-8")
@@ -236,9 +230,7 @@ def test_load_taste_wraps_global_read_fault(
     assert exc_info.value.__cause__ is io_error
 
 
-def test_load_manifest_rejects_non_mapping_projects(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_manifest_rejects_non_mapping_projects(tmp_path: Path) -> None:
 
     manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
@@ -248,9 +240,7 @@ def test_load_manifest_rejects_non_mapping_projects(
         load_manifest()
 
 
-def test_load_manifest_rejects_non_mapping_project_entry(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_load_manifest_rejects_non_mapping_project_entry(tmp_path: Path) -> None:
 
     manifest = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
     manifest.parent.mkdir(parents=True, exist_ok=True)
@@ -743,11 +733,7 @@ def test_entry_roundtrip_without_live_migrations_dir(
     assert loaded[entry.uuid].repo_taste_path is None
 
 
-def test_legacy_manifest_without_live_migrations_dir(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    import json
-
+def test_legacy_manifest_without_live_migrations_dir(tmp_path: Path) -> None:
     mpath = tmp_path / "xdg" / "continuous-refactoring" / "manifest.json"
     mpath.parent.mkdir(parents=True, exist_ok=True)
     uid = str(uuid.uuid4())

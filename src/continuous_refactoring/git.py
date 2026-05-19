@@ -89,7 +89,7 @@ def repo_change_count(repo_root: Path) -> int:
 
 
 def repo_has_changes(repo_root: Path) -> bool:
-    return repo_change_count(repo_root) > 0
+    return bool(workspace_status_lines(repo_root))
 
 
 def current_branch(repo_root: Path) -> str:

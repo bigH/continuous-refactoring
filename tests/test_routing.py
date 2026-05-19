@@ -11,6 +11,7 @@ from continuous_refactoring.artifacts import (
     RunArtifacts,
     create_run_artifacts,
 )
+from continuous_refactoring.log_mirroring import LogMirroring
 from continuous_refactoring.routing import classify_target
 from continuous_refactoring.targeting import Target
 
@@ -128,6 +129,61 @@ def test_classify_needs_plan(
     )
 
 
+def test_classify_target_passes_log_mirroring_to_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_tmpdir(tmp_path, monkeypatch)
+    captured: list[bool] = []
+
+    def fake_agent(**kwargs: object) -> CommandCapture:
+        captured.append(bool(kwargs["mirror_to_terminal"]))
+        Path(str(kwargs["stdout_path"])).write_text("", encoding="utf-8")
+        Path(str(kwargs["stderr_path"])).write_text("", encoding="utf-8")
+        return _fake_capture("decision: cohesive-cleanup\n", tmp_path=tmp_path)
+
+    monkeypatch.setattr("continuous_refactoring.routing.maybe_run_agent", fake_agent)
+
+    assert classify_target(
+        _target(),
+        _TASTE,
+        tmp_path,
+        _make_artifacts(tmp_path),
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        log_mirroring=LogMirroring(agent=True),
+    ) == "cohesive-cleanup"
+    assert captured == [True]
+
+
+def test_classify_target_defaults_quiet(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_tmpdir(tmp_path, monkeypatch)
+    captured: list[bool] = []
+
+    def fake_agent(**kwargs: object) -> CommandCapture:
+        captured.append(bool(kwargs["mirror_to_terminal"]))
+        Path(str(kwargs["stdout_path"])).write_text("", encoding="utf-8")
+        Path(str(kwargs["stderr_path"])).write_text("", encoding="utf-8")
+        return _fake_capture("decision: cohesive-cleanup\n", tmp_path=tmp_path)
+
+    monkeypatch.setattr("continuous_refactoring.routing.maybe_run_agent", fake_agent)
+
+    classify_target(
+        _target(),
+        _TASTE,
+        tmp_path,
+        _make_artifacts(tmp_path),
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+    )
+    assert captured == [False]
+
+
 def test_classify_case_insensitive(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -222,6 +278,40 @@ def test_classify_nonzero_exit_raises(
             "decision: cohesive-cleanup\n",
             returncode=1,
         )
+
+
+def test_classify_nonzero_exit_logs_failed_call(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _prepare_tmpdir(tmp_path, monkeypatch)
+    artifacts = _make_artifacts(tmp_path)
+
+    with pytest.raises(ContinuousRefactorError, match="exit code 1"):
+        _run_with_fake_agent(
+            tmp_path,
+            monkeypatch,
+            "decision: cohesive-cleanup\n",
+            returncode=1,
+            artifacts=artifacts,
+        )
+
+    event = _call_finished_events(artifacts)[-1]
+    timestamp = event.pop("timestamp")
+
+    assert isinstance(timestamp, str)
+    assert event == {
+        "attempt": 1,
+        "call_role": "classify",
+        "call_status": "failed",
+        "event": "call_finished",
+        "level": "WARN",
+        "message": "call failed: classify \u2014 Clean up auth module",
+        "phase_reached": "classify",
+        "retry": 1,
+        "returncode": 1,
+        "summary": "codex exited with code 1",
+        "target": "Clean up auth module",
+    }
 
 
 def test_classify_preserves_wrapped_agent_failure(

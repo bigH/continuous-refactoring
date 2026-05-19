@@ -4,9 +4,10 @@ import os
 import random
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     import argparse
@@ -50,7 +51,7 @@ from continuous_refactoring.effort import (
     EffortBudget,
     EffortResolution,
     resolve_effort_budget,
-    resolve_requested_effort,
+    resolve_target_effort_budget,
 )
 from continuous_refactoring.failure_report import effective_record, persist_decision
 from continuous_refactoring.git import (
@@ -60,6 +61,7 @@ from continuous_refactoring.git import (
     revert_to,
     run_command,
 )
+from continuous_refactoring.log_mirroring import LogMirroring
 from continuous_refactoring.migrations import (
     phase_file_reference,
     resolve_current_phase,
@@ -82,18 +84,29 @@ import continuous_refactoring.routing_pipeline as routing_pipeline
 from continuous_refactoring.targeting import Target, parse_paths_arg, resolve_targets
 
 
+_RunSourceKind = Literal["finite", "pool", "group", "ambient", "empty"]
+
+
+@dataclass(frozen=True)
+class _RunSource:
+    kind: _RunSourceKind
+    targets: tuple[Target, ...] = ()
+
+
 def run_baseline_checks(
     test_command: str,
     repo_root: Path,
     *,
     stdout_path: Path,
     stderr_path: Path,
+    log_mirroring: LogMirroring = LogMirroring(),
 ) -> tuple[bool, str]:
     result = run_tests(
         test_command,
         repo_root,
         stdout_path=stdout_path,
         stderr_path=stderr_path,
+        mirror_to_terminal=log_mirroring.command,
     )
     if result.returncode == 0:
         return True, ""
@@ -125,27 +138,10 @@ def _effort_budget_from_args(args: argparse.Namespace) -> EffortBudget:
     return resolve_effort_budget(default_effort, max_allowed_effort)
 
 
-def _target_effort_budget(
-    budget: EffortBudget,
-    target: Target,
-) -> tuple[EffortBudget, EffortResolution]:
-    has_override = target.effort_override is not None
-    resolution = resolve_requested_effort(
-        budget,
-        target.effort_override,
-        source="target-override" if has_override else "default",
-        reason=(
-            "target effort override capped by run budget"
-            if has_override
-            else "run default effort"
-        ),
-    )
-    return (
-        EffortBudget(
-            default_effort=resolution.effective_effort,
-            max_allowed_effort=budget.max_allowed_effort,
-        ),
-        resolution,
+def _log_mirroring_from_args(args: argparse.Namespace) -> LogMirroring:
+    return LogMirroring(
+        agent=bool(getattr(args, "show_agent_logs", False)),
+        command=bool(getattr(args, "show_command_logs", False)),
     )
 
 
@@ -226,6 +222,35 @@ def _resolve_targets_from_args(
     )
 
 
+def _has_selector(args: argparse.Namespace) -> bool:
+    return bool(args.targets or args.globs or args.extensions or args.paths)
+
+
+def _build_run_source(
+    args: argparse.Namespace,
+    repo_root: Path,
+) -> tuple[_RunSource, bool]:
+    if not _has_selector(args):
+        return _RunSource("ambient"), False
+
+    targets = _resolve_targets_from_args(args, repo_root)
+    if args.targets:
+        random.shuffle(targets)
+        return _RunSource("finite", tuple(targets)), False
+
+    if targets:
+        source_kind: _RunSourceKind = "group" if args.paths else "pool"
+        return _RunSource(source_kind, tuple(targets)), False
+
+    if args.scope_instruction and (args.globs or args.extensions or args.paths):
+        return (
+            _RunSource("group", (_build_target_fallback(args.scope_instruction),)),
+            True,
+        )
+
+    return _RunSource("empty"), False
+
+
 def _action_limit(
     args: argparse.Namespace,
     targets: list[Target],
@@ -237,8 +262,54 @@ def _action_limit(
     return args.max_refactors
 
 
+def _require_run_loop_action_limit(args: argparse.Namespace) -> None:
+    if args.max_refactors is None and not args.targets:
+        raise ContinuousRefactorError("--max-refactors required when no --targets")
+
+
 def _has_action_budget(actions_completed: int, action_limit: int | None) -> bool:
     return action_limit is None or actions_completed < action_limit
+
+
+def _has_available_source_target(source: _RunSource, source_index: int) -> bool:
+    if source.kind == "finite":
+        return source_index < len(source.targets)
+    return source.kind in {"pool", "group", "ambient"}
+
+
+def _has_more_actions(
+    source: _RunSource,
+    source_index: int,
+    actions_completed: int,
+    action_limit: int | None,
+) -> bool:
+    return _has_action_budget(
+        actions_completed,
+        action_limit,
+    ) and _has_available_source_target(source, source_index)
+
+
+def _select_source_target(
+    source: _RunSource,
+    source_index: int,
+    args: argparse.Namespace,
+    repo_root: Path,
+) -> tuple[Target, int]:
+    if source.kind == "finite":
+        return source.targets[source_index], source_index + 1
+    if source.kind == "pool":
+        return random.choice(source.targets), source_index
+    if source.kind == "group":
+        return source.targets[0], source_index
+
+    if source.kind != "ambient":
+        raise ContinuousRefactorError("no source target is available")
+
+    targets = _resolve_targets_from_args(args, repo_root)
+    target = random.choice(targets) if targets else _build_target_fallback(
+        args.scope_instruction
+    )
+    return target, source_index
 
 
 def _action_banner(action_index: int, action_limit: int | None) -> str:
@@ -248,9 +319,31 @@ def _action_banner(action_index: int, action_limit: int | None) -> str:
 
 
 def _print_migration_probe(live_dir: Path, effort_budget: EffortBudget) -> None:
+    preflight = migration_tick._first_unloadable_visible_manifest(live_dir)
+    if preflight is not None:
+        migration_dir, _findings = preflight
+        print(f"Examining migration: migration/{migration_dir.name}")
+        return
+
+    now = datetime.now(timezone.utc)
+    planning_candidates = migration_tick.enumerate_eligible_planning_manifests(
+        live_dir,
+        now,
+    )
+    if planning_candidates:
+        if len(planning_candidates) > 1:
+            print(
+                f"Examining planning migrations: "
+                f"{len(planning_candidates)} eligible"
+            )
+            return
+        manifest, _manifest_path = planning_candidates[0]
+        print(f"Examining planning migration: migration/{manifest.name}")
+        return
+
     candidates = migration_tick.enumerate_eligible_manifests(
         live_dir,
-        datetime.now(timezone.utc),
+        now,
         effort_budget,
     )
     if not candidates:
@@ -268,6 +361,7 @@ def _print_migration_probe(live_dir: Path, effort_budget: EffortBudget) -> None:
 class _MigrationProbeArtifacts:
     def __init__(self, artifacts: RunArtifacts, action_index: int) -> None:
         self._artifacts = artifacts
+        self.run_id = artifacts.run_id
         self.root = artifacts.root / "migration-probes" / f"action-{action_index:03d}"
 
     def attempt_dir(self, attempt: int, retry: int = 1) -> Path:
@@ -367,6 +461,7 @@ def _sleep_between_actions(
 def run_once(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
     timeout = args.timeout or 900
+    log_mirroring = _log_mirroring_from_args(args)
     base_effort_budget = _effort_budget_from_args(args)
     max_attempts_effective = _effective_max_attempts(
         getattr(args, "max_attempts", None)
@@ -382,9 +477,9 @@ def run_once(args: argparse.Namespace) -> int:
 
     base_prompt = _resolve_base_prompt(args)
     model = target.model_override or args.model
-    target_effort_budget, effort_resolution = _target_effort_budget(
+    target_effort_budget, effort_resolution = resolve_target_effort_budget(
         base_effort_budget,
-        target,
+        target.effort_override,
     )
     effort = target_effort_budget.default_effort
 
@@ -417,6 +512,7 @@ def run_once(args: argparse.Namespace) -> int:
             repo_root,
             stdout_path=artifacts.baseline_dir("initial") / "tests.stdout.log",
             stderr_path=artifacts.baseline_dir("initial") / "tests.stderr.log",
+            log_mirroring=log_mirroring,
         )
         if not baseline_ok:
             final_status = "baseline_failed"
@@ -444,12 +540,22 @@ def run_once(args: argparse.Namespace) -> int:
             max_attempts=max_attempts_effective,
             attempt=1,
             finalize_commit=_finalize_commit,
+            log_mirroring=log_mirroring,
         )
         target = route_result.target
         if route_result.outcome == "commit":
             final_status = "completed"
             return 0
         if route_result.outcome in {"abandon", "blocked"}:
+            if route_result.decision_record is not None:
+                persist_decision(
+                    repo_root,
+                    artifacts,
+                    attempt=1,
+                    retry=route_result.decision_record.retry_used,
+                    validation_command=args.validation_command,
+                    record=route_result.decision_record,
+                )
             final_status = "migration_failed"
             raise ContinuousRefactorError(
                 route_result.decision_record.summary
@@ -490,7 +596,7 @@ def run_once(args: argparse.Namespace) -> int:
                 stdout_path=attempt_dir / "agent.stdout.log",
                 stderr_path=attempt_dir / "agent.stderr.log",
                 last_message_path=last_message_path,
-                mirror_to_terminal=args.show_agent_logs,
+                mirror_to_terminal=log_mirroring.agent,
                 timeout=timeout,
             )
         except ContinuousRefactorError as error:
@@ -538,7 +644,7 @@ def run_once(args: argparse.Namespace) -> int:
             repo_root,
             stdout_path=attempt_dir / "tests.stdout.log",
             stderr_path=attempt_dir / "tests.stderr.log",
-            mirror_to_terminal=args.show_command_logs,
+            mirror_to_terminal=log_mirroring.command,
         )
 
         if validation_result.returncode != 0:
@@ -597,7 +703,9 @@ def run_once(args: argparse.Namespace) -> int:
 
 def run_loop(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
+    _require_run_loop_action_limit(args)
     timeout = args.timeout or 1800
+    log_mirroring = _log_mirroring_from_args(args)
     sleep_seconds = getattr(args, "sleep", 0.0)
     max_consecutive = args.max_consecutive_failures
     base_effort_budget = _effort_budget_from_args(args)
@@ -606,14 +714,8 @@ def run_loop(args: argparse.Namespace) -> int:
     )
     taste = _load_taste_safe(repo_root)
 
-    targets = _resolve_targets_from_args(args, repo_root)
-    random.shuffle(targets)
-
-    fell_back_to_scope = False
-    if not targets:
-        targets = [_build_target_fallback(args.scope_instruction)]
-        fell_back_to_scope = bool(args.extensions or args.globs or args.paths)
-    action_limit = _action_limit(args, targets)
+    source, fell_back_to_scope = _build_run_source(args, repo_root)
+    action_limit = _action_limit(args, list(source.targets))
     live_dir = _resolve_live_migrations_dir(repo_root)
 
     base_prompt = _resolve_base_prompt(args)
@@ -657,6 +759,7 @@ def run_loop(args: argparse.Namespace) -> int:
             repo_root,
             stdout_path=artifacts.baseline_dir("initial") / "tests.stdout.log",
             stderr_path=artifacts.baseline_dir("initial") / "tests.stderr.log",
+            log_mirroring=log_mirroring,
         )
         if not baseline_ok:
             final_status = "baseline_failed"
@@ -664,16 +767,68 @@ def run_loop(args: argparse.Namespace) -> int:
                 f"Baseline validation failed\n{baseline_context}"
             )
 
-        while (
-            source_index < len(targets)
-            and _has_action_budget(actions_completed, action_limit)
-        ):
+        while _has_more_actions(source, source_index, actions_completed, action_limit):
             action_index = actions_completed + 1
             print(_action_banner(action_index, action_limit))
 
             if live_dir is not None:
                 _print_migration_probe(live_dir, base_effort_budget)
                 migration_artifacts = _MigrationProbeArtifacts(artifacts, action_index)
+                planning_outcome, planning_record = migration_tick.try_planning_tick(
+                    live_dir,
+                    taste,
+                    repo_root,
+                    migration_artifacts,
+                    agent=args.agent,
+                    model=args.model,
+                    effort=base_effort_budget.default_effort,
+                    effort_budget=base_effort_budget,
+                    timeout=timeout,
+                    commit_message_prefix=args.commit_message_prefix,
+                    attempt=action_index,
+                    finalize_commit=_finalize_commit,
+                    log_mirroring=log_mirroring,
+                )
+
+                if planning_outcome in {"commit", "abandon", "blocked"}:
+                    artifacts.mark_attempt_started(action_index)
+                    if planning_record is not None:
+                        persist_decision(
+                            repo_root,
+                            artifacts,
+                            attempt=action_index,
+                            retry=planning_record.retry_used,
+                            validation_command=args.validation_command,
+                            record=planning_record,
+                        )
+                    actions_completed += 1
+                    if planning_outcome == "commit":
+                        consecutive_failures = 0
+                    else:
+                        if planning_record is not None:
+                            print(
+                                "Planning blocked: "
+                                f"{planning_record.target} — {planning_record.summary}"
+                            )
+                        consecutive_failures += 1
+                        if consecutive_failures >= max_consecutive:
+                            final_status = "max_consecutive_failures"
+                            raise ContinuousRefactorError(
+                                f"Stopping: {max_consecutive} consecutive failures"
+                            )
+                    _sleep_between_actions(
+                        sleep_seconds,
+                        artifacts=artifacts,
+                        action_index=action_index,
+                        has_more_actions=_has_more_actions(
+                            source,
+                            source_index,
+                            actions_completed,
+                            action_limit,
+                        ),
+                    )
+                    continue
+
                 migration_outcome, migration_record = migration_tick.try_migration_tick(
                     live_dir,
                     taste,
@@ -689,6 +844,7 @@ def run_loop(args: argparse.Namespace) -> int:
                     max_attempts=max_attempts_effective,
                     attempt=action_index,
                     finalize_commit=_finalize_commit,
+                    log_mirroring=log_mirroring,
                 )
 
                 if migration_outcome in {"commit", "abandon"}:
@@ -721,9 +877,11 @@ def run_loop(args: argparse.Namespace) -> int:
                         sleep_seconds,
                         artifacts=artifacts,
                         action_index=action_index,
-                        has_more_actions=(
-                            source_index < len(targets)
-                            and _has_action_budget(actions_completed, action_limit)
+                        has_more_actions=_has_more_actions(
+                            source,
+                            source_index,
+                            actions_completed,
+                            action_limit,
                         ),
                     )
                     continue
@@ -741,13 +899,17 @@ def run_loop(args: argparse.Namespace) -> int:
                         f"{migration_record.summary}"
                     )
 
-            target = targets[source_index]
-            source_index += 1
+            target, source_index = _select_source_target(
+                source,
+                source_index,
+                args,
+                repo_root,
+            )
             artifacts.mark_attempt_started(action_index)
             model = target.model_override or args.model
-            target_effort_budget, effort_resolution = _target_effort_budget(
+            target_effort_budget, effort_resolution = resolve_target_effort_budget(
                 base_effort_budget,
-                target,
+                target.effort_override,
             )
             effort = target_effort_budget.default_effort
             effort_metadata = effort_resolution.event_fields()
@@ -777,6 +939,7 @@ def run_loop(args: argparse.Namespace) -> int:
                 attempt=action_index,
                 finalize_commit=_finalize_commit,
                 check_migrations=False,
+                log_mirroring=log_mirroring,
             )
             target = route_result.target
             if route_result.outcome == "commit":
@@ -795,9 +958,11 @@ def run_loop(args: argparse.Namespace) -> int:
                     sleep_seconds,
                     artifacts=artifacts,
                     action_index=action_index,
-                    has_more_actions=(
-                        source_index < len(targets)
-                        and _has_action_budget(actions_completed, action_limit)
+                    has_more_actions=_has_more_actions(
+                        source,
+                        source_index,
+                        actions_completed,
+                        action_limit,
                     ),
                 )
                 continue
@@ -822,9 +987,11 @@ def run_loop(args: argparse.Namespace) -> int:
                     sleep_seconds,
                     artifacts=artifacts,
                     action_index=action_index,
-                    has_more_actions=(
-                        source_index < len(targets)
-                        and _has_action_budget(actions_completed, action_limit)
+                    has_more_actions=_has_more_actions(
+                        source,
+                        source_index,
+                        actions_completed,
+                        action_limit,
                     ),
                 )
                 continue
@@ -861,8 +1028,8 @@ def run_loop(args: argparse.Namespace) -> int:
                     prompt=prompt,
                     timeout=timeout,
                     validation_command=args.validation_command,
-                    show_agent_logs=args.show_agent_logs,
-                    show_command_logs=args.show_command_logs,
+                    show_agent_logs=log_mirroring.agent,
+                    show_command_logs=log_mirroring.command,
                     commit_message_prefix=args.commit_message_prefix,
                     preserved_workspace=preserved_workspace,
                 )
@@ -914,9 +1081,11 @@ def run_loop(args: argparse.Namespace) -> int:
                 sleep_seconds,
                 artifacts=artifacts,
                 action_index=action_index,
-                has_more_actions=(
-                    source_index < len(targets)
-                    and _has_action_budget(actions_completed, action_limit)
+                has_more_actions=_has_more_actions(
+                    source,
+                    source_index,
+                    actions_completed,
+                    action_limit,
                 ),
             )
 
@@ -951,6 +1120,40 @@ def _focus_eligible_manifests(
     ]
 
 
+def _focus_eligible_planning_manifests(
+    live_dir: Path, now: datetime,
+) -> list[tuple[MigrationManifest, Path]]:
+    return [
+        pair for pair in migration_tick.enumerate_eligible_planning_manifests(
+            live_dir,
+            now,
+        )
+        if not pair[0].awaiting_human_review
+    ]
+
+
+def _unskipped_planning_candidates(
+    candidates: list[tuple[MigrationManifest, Path]],
+    skipped_names: set[str],
+) -> list[tuple[MigrationManifest, Path]]:
+    if not skipped_names:
+        return candidates
+    return [
+        pair for pair in candidates
+        if pair[0].name not in skipped_names
+    ]
+
+
+def _eligible_planning_path_labels(
+    repo_root: Path,
+    candidates: list[tuple[MigrationManifest, Path]],
+) -> tuple[str, ...]:
+    return tuple(
+        _repo_relative_path(repo_root, manifest_path.parent)
+        for _manifest, manifest_path in candidates
+    )
+
+
 def _eligible_phase_path_labels(
     repo_root: Path,
     candidates: list[tuple[MigrationManifest, Path]],
@@ -977,6 +1180,7 @@ def _repo_relative_path(repo_root: Path, path: Path) -> str:
 def run_migrations_focused_loop(args: argparse.Namespace) -> int:
     repo_root = args.repo_root.resolve()
     timeout = args.timeout or 1800
+    log_mirroring = _log_mirroring_from_args(args)
     sleep_seconds = getattr(args, "sleep", 0.0)
     max_consecutive = args.max_consecutive_failures
     base_effort_budget = _effort_budget_from_args(args)
@@ -1019,6 +1223,7 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
     error_message: str | None = None
     consecutive_failures = 0
     iteration = 0
+    skipped_planning_names: set[str] = set()
 
     try:
         require_clean_worktree(repo_root)
@@ -1028,6 +1233,7 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
             repo_root,
             stdout_path=artifacts.baseline_dir("initial") / "tests.stdout.log",
             stderr_path=artifacts.baseline_dir("initial") / "tests.stderr.log",
+            log_mirroring=log_mirroring,
         )
         if not baseline_ok:
             final_status = "baseline_failed"
@@ -1037,8 +1243,26 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
 
         while True:
             now = datetime.now(timezone.utc)
-            eligible = _focus_eligible_manifests(live_dir, now, base_effort_budget)
-            if not eligible:
+            preflight = migration_tick._first_unloadable_visible_manifest(live_dir)
+            all_planning_eligible = (
+                []
+                if preflight is not None
+                else _focus_eligible_planning_manifests(live_dir, now)
+            )
+            planning_eligible = _unskipped_planning_candidates(
+                all_planning_eligible,
+                skipped_planning_names,
+            )
+            phase_eligible = (
+                []
+                if preflight is not None or planning_eligible
+                else _focus_eligible_manifests(live_dir, now, base_effort_budget)
+            )
+            if all_planning_eligible and not planning_eligible and not phase_eligible:
+                skipped_planning_names.clear()
+                planning_eligible = all_planning_eligible
+
+            if not planning_eligible and not phase_eligible and preflight is None:
                 print(
                     "Focused migrations loop: nothing eligible — "
                     "every migration is done or blocked."
@@ -1053,25 +1277,56 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
 
             iteration += 1
             artifacts.mark_attempt_started(iteration)
-            names = ", ".join(_eligible_phase_path_labels(repo_root, eligible))
+            names = (
+                f"{preflight[0].name}/manifest.json"
+                if preflight is not None
+                else (
+                    ", ".join(
+                        _eligible_planning_path_labels(repo_root, planning_eligible)
+                    )
+                    if planning_eligible
+                    else ", ".join(
+                        _eligible_phase_path_labels(repo_root, phase_eligible)
+                    )
+                )
+            )
             print(f"\n── Migration tick {iteration} (eligible: {names}) ──")
 
-            outcome, record = migration_tick.try_migration_tick(
-                live_dir,
-                taste,
-                repo_root,
-                artifacts,
-                agent=args.agent,
-                model=args.model,
-                effort=base_effort_budget.default_effort,
-                effort_budget=base_effort_budget,
-                timeout=timeout,
-                commit_message_prefix=args.commit_message_prefix,
-                validation_command=args.validation_command,
-                max_attempts=max_attempts_effective,
-                attempt=iteration,
-                finalize_commit=_finalize_commit,
-            )
+            if planning_eligible:
+                outcome, record = migration_tick.try_planning_tick(
+                    live_dir,
+                    taste,
+                    repo_root,
+                    artifacts,
+                    agent=args.agent,
+                    model=args.model,
+                    effort=base_effort_budget.default_effort,
+                    effort_budget=base_effort_budget,
+                    timeout=timeout,
+                    commit_message_prefix=args.commit_message_prefix,
+                    attempt=iteration,
+                    finalize_commit=_finalize_commit,
+                    skip_migration_names=skipped_planning_names,
+                    log_mirroring=log_mirroring,
+                )
+            else:
+                outcome, record = migration_tick.try_migration_tick(
+                    live_dir,
+                    taste,
+                    repo_root,
+                    artifacts,
+                    agent=args.agent,
+                    model=args.model,
+                    effort=base_effort_budget.default_effort,
+                    effort_budget=base_effort_budget,
+                    timeout=timeout,
+                    commit_message_prefix=args.commit_message_prefix,
+                    validation_command=args.validation_command,
+                    max_attempts=max_attempts_effective,
+                    attempt=iteration,
+                    finalize_commit=_finalize_commit,
+                    log_mirroring=log_mirroring,
+                )
 
             if record is not None and outcome != "not-routed":
                 persist_decision(
@@ -1085,7 +1340,16 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
 
             if outcome == "commit":
                 consecutive_failures = 0
+                if record is not None and record.call_role.startswith("planning."):
+                    skipped_planning_names.discard(record.target)
             elif outcome in {"abandon", "blocked"}:
+                if (
+                    outcome == "abandon"
+                    and record is not None
+                    and record.call_role.startswith("planning.")
+                    and record.retry_recommendation == "new-target"
+                ):
+                    skipped_planning_names.add(record.target)
                 consecutive_failures += 1
                 if consecutive_failures >= max_consecutive:
                     final_status = "max_consecutive_failures"
@@ -1093,6 +1357,16 @@ def run_migrations_focused_loop(args: argparse.Namespace) -> int:
                         f"Stopping: {max_consecutive} consecutive failures"
                     )
             else:
+                if skipped_planning_names:
+                    artifacts.log(
+                        "INFO",
+                        "Focused migration alternatives deferred; retrying skipped "
+                        "planning migrations.",
+                        event="focus_retry_skipped_planning",
+                        skipped_planning_targets=sorted(skipped_planning_names),
+                    )
+                    skipped_planning_names.clear()
+                    continue
                 message = (
                     "Migration tick deferred all eligible migrations; "
                     "terminating until a wake-up window or manifest change."

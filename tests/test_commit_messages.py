@@ -58,3 +58,13 @@ def test_commit_rationale_ignores_placeholder_summary() -> None:
     )
 
     assert rationale == "agent stdout explained the cleanup"
+
+
+def test_commit_rationale_sanitizes_fallback_text() -> None:
+    rationale = commit_rationale(
+        None,
+        fallback="Touched /repo/src/continuous_refactoring/decisions.py",
+        repo_root=Path("/repo"),
+    )
+
+    assert rationale == "Touched <repo>/src/continuous_refactoring/decisions.py"

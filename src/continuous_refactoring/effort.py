@@ -21,6 +21,7 @@ __all__ = [
     "resolve_effort_budget",
     "resolve_phase_effort",
     "resolve_requested_effort",
+    "resolve_target_effort_budget",
 ]
 
 EffortTier = Literal["low", "medium", "high", "xhigh"]
@@ -90,6 +91,24 @@ def cap_effort(requested: EffortTier, max_allowed: EffortTier) -> EffortTier:
     return requested
 
 
+def _build_resolution(
+    *,
+    source: str,
+    requested_effort: EffortTier,
+    max_allowed_effort: EffortTier,
+    reason: str,
+) -> EffortResolution:
+    effective_effort = cap_effort(requested_effort, max_allowed_effort)
+    return EffortResolution(
+        source=source,
+        requested_effort=requested_effort,
+        effective_effort=effective_effort,
+        max_allowed_effort=max_allowed_effort,
+        capped=effective_effort != requested_effort,
+        reason=reason,
+    )
+
+
 def resolve_effort_budget(
     default_effort: object | None,
     max_allowed_effort: object | None,
@@ -123,14 +142,35 @@ def resolve_requested_effort(
         if requested_effort is None
         else require_effort_tier(requested_effort, field=f"{source} effort")
     )
-    effective = cap_effort(requested, budget.max_allowed_effort)
-    return EffortResolution(
+    return _build_resolution(
         source=source,
         requested_effort=requested,
-        effective_effort=effective,
         max_allowed_effort=budget.max_allowed_effort,
-        capped=effective != requested,
         reason=reason,
+    )
+
+
+def resolve_target_effort_budget(
+    budget: EffortBudget,
+    requested_effort: object | None,
+) -> tuple[EffortBudget, EffortResolution]:
+    has_override = requested_effort is not None
+    resolution = resolve_requested_effort(
+        budget,
+        requested_effort,
+        source="target-override" if has_override else "default",
+        reason=(
+            "target effort override capped by run budget"
+            if has_override
+            else "run default effort"
+        ),
+    )
+    return (
+        EffortBudget(
+            default_effort=resolution.effective_effort,
+            max_allowed_effort=budget.max_allowed_effort,
+        ),
+        resolution,
     )
 
 
@@ -146,13 +186,10 @@ def resolve_phase_effort(
         else max_effort(budget.default_effort, required_effort)
     )
     source = "phase-required" if required_effort is not None else "default"
-    effective = cap_effort(requested, budget.max_allowed_effort)
-    return EffortResolution(
+    return _build_resolution(
         source=source,
         requested_effort=requested,
-        effective_effort=effective,
         max_allowed_effort=budget.max_allowed_effort,
-        capped=effective != requested,
         reason=reason or (
             "phase required effort" if required_effort is not None else "default effort"
         ),

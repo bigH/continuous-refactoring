@@ -12,13 +12,14 @@ import continuous_refactoring.loop
 import continuous_refactoring.refactor_attempts
 from continuous_refactoring.cli import build_parser
 from continuous_refactoring.artifacts import CommandCapture, ContinuousRefactorError
-from continuous_refactoring.decisions import DecisionRecord
+from continuous_refactoring.decisions import DecisionRecord, RouteOutcome
 from continuous_refactoring.migrations import (
     MigrationManifest,
     PhaseSpec,
     load_manifest,
     save_manifest,
 )
+from continuous_refactoring.planning_state import load_planning_state, planning_state_path
 
 from conftest import (
     failing_tests,
@@ -28,6 +29,7 @@ from conftest import (
     noop_tests,
     read_single_run_events as _read_single_run_events,
     read_single_run_summary as _read_single_run_summary,
+    write_targets_file,
 )
 
 
@@ -56,19 +58,13 @@ def _write_live_manifest(
     )
     migration_dir = live_dir / name
     migration_dir.mkdir(parents=True, exist_ok=True)
+    if status in ("ready", "in-progress"):
+        (migration_dir / "plan.md").write_text("# Plan\n", encoding="utf-8")
+    for phase in manifest.phases:
+        phase_path = migration_dir / phase.file
+        phase_path.parent.mkdir(parents=True, exist_ok=True)
+        phase_path.write_text(f"# {phase.name}\n", encoding="utf-8")
     save_manifest(manifest, migration_dir / "manifest.json")
-
-
-def _write_targets_file(tmp_path: Path, count: int) -> Path:
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        "\n".join(
-            json.dumps({"description": f"target-{index}", "files": [f"file{index}.py"]})
-            for index in range(count)
-        ),
-        encoding="utf-8",
-    )
-    return targets_file
 
 
 def _migration_record(
@@ -91,6 +87,50 @@ def _migration_record(
         phase_reached="phase.execute" if decision == "commit" else "phase.ready-check",
         failure_kind=failure_kind,
         summary=summary,
+    )
+
+
+def _planning_record(decision: Literal["commit", "abandon", "blocked"]) -> DecisionRecord:
+    retry_recommendation = {
+        "commit": "none",
+        "abandon": "new-target",
+        "blocked": "human-review",
+    }[decision]
+    return DecisionRecord(
+        decision=decision,
+        retry_recommendation=retry_recommendation,
+        target="queued-planning",
+        call_role="planning.approaches" if decision == "commit" else "planning.state",
+        phase_reached=(
+            "planning.approaches" if decision == "commit" else "planning.state"
+        ),
+        failure_kind="none" if decision == "commit" else "planning-state-missing",
+        summary="planning result",
+    )
+
+
+def _commit_fake_planning_step(
+    repo_root: Path,
+    artifacts: object,
+    *,
+    attempt: int,
+    finalize_commit: object,
+) -> None:
+    (repo_root / f"planning-step-{attempt}.txt").write_text("planned\n", encoding="utf-8")
+    head_before = continuous_refactoring.run_command(
+        ["git", "rev-parse", "HEAD"],
+        cwd=repo_root,
+    ).stdout.strip()
+    finalize_commit(  # type: ignore[operator]
+        repo_root,
+        head_before,
+        "continuous refactor: planning/queued-planning/approaches\n"
+        "\n"
+        "Why:\n"
+        "planning result",
+        artifacts=artifacts,
+        attempt=attempt,
+        phase="planning",
     )
 
 
@@ -164,6 +204,41 @@ def test_run_parser_accepts_sleep_flag() -> None:
     )
 
     assert args.sleep == 0.25
+
+
+def test_run_loop_show_command_logs_mirrors_baseline_validation(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mirrored: list[bool] = []
+
+    def fail_validation(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        mirrored.append(bool(kwargs["mirror_to_terminal"]))
+        return failing_tests(
+            test_command,
+            repo_root,
+            stdout_path,
+            stderr_path,
+            **kwargs,
+        )
+
+    _patch_run_loop_tests(monkeypatch, fail_validation)
+
+    args = make_run_loop_args(
+        run_loop_env,
+        max_refactors=1,
+        show_command_logs=True,
+    )
+    with pytest.raises(ContinuousRefactorError, match="Baseline validation failed"):
+        continuous_refactoring.run_loop(args)
+
+    assert mirrored == [True]
 
 
 def test_run_observed_command_wraps_launch_failures_with_cause(
@@ -375,14 +450,7 @@ def test_run_sleeps_only_between_targets(
     sleep_calls: list[float] = []
     monkeypatch.setattr("continuous_refactoring.loop.time.sleep", sleep_calls.append)
 
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        "\n".join(
-            json.dumps({"description": f"target-{index}", "files": [f"file{index}.py"]})
-            for index in range(3)
-        ),
-        encoding="utf-8",
-    )
+    targets_file = write_targets_file(tmp_path, count=3)
 
     args = make_run_loop_args(
         repo_root,
@@ -472,14 +540,7 @@ def test_run_does_not_sleep_between_retries(
     sleep_calls: list[float] = []
     monkeypatch.setattr("continuous_refactoring.loop.time.sleep", sleep_calls.append)
 
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        "\n".join(
-            json.dumps({"description": f"target-{index}", "files": [f"file{index}.py"]})
-            for index in range(2)
-        ),
-        encoding="utf-8",
-    )
+    targets_file = write_targets_file(tmp_path, count=2)
 
     args = make_run_loop_args(
         repo_root,
@@ -551,15 +612,21 @@ def test_run_routed_planning_reports_and_records_commit(
         lambda *_args, **_kwargs: "needs-plan",
     )
 
-    class StubPlanningOutcome:
-        status = "ready"
+    class StubPlanningStepResult:
+        status = "published"
+        step = "approaches"
+        next_step = "pick-best"
+        terminal_outcome = None
         reason = "stub"
 
-    def fake_run_planning(*_args: object, **_kwargs: object) -> StubPlanningOutcome:
+    def fake_run_next_planning_step(*_args: object, **_kwargs: object) -> StubPlanningStepResult:
         (repo_root / "plan.txt").write_text("plan\n", encoding="utf-8")
-        return StubPlanningOutcome()
+        return StubPlanningStepResult()
 
-    monkeypatch.setattr("continuous_refactoring.routing_pipeline.run_planning", fake_run_planning)
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.run_next_planning_step",
+        fake_run_next_planning_step,
+    )
 
     exit_code = continuous_refactoring.run_loop(make_run_loop_args(repo_root, max_refactors=1))
 
@@ -567,7 +634,7 @@ def test_run_routed_planning_reports_and_records_commit(
     output = capsys.readouterr().out
     assert "Classification: needs-plan — random files" in output
     assert "Committed: " in output
-    assert "Planning: queued for execution — stub" in output
+    assert "Planning: approaches accepted — stub" in output
 
     log = continuous_refactoring.run_command(
         ["git", "log", "--oneline"], cwd=repo_root,
@@ -592,15 +659,25 @@ def test_run_routed_planning_surfaces_human_review_requirement(
         lambda *_args, **_kwargs: "needs-plan",
     )
 
-    class StubPlanningOutcome:
+    class StubTerminalOutcome:
         status = "awaiting_human_review"
         reason = "phase 2 has a decision gap"
 
-    def fake_run_planning(*_args: object, **_kwargs: object) -> StubPlanningOutcome:
-        (repo_root / "plan.txt").write_text("plan\n", encoding="utf-8")
-        return StubPlanningOutcome()
+    class StubPlanningStepResult:
+        status = "published"
+        step = "final-review"
+        next_step = "terminal-ready-awaiting-human"
+        terminal_outcome = StubTerminalOutcome()
+        reason = "phase 2 has a decision gap"
 
-    monkeypatch.setattr("continuous_refactoring.routing_pipeline.run_planning", fake_run_planning)
+    def fake_run_next_planning_step(*_args: object, **_kwargs: object) -> StubPlanningStepResult:
+        (repo_root / "plan.txt").write_text("plan\n", encoding="utf-8")
+        return StubPlanningStepResult()
+
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.run_next_planning_step",
+        fake_run_next_planning_step,
+    )
 
     exit_code = continuous_refactoring.run_loop(make_run_loop_args(repo_root, max_refactors=1))
 
@@ -615,6 +692,284 @@ def test_run_routed_planning_surfaces_human_review_requirement(
     assert attempts[0]["commit_phase"] == "planning"
 
 
+def test_e2e_source_target_creates_only_first_planning_step(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    live_dir = repo_root / ".migrations"
+    live_dir.mkdir()
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        lambda *_args, **_kwargs: "needs-plan",
+    )
+
+    stage_labels: list[str] = []
+
+    def one_step_planning_agent(**kwargs: object) -> CommandCapture:
+        stdout_path = Path(str(kwargs["stdout_path"]))
+        stderr_path = Path(str(kwargs["stderr_path"]))
+        stage_label = stdout_path.parent.name
+        stage_labels.append(stage_label)
+        assert stage_label == "approaches"
+        migration_dir = _prompt_migration_dir(
+            str(kwargs["prompt"]),
+            Path(str(kwargs["repo_root"])),
+        )
+        (migration_dir / "approaches").mkdir(parents=True, exist_ok=True)
+        (migration_dir / "approaches" / "incremental.md").write_text(
+            "# Incremental\n",
+            encoding="utf-8",
+        )
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text("Generated approaches.\n", encoding="utf-8")
+        stderr_path.parent.mkdir(parents=True, exist_ok=True)
+        stderr_path.write_text("", encoding="utf-8")
+        return CommandCapture(
+            command=("fake",),
+            returncode=0,
+            stdout="Generated approaches.\n",
+            stderr="",
+            stdout_path=stdout_path,
+            stderr_path=stderr_path,
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.planning.maybe_run_agent",
+        one_step_planning_agent,
+    )
+
+    exit_code = continuous_refactoring.run_loop(
+        make_run_loop_args(repo_root, max_refactors=1)
+    )
+
+    migration_dirs = [
+        path for path in live_dir.iterdir()
+        if path.is_dir() and not path.name.startswith("__")
+    ]
+    assert exit_code == 0
+    assert stage_labels == ["approaches"]
+    assert len(migration_dirs) == 1
+    mig_root = migration_dirs[0]
+    manifest = load_manifest(mig_root / "manifest.json")
+    state = load_planning_state(repo_root, planning_state_path(mig_root))
+    assert manifest.status == "planning"
+    assert state.next_step == "pick-best"
+    assert (mig_root / "approaches" / "incremental.md").is_file()
+    assert not (mig_root / "plan.md").exists()
+
+
+def test_e2e_source_target_then_focused_run_resumes_planning_to_ready(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    live_dir = repo_root / ".migrations"
+    live_dir.mkdir()
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        lambda *_args, **_kwargs: "needs-plan",
+    )
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+
+    first_stage_labels: list[str] = []
+
+    def first_step_agent(**kwargs: object) -> CommandCapture:
+        stage_label = Path(str(kwargs["stdout_path"])).parent.name
+        first_stage_labels.append(stage_label)
+        assert stage_label == "approaches"
+        migration_dir = _prompt_migration_dir(
+            str(kwargs["prompt"]),
+            Path(str(kwargs["repo_root"])),
+        )
+        (migration_dir / "approaches").mkdir(parents=True, exist_ok=True)
+        (migration_dir / "approaches" / "incremental.md").write_text(
+            "# Incremental\n",
+            encoding="utf-8",
+        )
+        return _planning_agent_result(kwargs, "Generated approaches.\n")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.planning.maybe_run_agent",
+        first_step_agent,
+    )
+
+    assert continuous_refactoring.run_loop(
+        make_run_loop_args(repo_root, max_refactors=1)
+    ) == 0
+
+    migration_dirs = [
+        path for path in live_dir.iterdir()
+        if path.is_dir() and not path.name.startswith("__")
+    ]
+    assert first_stage_labels == ["approaches"]
+    assert len(migration_dirs) == 1
+    mig_root = migration_dirs[0]
+    assert load_planning_state(repo_root, planning_state_path(mig_root)).next_step == "pick-best"
+
+    focused_stage_labels: list[str] = []
+
+    def focused_planning_agent(**kwargs: object) -> CommandCapture:
+        stage_label = Path(str(kwargs["stdout_path"])).parent.name
+        focused_stage_labels.append(stage_label)
+        migration_dir = _prompt_migration_dir(
+            str(kwargs["prompt"]),
+            Path(str(kwargs["repo_root"])),
+        )
+        if stage_label == "pick-best":
+            return _planning_agent_result(kwargs, "Chose incremental.\n")
+        if stage_label == "expand":
+            (migration_dir / "plan.md").write_text("# Plan\n", encoding="utf-8")
+            (migration_dir / "phase-0-setup.md").write_text(
+                "## Precondition\n\nalways\n\n"
+                "## Definition of Done\n\nSetup is complete.\n",
+                encoding="utf-8",
+            )
+            return _planning_agent_result(kwargs, "Expanded plan.\n")
+        if stage_label == "review":
+            return _planning_agent_result(kwargs, "no findings\n")
+        if stage_label == "final-review":
+            return _planning_agent_result(
+                kwargs,
+                "final-decision: approve-auto - ready\n",
+            )
+        raise AssertionError(f"unexpected planning stage {stage_label}")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.planning.maybe_run_agent",
+        focused_planning_agent,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.check_phase_ready",
+        lambda *_args, **_kwargs: ("no", "wait for operator"),
+    )
+
+    assert continuous_refactoring.run_migrations_focused_loop(
+        make_run_loop_args(repo_root, focus_on_live_migrations=True)
+    ) == 0
+
+    manifest = load_manifest(mig_root / "manifest.json")
+    state = load_planning_state(repo_root, planning_state_path(mig_root))
+    assert focused_stage_labels == ["pick-best", "expand", "review", "final-review"]
+    assert manifest.status == "ready"
+    assert state.next_step == "terminal-ready"
+    assert (mig_root / "plan.md").is_file()
+    assert (mig_root / "phase-0-setup.md").is_file()
+    assert (mig_root / ".planning" / "stages" / "pick-best.stdout.md").is_file()
+    assert (mig_root / ".planning" / "stages" / "final-review.stdout.md").is_file()
+
+
+def test_run_source_target_planning_continues_to_action_budget(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    live_dir = repo_root / ".migrations"
+    live_dir.mkdir()
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        lambda *_args, **_kwargs: "needs-plan",
+    )
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+
+    stage_labels: list[str] = []
+
+    def planning_agent(**kwargs: object) -> CommandCapture:
+        stage_label = Path(str(kwargs["stdout_path"])).parent.name
+        stage_labels.append(stage_label)
+        migration_dir = _prompt_migration_dir(
+            str(kwargs["prompt"]),
+            Path(str(kwargs["repo_root"])),
+        )
+        if stage_label == "approaches":
+            (migration_dir / "approaches").mkdir(parents=True, exist_ok=True)
+            (migration_dir / "approaches" / "incremental.md").write_text(
+                "# Incremental\n",
+                encoding="utf-8",
+            )
+            return _planning_agent_result(kwargs, "Generated approaches.\n")
+        if stage_label == "pick-best":
+            return _planning_agent_result(kwargs, "Chose incremental.\n")
+        if stage_label == "expand":
+            (migration_dir / "plan.md").write_text("# Plan\n", encoding="utf-8")
+            (migration_dir / "phase-0-setup.md").write_text(
+                "## Precondition\n\nalways\n\n"
+                "## Definition of Done\n\nSetup is complete.\n",
+                encoding="utf-8",
+            )
+            return _planning_agent_result(kwargs, "Expanded plan.\n")
+        if stage_label == "review":
+            return _planning_agent_result(kwargs, "no findings\n")
+        if stage_label == "final-review":
+            return _planning_agent_result(
+                kwargs,
+                "final-decision: approve-auto - ready\n",
+            )
+        raise AssertionError(f"unexpected planning stage {stage_label}")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.planning.maybe_run_agent",
+        planning_agent,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.check_phase_ready",
+        lambda *_args, **_kwargs: ("no", "wait for operator"),
+    )
+
+    exit_code = continuous_refactoring.run_loop(
+        make_run_loop_args(repo_root, max_refactors=5)
+    )
+
+    summary = _read_single_run_summary(repo_root)
+    assert exit_code == 0
+    assert stage_labels == [
+        "approaches",
+        "pick-best",
+        "expand",
+        "review",
+        "final-review",
+    ]
+    assert summary["counts"]["attempts_started"] == 5
+    assert summary["counts"]["commits_created"] == 5
+
+
+def _prompt_migration_dir(prompt: str, repo_root: Path) -> Path:
+    for line in prompt.splitlines():
+        if line.startswith("Migration directory:"):
+            path = Path(line.split(":", 1)[1].strip())
+            return path if path.is_absolute() else repo_root / path
+    raise AssertionError("Migration directory missing from prompt")
+
+
+def _planning_agent_result(kwargs: dict[str, object], stdout: str) -> CommandCapture:
+    stdout_path = Path(str(kwargs["stdout_path"]))
+    stderr_path = Path(str(kwargs["stderr_path"]))
+    stdout_path.parent.mkdir(parents=True, exist_ok=True)
+    stdout_path.write_text(stdout, encoding="utf-8")
+    stderr_path.parent.mkdir(parents=True, exist_ok=True)
+    stderr_path.write_text("", encoding="utf-8")
+    return CommandCapture(
+        command=("fake",),
+        returncode=0,
+        stdout=stdout,
+        stderr="",
+        stdout_path=stdout_path,
+        stderr_path=stderr_path,
+    )
+
+
 def test_run_stops_after_max_consecutive_failures(
     run_loop_env: Path,
     tmp_path: Path,
@@ -627,14 +982,7 @@ def test_run_stops_after_max_consecutive_failures(
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
     # Write a JSONL with 5 targets so we have enough attempts
-    targets_file = tmp_path / "targets.jsonl"
-    lines = []
-    for i in range(5):
-        lines.append(json.dumps({
-            "description": f"target-{i}",
-            "files": [f"file{i}.py"],
-        }))
-    targets_file.write_text("\n".join(lines), encoding="utf-8")
+    targets_file = write_targets_file(tmp_path, count=5)
 
     args = make_run_loop_args(
         repo_root,
@@ -671,14 +1019,7 @@ def test_run_resets_consecutive_counter_on_success(
     _patch_run_loop_agent(monkeypatch, alternating_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    targets_file = tmp_path / "targets.jsonl"
-    lines = []
-    for i in range(6):
-        lines.append(json.dumps({
-            "description": f"target-{i}",
-            "files": [f"file{i}.py"],
-        }))
-    targets_file.write_text("\n".join(lines), encoding="utf-8")
+    targets_file = write_targets_file(tmp_path, count=6)
 
     args = make_run_loop_args(
         repo_root,
@@ -709,14 +1050,15 @@ def test_run_target_overrides(
     _patch_run_loop_agent(monkeypatch, model_capturing_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        json.dumps({
-            "description": "override target",
-            "files": ["foo.py"],
-            "model-override": "special-model",
-        }),
-        encoding="utf-8",
+    targets_file = write_targets_file(
+        tmp_path,
+        targets=[
+            {
+                "description": "override target",
+                "files": ["foo.py"],
+                "model-override": "special-model",
+            }
+        ],
     )
 
     args = make_run_loop_args(
@@ -746,14 +1088,15 @@ def test_run_target_effort_override_caps_to_max_and_is_audited(
     _patch_run_loop_agent(monkeypatch, effort_capturing_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        json.dumps({
-            "description": "override effort target",
-            "files": ["foo.py"],
-            "effort-override": "xhigh",
-        }),
-        encoding="utf-8",
+    targets_file = write_targets_file(
+        tmp_path,
+        targets=[
+            {
+                "description": "override effort target",
+                "files": ["foo.py"],
+                "effort-override": "xhigh",
+            }
+        ],
     )
 
     args = make_run_loop_args(
@@ -983,7 +1326,7 @@ def test_run_extensions_targeting(
     assert len(matched) == 1, matched
 
 
-def test_run_extensions_expands_to_multiple_targets(
+def test_run_extensions_reuses_resolved_target_pool(
     run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -999,15 +1342,16 @@ def test_run_extensions_expands_to_multiple_targets(
     _patch_run_loop_agent(monkeypatch, capture_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    args = make_run_loop_args(repo_root, extensions=".py", max_refactors=99)
+    args = make_run_loop_args(repo_root, extensions=".py", max_refactors=5)
     continuous_refactoring.run_loop(args)
 
-    assert len(captured_prompts) == len(tracked)
-    hit = {f for f in tracked if any(f in p for p in captured_prompts)}
-    assert hit == set(tracked)
+    assert len(captured_prompts) == 5
+    for prompt in captured_prompts:
+        matched = [f for f in tracked if f in prompt]
+        assert len(matched) == 1, matched
 
 
-def test_run_globs_targeting(
+def test_run_globs_reuses_resolved_target_pool(
     run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1023,14 +1367,14 @@ def test_run_globs_targeting(
     _patch_run_loop_agent(monkeypatch, capture_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    args = make_run_loop_args(repo_root, globs="src/**/*.py", max_refactors=1)
+    args = make_run_loop_args(repo_root, globs="src/**/*.py", max_refactors=4)
     continuous_refactoring.run_loop(args)
 
-    assert len(captured_prompts) == 1
-    prompt = captured_prompts[0]
-    matched = [f for f in ("src/foo.py", "src/bar.py") if f in prompt]
-    assert len(matched) == 1, matched
-    assert "tests/test_foo.py" not in prompt
+    assert len(captured_prompts) == 4
+    for prompt in captured_prompts:
+        matched = [f for f in ("src/foo.py", "src/bar.py") if f in prompt]
+        assert len(matched) == 1, matched
+        assert "tests/test_foo.py" not in prompt
 
 
 def test_run_paths_targeting_keeps_non_empty_target_list_shape(
@@ -1052,15 +1396,15 @@ def test_run_paths_targeting_keeps_non_empty_target_list_shape(
     args = make_run_loop_args(
         repo_root,
         paths="src/foo.py: src/bar.py",
-        max_refactors=1,
+        max_refactors=3,
     )
     continuous_refactoring.run_loop(args)
 
-    assert len(captured_prompts) == 1
-    prompt = captured_prompts[0]
-    assert "## Target Files" in prompt
-    assert "- src/foo.py" in prompt
-    assert "- src/bar.py" in prompt
+    assert len(captured_prompts) == 3
+    for prompt in captured_prompts:
+        assert "## Target Files" in prompt
+        assert "- src/foo.py" in prompt
+        assert "- src/bar.py" in prompt
 
 
 def test_run_targets_precedence_over_other_selectors(
@@ -1080,10 +1424,9 @@ def test_run_targets_precedence_over_other_selectors(
     _patch_run_loop_agent(monkeypatch, capture_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        json.dumps({"description": "jsonl wins", "files": ["from-targets.py"]}) + "\n",
-        encoding="utf-8",
+    targets_file = write_targets_file(
+        tmp_path,
+        targets=[{"description": "jsonl wins", "files": ["from-targets.py"]}],
     )
 
     args = make_run_loop_args(
@@ -1222,15 +1565,27 @@ def test_cli_run_requires_max_refactors_for_scope_only_run(
     assert calls == []
 
 
+def test_run_loop_requires_max_refactors_without_targets(
+    run_loop_env: Path,
+) -> None:
+    args = make_run_loop_args(
+        run_loop_env,
+        extensions=".py",
+        max_refactors=None,
+    )
+
+    with pytest.raises(ContinuousRefactorError, match="--max-refactors required"):
+        continuous_refactoring.run_loop(args)
+
+
 def test_cli_run_allows_targets_without_max_refactors(
     run_loop_env: Path,
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        json.dumps({"description": "target", "files": ["file.py"]}),
-        encoding="utf-8",
+    targets_file = write_targets_file(
+        tmp_path,
+        targets=[{"description": "target", "files": ["file.py"]}],
     )
     args = make_run_loop_args(
         run_loop_env,
@@ -1252,6 +1607,35 @@ def test_cli_run_allows_targets_without_max_refactors(
         _handle_run(args)
     assert exc_info.value.code == 0
     assert calls == [args]
+
+
+def test_run_loop_allows_finite_targets_without_max_refactors(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    targets_file = write_targets_file(tmp_path, count=2)
+    agent_calls = 0
+
+    def counting_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        return noop_agent(**kwargs)
+
+    _patch_run_loop_agent(monkeypatch, counting_agent)
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+
+    args = make_run_loop_args(
+        repo_root,
+        targets=targets_file,
+        max_refactors=None,
+        scope_instruction=None,
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert agent_calls == 2
 
 
 def test_cli_run_once_validates_targeting_before_dispatch(
@@ -1304,16 +1688,24 @@ def test_cli_loop_errors_exit_one_with_cause(
     assert capsys.readouterr().err == "loop broke\n"
 
 
-def test_run_random_fallback_targeting(
+def test_run_ambient_source_resamples_random_files(
     run_loop_env: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     repo_root = run_loop_env
-    # Add a Python file so there's something to find
-    (repo_root / "hello.py").write_text("print('hi')\n", encoding="utf-8")
-    continuous_refactoring.run_command(["git", "add", "hello.py"], cwd=repo_root)
+    (repo_root / "first.py").write_text("print('first')\n", encoding="utf-8")
+    (repo_root / "second.py").write_text("print('second')\n", encoding="utf-8")
     continuous_refactoring.run_command(
-        ["git", "commit", "-m", "add hello"], cwd=repo_root,
+        ["git", "add", "first.py", "second.py"],
+        cwd=repo_root,
+    )
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "add py files"], cwd=repo_root,
+    )
+    selections = iter((("first.py",), ("second.py",)))
+    monkeypatch.setattr(
+        "continuous_refactoring.targeting.select_random_files",
+        lambda _repo_root: next(selections),
     )
 
     captured_prompts: list[str] = []
@@ -1325,14 +1717,46 @@ def test_run_random_fallback_targeting(
     _patch_run_loop_agent(monkeypatch, capture_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    args = make_run_loop_args(repo_root, max_refactors=1, scope_instruction=None)
-    # With no targeting args and no scope_instruction, resolve_targets falls back to
-    # random files from git ls-files
+    args = make_run_loop_args(repo_root, max_refactors=2, scope_instruction=None)
     continuous_refactoring.run_loop(args)
 
-    assert len(captured_prompts) == 1
-    # Should have target files from the random selection
-    assert "## Target Files" in captured_prompts[0]
+    assert len(captured_prompts) == 2
+    assert "- first.py" in captured_prompts[0]
+    assert "- second.py" in captured_prompts[1]
+
+
+def test_run_ambient_source_reuses_scope_fallback_without_tracked_files(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    continuous_refactoring.run_command(["git", "rm", "README.md"], cwd=repo_root)
+    continuous_refactoring.run_command(
+        ["git", "commit", "-m", "remove tracked files"], cwd=repo_root,
+    )
+
+    captured_prompts: list[str] = []
+
+    def capture_agent(**kwargs: object) -> CommandCapture:
+        captured_prompts.append(str(kwargs.get("prompt", "")))
+        return noop_agent(**kwargs)
+
+    _patch_run_loop_agent(monkeypatch, capture_agent)
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+
+    args = make_run_loop_args(
+        repo_root,
+        max_refactors=2,
+        scope_instruction="clean the project shape",
+    )
+    continuous_refactoring.run_loop(args)
+
+    assert len(captured_prompts) == 2
+    assert all("## Target Files" not in prompt for prompt in captured_prompts)
+    assert all(
+        "## Scope\nclean the project shape" in prompt
+        for prompt in captured_prompts
+    )
 
 
 def test_run_ctrl_c_discards_and_summarizes(
@@ -1387,6 +1811,36 @@ def test_cli_errors_when_no_targets_and_no_scope_instruction(
     assert exc_info.value.code == 2
 
 
+def test_run_no_match_selector_without_scope_completes_zero_actions(
+    run_loop_env: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    agent_calls = 0
+
+    def counting_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        return noop_agent(**kwargs)
+
+    _patch_run_loop_agent(monkeypatch, counting_agent)
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+
+    args = make_run_loop_args(
+        repo_root,
+        extensions=".missing",
+        max_refactors=3,
+        scope_instruction=None,
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    summary = _read_single_run_summary(repo_root)
+    assert exit_code == 0
+    assert agent_calls == 0
+    assert summary["final_status"] == "completed"
+    assert summary["counts"]["attempts_started"] == 0
+
+
 def test_run_samples_targets_when_max_refactors_lt_total(
     run_loop_env: Path,
     tmp_path: Path,
@@ -1404,14 +1858,7 @@ def test_run_samples_targets_when_max_refactors_lt_total(
     _patch_run_loop_agent(monkeypatch, counting_agent)
     _patch_run_loop_tests(monkeypatch, noop_tests)
 
-    targets_file = tmp_path / "targets.jsonl"
-    lines = []
-    for i in range(10):
-        lines.append(json.dumps({
-            "description": f"target-{i}",
-            "files": [f"file{i}.py"],
-        }))
-    targets_file.write_text("\n".join(lines), encoding="utf-8")
+    targets_file = write_targets_file(tmp_path, count=10)
 
     args = make_run_loop_args(
         repo_root,
@@ -1423,6 +1870,35 @@ def test_run_samples_targets_when_max_refactors_lt_total(
 
     assert exit_code == 0
     assert agent_calls == 3
+
+
+def test_run_targets_jsonl_remains_finite_with_larger_action_budget(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    targets_file = write_targets_file(tmp_path, count=2)
+    agent_calls = 0
+
+    def counting_agent(**kwargs: object) -> CommandCapture:
+        nonlocal agent_calls
+        agent_calls += 1
+        return noop_agent(**kwargs)
+
+    _patch_run_loop_agent(monkeypatch, counting_agent)
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+
+    args = make_run_loop_args(
+        repo_root,
+        targets=targets_file,
+        max_refactors=5,
+        scope_instruction=None,
+    )
+    exit_code = continuous_refactoring.run_loop(args)
+
+    assert exit_code == 0
+    assert agent_calls == 2
 
 
 def _count_validation_calls(stdout_path: object) -> bool:
@@ -1677,15 +2153,12 @@ def test_run_records_retry_and_abandon_transitions_with_failure_docs(
     _patch_run_loop_agent(monkeypatch, touching_agent)
     _patch_run_loop_tests(monkeypatch, fail_twice_then_pass)
 
-    targets_file = tmp_path / "targets.jsonl"
-    targets_file.write_text(
-        "\n".join(
-            [
-                json.dumps({"description": "target-a", "files": ["a.py"]}),
-                json.dumps({"description": "target-b", "files": ["b.py"]}),
-            ]
-        ),
-        encoding="utf-8",
+    targets_file = write_targets_file(
+        tmp_path,
+        targets=[
+            {"description": "target-a", "files": ["a.py"]},
+            {"description": "target-b", "files": ["b.py"]},
+        ],
     )
 
     args = make_run_loop_args(
@@ -1938,6 +2411,7 @@ def test_run_planning_failure_writes_reason_doc_and_logs_stage(
     reason_doc = snapshots[-1].read_text(encoding="utf-8")
     assert 'call_role: "planning.approaches"' in reason_doc
     assert 'decision: "abandon"' in reason_doc
+    assert 'agent_stdout: "attempt-001/planning/approaches/agent.stdout.log"' in reason_doc
 
 
 def test_run_migration_work_does_not_print_target_banner_first(
@@ -2005,7 +2479,7 @@ def test_run_non_runnable_migration_does_not_consume_max_refactors(
         ["git", "commit", "-m", "add live migration"],
         cwd=repo_root,
     )
-    targets_file = _write_targets_file(tmp_path, 2)
+    targets_file = write_targets_file(tmp_path, count=2)
     monkeypatch.setattr(
         "continuous_refactoring.loop._resolve_live_migrations_dir",
         lambda _repo_root: live_dir,
@@ -2101,7 +2575,7 @@ def test_run_preserves_non_runnable_migration_state_across_source_retry(
         ["git", "commit", "-m", "add live migration"],
         cwd=repo_root,
     )
-    targets_file = _write_targets_file(tmp_path, 2)
+    targets_file = write_targets_file(tmp_path, count=2)
     monkeypatch.setattr(
         "continuous_refactoring.loop._resolve_live_migrations_dir",
         lambda _repo_root: live_dir,
@@ -2199,7 +2673,7 @@ def test_run_runnable_migration_counts_as_one_action(
     live_dir = tmp_path / "live-migrations"
     live_dir.mkdir()
     _write_live_manifest(live_dir)
-    targets_file = _write_targets_file(tmp_path, 1)
+    targets_file = write_targets_file(tmp_path, count=1)
     monkeypatch.setattr(
         "continuous_refactoring.loop._resolve_live_migrations_dir",
         lambda _repo_root: live_dir,
@@ -2227,6 +2701,233 @@ def test_run_runnable_migration_counts_as_one_action(
     assert exit_code == 0
     assert summary["counts"]["attempts_started"] == 1
     assert summary["attempts"][0]["target"] == "queued-migration phase-0-cleanup.md (cleanup)"
+
+
+def test_run_loop_resumes_planning_before_source_target(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    live_dir = tmp_path / "live-migrations"
+    live_dir.mkdir()
+    targets_file = write_targets_file(tmp_path, count=1)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+    planning_calls = 0
+
+    def fake_planning_tick(
+        live_dir: Path,
+        taste: str,
+        repo_root: Path,
+        artifacts: object,
+        **kwargs: object,
+    ) -> tuple[RouteOutcome, DecisionRecord | None]:
+        nonlocal planning_calls
+        planning_calls += 1
+        _commit_fake_planning_step(
+            repo_root,
+            artifacts,
+            attempt=int(kwargs["attempt"]),
+            finalize_commit=kwargs["finalize_commit"],
+        )
+        return ("commit", _planning_record("commit"))
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_planning_tick",
+        fake_planning_tick,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_migration_tick",
+        lambda *_args, **_kwargs: pytest.fail("phase tick must wait for planning"),
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.route_and_run",
+        lambda *_args, **_kwargs: pytest.fail("source routing must wait for planning"),
+    )
+
+    exit_code = continuous_refactoring.run_loop(
+        make_run_loop_args(repo_root, targets=targets_file, max_refactors=1),
+    )
+
+    summary = _read_single_run_summary(repo_root)
+    assert exit_code == 0
+    assert planning_calls == 1
+    assert summary["counts"]["attempts_started"] == 1
+    assert summary["attempts"][0]["commit_phase"] == "planning"
+
+
+def test_run_loop_counts_completed_planning_as_action(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    live_dir = tmp_path / "live-migrations"
+    live_dir.mkdir()
+    targets_file = write_targets_file(tmp_path, count=2)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+    planning_calls = 0
+
+    def fake_planning_tick(
+        live_dir: Path,
+        taste: str,
+        repo_root: Path,
+        artifacts: object,
+        **kwargs: object,
+    ) -> tuple[RouteOutcome, DecisionRecord | None]:
+        nonlocal planning_calls
+        planning_calls += 1
+        if planning_calls > 1:
+            raise AssertionError("one action may publish only one planning step")
+        _commit_fake_planning_step(
+            repo_root,
+            artifacts,
+            attempt=int(kwargs["attempt"]),
+            finalize_commit=kwargs["finalize_commit"],
+        )
+        return ("commit", _planning_record("commit"))
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_planning_tick",
+        fake_planning_tick,
+    )
+
+    exit_code = continuous_refactoring.run_loop(
+        make_run_loop_args(repo_root, targets=targets_file, max_refactors=1),
+    )
+
+    summary = _read_single_run_summary(repo_root)
+    assert exit_code == 0
+    assert planning_calls == 1
+    assert summary["counts"]["attempts_started"] == 1
+    assert summary["attempts"][0]["commit_phase"] == "planning"
+
+
+def test_run_loop_counts_planning_before_reusable_source_action(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    live_dir = tmp_path / "live-migrations"
+    live_dir.mkdir()
+    _repo_with_py_files(repo_root)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+    planning_calls = 0
+    captured_targets: list[str] = []
+
+    def fake_planning_tick(
+        live_dir: Path,
+        taste: str,
+        repo_root: Path,
+        artifacts: object,
+        **kwargs: object,
+    ) -> tuple[RouteOutcome, DecisionRecord | None]:
+        nonlocal planning_calls
+        planning_calls += 1
+        if planning_calls == 1:
+            _commit_fake_planning_step(
+                repo_root,
+                artifacts,
+                attempt=int(kwargs["attempt"]),
+                finalize_commit=kwargs["finalize_commit"],
+            )
+            return ("commit", _planning_record("commit"))
+        return ("not-routed", None)
+
+    def no_migration_tick(
+        *_args: object,
+        **_kwargs: object,
+    ) -> tuple[RouteOutcome, DecisionRecord | None]:
+        return ("not-routed", None)
+
+    def capture_source_route(*args: object, **_kwargs: object) -> object:
+        target = args[0]
+        captured_targets.append(target.description)  # type: ignore[attr-defined]
+        return continuous_refactoring.routing_pipeline.RouteResult(
+            outcome="commit",
+            target=target,
+            decision_record=_migration_record(
+                "commit",
+                target=target.description,  # type: ignore[attr-defined]
+            ),
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_planning_tick",
+        fake_planning_tick,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_migration_tick",
+        no_migration_tick,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.route_and_run",
+        capture_source_route,
+    )
+
+    args = make_run_loop_args(repo_root, extensions=".py", max_refactors=2)
+    exit_code = continuous_refactoring.run_loop(args)
+
+    summary = _read_single_run_summary(repo_root)
+    assert exit_code == 0
+    assert planning_calls == 2
+    assert len(captured_targets) == 1
+    assert summary["counts"]["attempts_started"] == 2
+    assert summary["attempts"][0]["commit_phase"] == "planning"
+
+
+def test_run_loop_persists_planning_resume_failure_snapshot(
+    run_loop_env: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root = run_loop_env
+    live_dir = tmp_path / "live-migrations"
+    live_dir.mkdir()
+    targets_file = write_targets_file(tmp_path, count=1)
+    monkeypatch.setattr(
+        "continuous_refactoring.loop._resolve_live_migrations_dir",
+        lambda _repo_root: live_dir,
+    )
+    _patch_run_loop_tests(monkeypatch, noop_tests)
+    monkeypatch.setattr(
+        "continuous_refactoring.migration_tick.try_planning_tick",
+        lambda *_args, **_kwargs: ("blocked", _planning_record("blocked")),
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.route_and_run",
+        lambda *_args, **_kwargs: pytest.fail("blocked planning must not source-route"),
+    )
+
+    args = make_run_loop_args(
+        repo_root,
+        targets=targets_file,
+        max_refactors=1,
+        max_consecutive_failures=1,
+    )
+    with pytest.raises(ContinuousRefactorError, match="1 consecutive failures"):
+        continuous_refactoring.run_loop(args)
+
+    snapshots = sorted(
+        continuous_refactoring.config.failure_snapshots_dir(repo_root).glob("*.md")
+    )
+    assert snapshots
+    reason_doc = snapshots[-1].read_text(encoding="utf-8")
+    assert 'call_role: "planning.state"' in reason_doc
+    assert "planning-state-missing" in reason_doc
 
 
 def test_run_phase_ready_check_failure_logs_phase_ready_role(

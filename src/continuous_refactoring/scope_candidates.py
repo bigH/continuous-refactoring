@@ -5,6 +5,7 @@ import subprocess
 from collections import Counter, defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path, PurePosixPath
 from typing import TYPE_CHECKING, Literal
 
@@ -94,10 +95,14 @@ def _reference_aliases(path: str) -> tuple[str, ...]:
 def _text_mentions_alias(text: str, alias: str) -> bool:
     if not alias:
         return False
-    pattern = re.compile(
+    return _alias_pattern(alias).search(text) is not None
+
+
+@lru_cache(maxsize=4096)
+def _alias_pattern(alias: str) -> re.Pattern[str]:
+    return re.compile(
         rf"(?<!{_IDENTIFIER_BOUNDARY}){re.escape(alias)}(?!{_IDENTIFIER_BOUNDARY})"
     )
-    return pattern.search(text) is not None
 
 
 def _safe_read_text(path: Path) -> str:
@@ -357,20 +362,6 @@ def _rank_paths(
     return [path for _score, path in ranked]
 
 
-def _include_local(same_dir: bool, support_kinds: tuple[_SupportKind, ...]) -> bool:
-    has_pairing = "source-test-pairing" in support_kinds
-    has_non_cochange = any(kind != "git-cochange" for kind in support_kinds)
-    return has_pairing or (same_dir and has_non_cochange)
-
-
-def _include_cross(same_dir: bool, support_kinds: tuple[_SupportKind, ...]) -> bool:
-    return not (
-        same_dir
-        and support_kinds
-        and all(kind == "git-cochange" for kind in support_kinds)
-    )
-
-
 def build_scope_candidates(
     target: Target,
     repo_root: Path,
@@ -394,8 +385,23 @@ def build_scope_candidates(
     )
     candidates = [_build_seed_candidate(seed_file)]
 
+    def include_local(same_dir: bool, support_kinds: tuple[_SupportKind, ...]) -> bool:
+        return "source-test-pairing" in support_kinds or (
+            same_dir and any(kind != "git-cochange" for kind in support_kinds)
+        )
+
+    def include_cross(same_dir: bool, support_kinds: tuple[_SupportKind, ...]) -> bool:
+        return not (
+            same_dir
+            and support_kinds
+            and all(kind == "git-cochange" for kind in support_kinds)
+        )
+
     local_ranked = _rank_paths(
-        support.scores, support.support_kinds, seed_file, _include_local,
+        support.scores,
+        support.support_kinds,
+        seed_file,
+        include_local,
     )
     local_extras = tuple(local_ranked[: max_files - 1])
     if local_extras:
@@ -407,7 +413,10 @@ def build_scope_candidates(
         )
 
     cross_ranked = _rank_paths(
-        support.scores, support.support_kinds, seed_file, _include_cross,
+        support.scores,
+        support.support_kinds,
+        seed_file,
+        include_cross,
     )
     cross_extras = tuple(cross_ranked[: max_files - 1])
     if cross_extras:

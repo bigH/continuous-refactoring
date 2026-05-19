@@ -18,6 +18,16 @@ def test_selection_parser_accepts_valid_output() -> None:
     assert selection.reason == "paired test and helper"
 
 
+def test_selection_parser_accepts_hyphen_reason_separator() -> None:
+    selection = parse_scope_selection(
+        "selected-candidate: cross-cluster - shared validation surface\n",
+        _KINDS,
+    )
+
+    assert selection.kind == "cross-cluster"
+    assert selection.reason == "shared validation surface"
+
+
 def test_selection_parser_defaults_reason_to_kind_when_missing() -> None:
     selection = parse_scope_selection("selected-candidate: seed\n", _KINDS)
 
@@ -40,9 +50,27 @@ def test_selection_parser_rejects_empty_output() -> None:
         parse_scope_selection("   \n\n", _KINDS)
 
 
+def test_selection_parser_uses_last_valid_selection_line() -> None:
+    selection = parse_scope_selection(
+        "selected-candidate: seed\nnotes\nselected-candidate: local-cluster — paired test and helper\n",
+        _KINDS,
+    )
+
+    assert selection.kind == "local-cluster"
+    assert selection.reason == "paired test and helper"
+
+
 def test_selection_parser_rejects_kind_outside_available_candidates() -> None:
     with pytest.raises(ContinuousRefactorError, match="unavailable candidate"):
         parse_scope_selection(
             "selected-candidate: cross-cluster\n",
             ("seed", "local-cluster"),
+        )
+
+
+def test_selection_parser_rejects_duplicate_candidate_kinds() -> None:
+    with pytest.raises(ContinuousRefactorError, match="requires unique candidate kinds"):
+        parse_scope_selection(
+            "selected-candidate: local-cluster\n",
+            ("seed", "local-cluster", "local-cluster"),
         )

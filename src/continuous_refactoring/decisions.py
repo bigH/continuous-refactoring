@@ -36,6 +36,12 @@ _VALID_DECISIONS = frozenset((*get_args(RunnerDecision), None))
 _VALID_RETRY_RECOMMENDATIONS = frozenset(
     (*get_args(RetryRecommendation), None),
 )
+_DEFAULT_RETRY_RECOMMENDATIONS: dict[RunnerDecision, RetryRecommendation] = {
+    "commit": "none",
+    "retry": "same-target",
+    "abandon": "new-target",
+    "blocked": "human-review",
+}
 
 
 @dataclass(frozen=True)
@@ -67,13 +73,6 @@ class DecisionRecord:
     agent_stderr_path: Path | None = None
     tests_stdout_path: Path | None = None
     tests_stderr_path: Path | None = None
-
-
-def _status_path_text(path: Path | None) -> str | None:
-    if path is None or not path.exists():
-        return None
-    return path.read_text(encoding="utf-8")
-
 
 def parse_status_block(text: str | None) -> AgentStatus | None:
     if not text:
@@ -134,8 +133,8 @@ def read_status(
     last_message_path: Path | None,
     fallback_text: str | None,
 ) -> AgentStatus | None:
-    if agent == "codex":
-        status = parse_status_block(_status_path_text(last_message_path))
+    if agent == "codex" and last_message_path is not None and last_message_path.exists():
+        status = parse_status_block(last_message_path.read_text(encoding="utf-8"))
         if status is not None:
             return status
     return parse_status_block(fallback_text)
@@ -159,21 +158,23 @@ def sanitize_text(text: str | None, repo_root: Path) -> str | None:
     return " ".join(lines)[:240]
 
 
+def sanitized_text_or(text: str | None, repo_root: Path, fallback: str) -> str:
+    return sanitize_text(text, repo_root) or fallback
+
+
 def status_summary(
     status: AgentStatus | None,
     *,
     fallback: str,
     repo_root: Path,
 ) -> tuple[str, str | None]:
-    summary = sanitize_text(status.summary if status else None, repo_root) or fallback
+    summary = sanitized_text_or(status.summary if status else None, repo_root, fallback)
     focus = sanitize_text(status.next_retry_focus if status else None, repo_root)
     return summary, focus
 
 
 def resolved_phase_reached(status: AgentStatus | None, fallback: str) -> str:
-    if status is None:
-        return fallback
-    return status.phase_reached or fallback
+    return fallback if status is None else (status.phase_reached or fallback)
 
 
 def error_failure_kind(message: str) -> str:
@@ -188,10 +189,4 @@ def error_failure_kind(message: str) -> str:
 def default_retry_recommendation(
     decision: RunnerDecision,
 ) -> RetryRecommendation:
-    if decision == "retry":
-        return "same-target"
-    if decision == "abandon":
-        return "new-target"
-    if decision == "blocked":
-        return "human-review"
-    return "none"
+    return _DEFAULT_RETRY_RECOMMENDATIONS[decision]

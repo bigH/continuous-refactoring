@@ -2,7 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from continuous_refactoring.decisions import AgentStatus, sanitize_text
+from continuous_refactoring.decisions import (
+    AgentStatus,
+    sanitize_text,
+    sanitized_text_or,
+)
 
 __all__ = [
     "build_commit_message",
@@ -49,7 +53,7 @@ def commit_rationale(
         ):
             return summary
 
-    fallback_text = _present_text(sanitize_text(fallback, repo_root))
+    fallback_text = _present_text(sanitized_text_or(fallback, repo_root, fallback))
     if fallback_text is not None:
         return fallback_text
     return "Validated cleanup completed."

@@ -6,6 +6,7 @@ from types import SimpleNamespace
 
 import pytest
 
+import continuous_refactoring.routing_pipeline as routing_pipeline
 import continuous_refactoring.scope_expansion as scope_expansion
 from continuous_refactoring.artifacts import (
     CommandCapture,
@@ -13,9 +14,11 @@ from continuous_refactoring.artifacts import (
     RunArtifacts,
     create_run_artifacts,
 )
+from continuous_refactoring.log_mirroring import LogMirroring
 from continuous_refactoring.scope_candidates import ScopeCandidate, ScopeCandidateKind
 from continuous_refactoring.scope_expansion import (
     ScopeSelection,
+    parse_scope_selection,
     select_scope_candidate,
     scope_candidate_to_target,
     scope_expansion_bypass_reason,
@@ -122,6 +125,48 @@ def test_select_scope_candidate_single_candidate_writes_selection_logs(
     ).read_text(encoding="utf-8") == expected
 
 
+def test_select_scope_candidate_passes_log_mirroring_to_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    target = Target(description="clean up", files=("README.md",), provenance="globs")
+    artifacts = _make_artifacts(tmp_path, monkeypatch)
+    captured: list[bool] = []
+
+    def fake_run_agent(**kwargs: object) -> CommandCapture:
+        captured.append(bool(kwargs["mirror_to_terminal"]))
+        Path(str(kwargs["stdout_path"])).write_text("", encoding="utf-8")
+        Path(str(kwargs["stderr_path"])).write_text("", encoding="utf-8")
+        if kwargs["last_message_path"] is not None:
+            Path(str(kwargs["last_message_path"])).write_text("", encoding="utf-8")
+        return _fake_capture(
+            "selected-candidate: local-cluster - clustered evidence\n",
+            tmp_path,
+        )
+
+    monkeypatch.setattr(scope_expansion, "maybe_run_agent", fake_run_agent)
+
+    selection = select_scope_candidate(
+        target,
+        (_candidate("seed"), _candidate("local-cluster")),
+        "taste",
+        tmp_path,
+        artifacts,
+        agent="codex",
+        model="gpt-5.5",
+        effort="low",
+        timeout=None,
+        log_mirroring=LogMirroring(agent=True),
+    )
+
+    assert selection == ScopeSelection(
+        kind="local-cluster",
+        reason="clustered evidence",
+    )
+    assert captured == [True]
+    assert (artifacts.root / "scope-expansion" / "selection.stdout.log").exists()
+    assert (artifacts.root / "scope-expansion" / "selection-last-message.md").exists()
+
+
 def test_write_scope_expansion_artifacts_records_payload(tmp_path: Path) -> None:
     target = Target(description="clean up", files=("README.md",), provenance="globs")
     candidates = (_candidate("seed"), _candidate("local-cluster"))
@@ -152,6 +197,54 @@ def test_write_scope_expansion_artifacts_records_payload(tmp_path: Path) -> None
         "validation_surfaces": ["README.md"],
     }
     assert payload["selection"] == {"kind": "local-cluster", "reason": "clustered evidence"}
+
+
+def test_expand_target_bypass_writes_scope_artifacts_and_logs(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target = Target(
+        description="explicit paths",
+        files=("src/foo.py", "src/bar.py"),
+        provenance="paths",
+    )
+    artifacts = _make_artifacts(tmp_path, monkeypatch)
+
+    selected_target, planning_context = routing_pipeline.expand_target_for_classification(
+        target,
+        "taste",
+        tmp_path,
+        artifacts,
+        agent="codex",
+        model="gpt-5.5",
+        effort="low",
+        timeout=None,
+    )
+
+    scope_dir = artifacts.root / "scope-expansion"
+    payload = json.loads((scope_dir / "variants.json").read_text(encoding="utf-8"))
+
+    assert selected_target == target
+    assert planning_context == (
+        "Scope expansion bypassed: scope expansion bypassed for explicit multi-file target\n"
+        "Files:\n"
+        "- src/foo.py\n"
+        "- src/bar.py"
+    )
+    assert payload == {
+        "bypass_reason": "scope expansion bypassed for explicit multi-file target",
+        "candidates": [],
+        "target": {
+            "description": "explicit paths",
+            "files": ["src/foo.py", "src/bar.py"],
+            "provenance": "paths",
+        },
+    }
+    expected = (
+        "selected-candidate: seed — scope expansion bypassed for explicit multi-file target\n"
+    )
+    assert (scope_dir / "selection.stdout.log").read_text(encoding="utf-8") == expected
+    assert (scope_dir / "selection-last-message.md").read_text(encoding="utf-8") == expected
 
 
 def test_select_scope_candidate_surfaces_parser_boundary_errors(
@@ -186,6 +279,49 @@ def test_select_scope_candidate_surfaces_parser_boundary_errors(
     ][-1]
     assert failed["call_role"] == "scope-expansion"
     assert failed["call_status"] == "failed"
+
+
+def test_select_scope_candidate_rejects_duplicate_candidate_kinds(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    target = Target(description="clean up", files=("README.md",), provenance="globs")
+    candidates = (_candidate("local-cluster"), _candidate("local-cluster"))
+    artifacts = _make_artifacts(tmp_path, monkeypatch)
+
+    with pytest.raises(ContinuousRefactorError, match="requires unique candidate kinds"):
+        select_scope_candidate(
+            target,
+            candidates,
+            "taste",
+            tmp_path,
+            artifacts,
+            agent="codex",
+            model="gpt-5.5",
+            effort="low",
+            timeout=None,
+        )
+
+
+def test_parse_scope_selection_accepts_case_insensitive_prefix_and_kind() -> None:
+    selection = parse_scope_selection(
+        "SELECTED-CANDIDATE: LOCAL-CLUSTER - stronger locality\n",
+        ("seed", "local-cluster"),
+    )
+
+    assert selection == ScopeSelection(
+        kind="local-cluster",
+        reason="stronger locality",
+    )
+
+
+def test_parse_scope_selection_defaults_reason_to_kind_when_separator_missing_text() -> None:
+    selection = parse_scope_selection(
+        "selected-candidate: seed - \n",
+        ("seed", "local-cluster"),
+    )
+
+    assert selection == ScopeSelection(kind="seed", reason="seed")
 
 
 def test_select_scope_candidate_multi_candidate_logs_call_events_with_effort(

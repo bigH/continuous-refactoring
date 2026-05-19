@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import tempfile
 from dataclasses import dataclass, replace
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING
 
 from continuous_refactoring.config import failure_snapshots_dir
 from continuous_refactoring.decisions import DecisionRecord
+from continuous_refactoring.planning_state import is_executable_planning_step
 
 if TYPE_CHECKING:
     from continuous_refactoring.artifacts import RunArtifacts
@@ -20,6 +22,10 @@ __all__ = [
     "persist_decision",
     "write",
 ]
+
+_PLANNING_CALL_ROLE_PREFIX = "planning."
+_INTERNAL_PLANNING_CALL_ROLES = frozenset({"state", "publish", "resume"})
+_MAX_INLINE_ARTIFACT_CHARS = 4000
 
 
 @dataclass(frozen=True)
@@ -157,6 +163,7 @@ def _snapshot_body_lines(
     record: DecisionRecord,
     artifacts: RunArtifacts,
     artifact_paths: SnapshotArtifactPaths,
+    repo_root: Path,
 ) -> list[str]:
     return [
         "# Reason for Failure",
@@ -177,6 +184,7 @@ def _snapshot_body_lines(
         "## Evidence",
         f"- Run artifacts: {artifacts.root}",
         *artifact_paths.evidence_lines(),
+        *_inline_artifact_sections(record, repo_root),
         "",
     ]
 
@@ -206,7 +214,7 @@ def _snapshot_content(
         ),
         "---",
         "",
-        *_snapshot_body_lines(record, artifacts, artifact_paths),
+        *_snapshot_body_lines(record, artifacts, artifact_paths, repo_root),
     ])
 
 
@@ -243,6 +251,13 @@ def write(
 
 
 def _next_step_text(record: DecisionRecord) -> str:
+    planning_step = _planning_step(record)
+    if planning_step is not None:
+        return (
+            f"Rerun planning step `{planning_step}` from the last published "
+            ".planning/state.json; failed current-step output and partial "
+            "work are artifact evidence only, not resume input."
+        )
     if record.decision == "retry":
         focus = f" Focus: {record.next_retry_focus}" if record.next_retry_focus else ""
         return f"Retry the same target on the next attempt.{focus}"
@@ -251,6 +266,48 @@ def _next_step_text(record: DecisionRecord) -> str:
     if record.decision == "blocked":
         return "Pause for human review before attempting more automated work."
     return "Commit the validated result and continue normally."
+
+
+def _inline_artifact_sections(record: DecisionRecord, repo_root: Path) -> list[str]:
+    sections: list[str] = []
+    for title, path in (
+        ("Latest Agent Message", record.agent_last_message_path),
+        ("Agent Stdout", record.agent_stdout_path),
+        ("Agent Stderr", record.agent_stderr_path),
+    ):
+        excerpt = _artifact_excerpt(path, repo_root)
+        if excerpt is None:
+            continue
+        sections.extend(["", f"### {title}", "```text", excerpt, "```"])
+    return sections
+
+
+def _artifact_excerpt(path: Path | None, repo_root: Path) -> str | None:
+    if path is None or not path.exists() or not path.is_file():
+        return None
+    content = path.read_text(encoding="utf-8", errors="replace")
+    if not content.strip():
+        return None
+    sanitized = _sanitize_artifact_text(content, repo_root)
+    if len(sanitized) <= _MAX_INLINE_ARTIFACT_CHARS:
+        return sanitized
+    return sanitized[:_MAX_INLINE_ARTIFACT_CHARS].rstrip() + "\n...[truncated]"
+
+
+def _sanitize_artifact_text(content: str, repo_root: Path) -> str:
+    sanitized = content.replace(str(repo_root), "<repo>")
+    return re.sub(r"/tmp/[^ \n]+", "<tmp>", sanitized)
+
+
+def _planning_step(record: DecisionRecord) -> str | None:
+    if not record.call_role.startswith(_PLANNING_CALL_ROLE_PREFIX):
+        return None
+    step = record.call_role.removeprefix(_PLANNING_CALL_ROLE_PREFIX)
+    if step in _INTERNAL_PLANNING_CALL_ROLES:
+        return None
+    if not is_executable_planning_step(step):
+        return None
+    return step
 
 
 def effective_record(
@@ -303,16 +360,25 @@ def persist_decision(
         validation_command=validation_command,
         record=record,
     )
+    planning_step = _planning_step(record)
+    log_fields: dict[str, object] = {}
+    if planning_step is not None:
+        log_fields["planning_step"] = planning_step
     artifacts.log(
         "WARN",
         f"failure snapshot written: {reason_doc}",
-        event="failure_doc_written",
+        event=(
+            "planning_step_failure_doc_written"
+            if planning_step is not None
+            else "failure_doc_written"
+        ),
         attempt=attempt,
         retry=retry,
         target=record.target,
         call_role=record.call_role,
         phase_reached=record.phase_reached,
         reason_doc_path=str(reason_doc),
+        **log_fields,
     )
     artifacts.log_transition(
         attempt=attempt,

@@ -8,11 +8,17 @@ from typing import get_args
 import pytest
 
 from continuous_refactoring.decisions import (
+    AgentStatus,
     RetryRecommendation,
     RunnerDecision,
+    default_retry_recommendation,
     error_failure_kind,
     parse_status_block,
+    read_status,
+    resolved_phase_reached,
     sanitize_text,
+    sanitized_text_or,
+    status_summary,
 )
 from continuous_refactoring.prompts import (
     CONTINUOUS_REFACTORING_STATUS_BEGIN,
@@ -154,6 +160,31 @@ def test_parse_status_block_never_raises_on_generated_corpus() -> None:
         assert all(isinstance(item, str) for item in status.evidence)
 
 
+def test_read_status_prefers_codex_last_message_file(tmp_path: Path) -> None:
+    last_message_path = tmp_path / "codex-last-message.md"
+    last_message_path.write_text(
+        _status_block("summary: from file"),
+        encoding="utf-8",
+    )
+    fallback = _status_block("summary: from fallback")
+
+    codex_status = read_status(
+        "codex",
+        last_message_path=last_message_path,
+        fallback_text=fallback,
+    )
+    other_status = read_status(
+        "claude",
+        last_message_path=last_message_path,
+        fallback_text=fallback,
+    )
+
+    assert codex_status is not None
+    assert codex_status.summary == "from file"
+    assert other_status is not None
+    assert other_status.summary == "from fallback"
+
+
 def test_sanitize_text_filters_and_redacts() -> None:
     repo_root = Path("/worktree/repo")
     text = "\n".join(
@@ -193,6 +224,60 @@ def test_sanitize_text_is_idempotent() -> None:
 
     assert once is not None
     assert sanitize_text(once, repo_root) == once
+
+
+def test_sanitized_text_or_prefers_sanitized_text() -> None:
+    repo_root = Path("/repo")
+
+    assert (
+        sanitized_text_or(" touched /repo/src/file.py ", repo_root, "fallback")
+        == "touched <repo>/src/file.py"
+    )
+
+
+def test_sanitized_text_or_uses_fallback_when_sanitized_text_is_empty() -> None:
+    assert (
+        sanitized_text_or("codex exec --help", Path("/repo"), "fallback")
+        == "fallback"
+    )
+
+
+def test_status_summary_sanitizes_summary_and_focus() -> None:
+    status = AgentStatus(
+        summary=" touched /repo/src/file.py ",
+        next_retry_focus=" /tmp/logs/run.txt ",
+    )
+
+    assert status_summary(status, fallback="fallback", repo_root=Path("/repo")) == (
+        "touched <repo>/src/file.py",
+        "<tmp>",
+    )
+
+
+def test_resolved_phase_reached_uses_fallback_for_missing_status_or_phase() -> None:
+    fallback = "review"
+
+    assert resolved_phase_reached(None, fallback) == fallback
+    assert resolved_phase_reached(AgentStatus(), fallback) == fallback
+    assert resolved_phase_reached(AgentStatus(phase_reached="refactor"), fallback) == (
+        "refactor"
+    )
+
+
+@pytest.mark.parametrize(
+    ("decision", "expected"),
+    [
+        ("commit", "none"),
+        ("retry", "same-target"),
+        ("abandon", "new-target"),
+        ("blocked", "human-review"),
+    ],
+)
+def test_default_retry_recommendation_maps_each_decision(
+    decision: RunnerDecision,
+    expected: RetryRecommendation,
+) -> None:
+    assert default_retry_recommendation(decision) == expected
 
 
 @pytest.mark.parametrize(

@@ -14,6 +14,7 @@ from continuous_refactoring.artifacts import (
     create_run_artifacts,
     ContinuousRefactorError,
 )
+from continuous_refactoring.log_mirroring import LogMirroring
 from continuous_refactoring.migrations import (
     MigrationManifest,
     PhaseSpec,
@@ -136,6 +137,22 @@ END_CONTINUOUS_REFACTORING_STATUS
 """
 
 
+def _assert_boundary_error(
+    exc: pytest.ExceptionInfo[ContinuousRefactorError],
+    *,
+    message_fragments: tuple[str, ...],
+    cause_type: type[BaseException] | None,
+) -> None:
+    error = exc.value
+    assert isinstance(error, ContinuousRefactorError)
+    for fragment in message_fragments:
+        assert fragment in str(error)
+    if cause_type is None:
+        assert error.__cause__ is None
+    else:
+        assert isinstance(error.__cause__, cause_type)
+
+
 def _patch_status_agent(
     monkeypatch: pytest.MonkeyPatch,
     stdout: str,
@@ -218,6 +235,41 @@ def test_check_ready_yes(
     assert reason == "yes"
 
 
+def test_check_phase_ready_passes_log_mirroring_to_agent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured: list[bool] = []
+
+    def fake_agent(**kwargs: object) -> CommandCapture:
+        captured.append(bool(kwargs["mirror_to_terminal"]))
+        for key in ("stdout_path", "stderr_path"):
+            path = Path(str(kwargs[key]))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+        return _fake_capture("ready: yes\n", tmp_path=tmp_path)
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.maybe_run_agent",
+        fake_agent,
+    )
+
+    verdict, _reason = check_phase_ready(
+        _PHASE_0,
+        _make_manifest(),
+        tmp_path,
+        _make_artifacts(tmp_path),
+        taste=_TASTE,
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        log_mirroring=LogMirroring(agent=True),
+    )
+
+    assert verdict == "yes"
+    assert captured == [True]
+
+
 def test_check_ready_yes_with_trailing_noise(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -277,8 +329,11 @@ def test_check_ready_propagates_agent_cause(tmp_path: Path, monkeypatch: pytest.
             _PHASE_0, _make_manifest(), tmp_path, _make_artifacts(tmp_path),
             taste=_TASTE, agent="codex", model="fake", effort="low", timeout=None,
         )
-
-    assert exc_info.value.__cause__ is failure
+    _assert_boundary_error(
+        exc_info,
+        message_fragments=("agent command failed",),
+        cause_type=OSError,
+    )
 
 
 def test_check_ready_nonzero_exit_wraps_called_process_error(
@@ -296,9 +351,13 @@ def test_check_ready_nonzero_exit_wraps_called_process_error(
             taste=_TASTE, agent="codex", model="fake", effort="low", timeout=None,
         )
 
-    cause = exc_info.value.__cause__
-    assert isinstance(cause, subprocess.CalledProcessError)
-    assert cause.returncode == 7
+    _assert_boundary_error(
+        exc_info,
+        message_fragments=("Phase ready-check agent failed with exit code 7",),
+        cause_type=subprocess.CalledProcessError,
+    )
+    assert isinstance(exc_info.value.__cause__, subprocess.CalledProcessError)
+    assert exc_info.value.__cause__.returncode == 7
 
 
 def test_check_ready_no(
@@ -435,6 +494,70 @@ def test_ready_yes_green_tests_flips_phase_done(
     assert reloaded.phases[0].done is True
     assert reloaded.phases[1].done is False
     assert reloaded.current_phase == "migrate"
+
+
+def test_execute_phase_passes_log_mirroring_to_agent_and_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    live_dir = tmp_path / "live"
+    manifest = _make_manifest()
+    _save_manifest_to_disk(manifest, live_dir)
+    captured_agent: list[bool] = []
+    captured_command: list[bool] = []
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.get_head_sha", lambda _: "abc123",
+    )
+
+    def fake_agent(**kwargs: object) -> CommandCapture:
+        captured_agent.append(bool(kwargs["mirror_to_terminal"]))
+        for key in ("stdout_path", "stderr_path"):
+            path = Path(str(kwargs[key]))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("", encoding="utf-8")
+        return _fake_capture("executed phase work\n", tmp_path=tmp_path)
+
+    def fake_tests(
+        test_command: str,
+        repo_root: Path,
+        stdout_path: Path,
+        stderr_path: Path,
+        **kwargs: object,
+    ) -> CommandCapture:
+        captured_command.append(bool(kwargs["mirror_to_terminal"]))
+        return _passing_tests(
+            test_command,
+            repo_root,
+            stdout_path,
+            stderr_path,
+            **kwargs,
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.phases.maybe_run_agent",
+        fake_agent,
+    )
+    monkeypatch.setattr("continuous_refactoring.phases.run_tests", fake_tests)
+
+    outcome = execute_phase(
+        _PHASE_0,
+        manifest,
+        _TASTE,
+        tmp_path,
+        live_dir,
+        _make_artifacts(tmp_path),
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        validation_command="true",
+        max_attempts=1,
+        log_mirroring=LogMirroring(agent=True, command=True),
+    )
+
+    assert outcome.status == "done"
+    assert captured_agent == [True]
+    assert captured_command == [True]
 
 
 def test_execute_phase_call_messages_use_phase_name(
@@ -1196,7 +1319,11 @@ def test_execute_phase_unknown_phase_does_not_mark_manifest_complete(
             max_attempts=1,
         )
 
-    assert exc_info.value.__cause__ is None
+    _assert_boundary_error(
+        exc_info,
+        message_fragments=("not found in manifest",),
+        cause_type=None,
+    )
     assert manifest_path.read_text(encoding="utf-8") == original
 
 

@@ -7,8 +7,14 @@ import pytest
 import continuous_refactoring
 import continuous_refactoring.loop
 import continuous_refactoring.routing_pipeline
-from continuous_refactoring.artifacts import RunArtifacts, create_run_artifacts
+from continuous_refactoring.artifacts import (
+    ContinuousRefactorError,
+    RunArtifacts,
+    create_run_artifacts,
+)
 from continuous_refactoring.decisions import DecisionRecord
+from continuous_refactoring.log_mirroring import LogMirroring
+from continuous_refactoring.planning import PlanningStepResult
 from continuous_refactoring.routing_pipeline import RouteResult
 from continuous_refactoring.targeting import Target
 
@@ -132,6 +138,81 @@ def test_expanded_target_reaches_classifier(
     assert result.target.files == EXPANDED_FILES
 
 
+def test_route_and_run_forwards_log_mirroring_to_routing_steps(
+    routing_env: tuple[Path, RunArtifacts],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, artifacts = routing_env
+    target = Target(
+        description="needs a plan",
+        files=("README.md",),
+        provenance="globs",
+    )
+    captured: dict[str, object] = {}
+
+    def fake_expand(
+        target: Target, *_args: object, **kwargs: object,
+    ) -> tuple[Target, str]:
+        captured["expand"] = kwargs["log_mirroring"]
+        return target, "Selected scope candidate: seed"
+
+    def fake_classify(target: Target, *_args: object, **kwargs: object) -> str:
+        captured["classify"] = kwargs["log_mirroring"]
+        return "needs-plan"
+
+    def fake_planning(*_args: object, **kwargs: object) -> PlanningStepResult:
+        captured["planning"] = kwargs["log_mirroring"]
+        return PlanningStepResult(
+            status="published",
+            migration_name="needs-a-plan",
+            step="approaches",
+            next_step="pick-best",
+            reason="approaches accepted",
+        )
+
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.expand_target_for_classification",
+        fake_expand,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        fake_classify,
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.run_next_planning_step",
+        fake_planning,
+    )
+
+    def noop_finalize(*_args: object, **_kwargs: object) -> None:
+        return None
+
+    result = continuous_refactoring.routing_pipeline.route_and_run(
+        target,
+        "taste",
+        repo_root,
+        artifacts,
+        live_dir=repo_root / LIVE_MIGRATIONS_DIR,
+        agent="codex",
+        model="fake",
+        effort="low",
+        timeout=None,
+        commit_message_prefix="continuous refactor",
+        validation_command="uv run pytest",
+        max_attempts=1,
+        attempt=1,
+        finalize_commit=noop_finalize,
+        check_migrations=False,
+        log_mirroring=LogMirroring(agent=True),
+    )
+
+    assert result.outcome == "commit"
+    assert captured == {
+        "expand": LogMirroring(agent=True),
+        "classify": LogMirroring(agent=True),
+        "planning": LogMirroring(agent=True),
+    }
+
+
 def test_deferred_migration_tick_falls_through_to_classifier(
     routing_env: tuple[Path, RunArtifacts],
     monkeypatch: pytest.MonkeyPatch,
@@ -220,15 +301,21 @@ def test_needs_plan_receives_expanded_scope_context(
         lambda *_args, **_kwargs: "needs-plan",
     )
 
-    class StubPlanningOutcome:
-        status = "ready"
+    class StubPlanningStepResult:
+        status = "published"
+        step = "approaches"
+        next_step = "pick-best"
+        terminal_outcome = None
         reason = "stub"
 
-    def fake_run_planning(*_args: object, **kwargs: object) -> StubPlanningOutcome:
+    def fake_run_next_planning_step(*_args: object, **kwargs: object) -> StubPlanningStepResult:
         captured["extra_context"] = str(kwargs["extra_context"])
-        return StubPlanningOutcome()
+        return StubPlanningStepResult()
 
-    monkeypatch.setattr("continuous_refactoring.routing_pipeline.run_planning", fake_run_planning)
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.run_next_planning_step",
+        fake_run_next_planning_step,
+    )
 
     result = _invoke_route_and_run(
         repo_root,
@@ -238,6 +325,124 @@ def test_needs_plan_receives_expanded_scope_context(
 
     assert result.outcome == "commit"
     assert captured["extra_context"] == planning_context
+
+
+def test_classifier_failure_returns_abandon_record(
+    routing_env: tuple[Path, RunArtifacts],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, artifacts = routing_env
+    target = Target(description="seed", files=("README.md",), provenance="globs")
+
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ContinuousRefactorError("transport failed")
+        ),
+    )
+
+    result = _invoke_route_and_run(repo_root, artifacts, target)
+
+    assert result.outcome == "abandon"
+    assert result.decision_record == DecisionRecord(
+        decision="abandon",
+        retry_recommendation="new-target",
+        target="seed",
+        call_role="classify",
+        phase_reached="classify",
+        failure_kind="agent-infra-failure",
+        summary="transport failed",
+    )
+
+
+def test_planning_failure_uses_stage_label_in_abandon_record(
+    routing_env: tuple[Path, RunArtifacts],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, artifacts = routing_env
+
+    _patch_scope_expansion(
+        monkeypatch,
+        files=("src/foo.py",),
+        context="Selected scope candidate: local-cluster",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        lambda *_args, **_kwargs: "needs-plan",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.run_next_planning_step",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ContinuousRefactorError(
+                "planning.review-2 failed: revised plan still has findings"
+            )
+        ),
+    )
+
+    result = _invoke_route_and_run(
+        repo_root,
+        artifacts,
+        Target(description="seed", files=("src/foo.py",), provenance="globs"),
+    )
+
+    stage_dir = artifacts.root / "attempt-001" / "planning" / "review-2"
+    assert result.outcome == "abandon"
+    assert result.decision_record == DecisionRecord(
+        decision="abandon",
+        retry_recommendation="new-target",
+        target="seed",
+        call_role="planning.review-2",
+        phase_reached="planning.review-2",
+        failure_kind="planning-step-failed",
+        summary="planning.review-2 failed: revised plan still has findings",
+        agent_last_message_path=stage_dir / "agent-last-message.md",
+        agent_stdout_path=stage_dir / "agent.stdout.log",
+        agent_stderr_path=stage_dir / "agent.stderr.log",
+    )
+
+
+def test_review_two_transport_failure_uses_infra_failure_kind(
+    routing_env: tuple[Path, RunArtifacts],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, artifacts = routing_env
+
+    _patch_scope_expansion(
+        monkeypatch,
+        files=("src/foo.py",),
+        context="Selected scope candidate: local-cluster",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.classify_target",
+        lambda *_args, **_kwargs: "needs-plan",
+    )
+    monkeypatch.setattr(
+        "continuous_refactoring.routing_pipeline.run_next_planning_step",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            ContinuousRefactorError("planning.review-2 failed: transport failed")
+        ),
+    )
+
+    result = _invoke_route_and_run(
+        repo_root,
+        artifacts,
+        Target(description="seed", files=("src/foo.py",), provenance="globs"),
+    )
+
+    stage_dir = artifacts.root / "attempt-001" / "planning" / "review-2"
+    assert result.outcome == "abandon"
+    assert result.decision_record == DecisionRecord(
+        decision="abandon",
+        retry_recommendation="new-target",
+        target="seed",
+        call_role="planning.review-2",
+        phase_reached="planning.review-2",
+        failure_kind="agent-infra-failure",
+        summary="planning.review-2 failed: transport failed",
+        agent_last_message_path=stage_dir / "agent-last-message.md",
+        agent_stdout_path=stage_dir / "agent.stdout.log",
+        agent_stderr_path=stage_dir / "agent.stderr.log",
+    )
 
 
 def test_live_migrations_unset_skips_scope_expansion_and_classification(

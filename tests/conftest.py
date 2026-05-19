@@ -13,6 +13,8 @@ import pytest
 
 import continuous_refactoring
 import continuous_refactoring.loop
+import continuous_refactoring.refactor_attempts
+import continuous_refactoring.targeting
 from continuous_refactoring.artifacts import CommandCapture
 from continuous_refactoring.config import (
     ProjectEntry,
@@ -95,6 +97,10 @@ def assert_single_run_final_status(repo_root: Path, expected_status: str) -> Non
     assert summary["final_status"] == expected_status
 
 
+def fail_if_taste_agent_runs(*_args: object, **_kwargs: object) -> int:
+    pytest.fail("taste agent should not be invoked")
+
+
 def make_taste_agent_writer(
     *,
     content: str | None = None,
@@ -102,16 +108,16 @@ def make_taste_agent_writer(
     captured: dict[str, str] | None = None,
 ) -> Callable[..., int]:
     def fake(
-        agent: str,
-        model: str,
-        effort: str,
+        _agent: str,
+        _model: str,
+        _effort: str,
         prompt: str,
-        repo_root: Path,
+        _repo_root: Path,
         *,
         content_path: Path,
         settle_path: Path,
-        settle_window_seconds: float = 2.0,
-        poll_interval_seconds: float = 0.1,
+        _settle_window_seconds: float = 2.0,
+        _poll_interval_seconds: float = 0.1,
     ) -> int:
         assert content_path == extract_taste_path(prompt)
         assert settle_path == extract_settle_path(prompt)
@@ -157,6 +163,28 @@ class RegisteredProjectLayout:
     entry: ProjectEntry
     project_dir: Path
     taste_path: Path
+
+
+def write_targets_file(
+    tmp_path: Path,
+    *,
+    count: int | None = None,
+    targets: list[dict[str, object]] | None = None,
+) -> Path:
+    if (count is None) == (targets is None):
+        raise AssertionError("provide exactly one of count or targets")
+    if targets is None:
+        assert count is not None
+        targets = [
+            {"description": f"target-{index}", "files": [f"file{index}.py"]}
+            for index in range(count)
+        ]
+    targets_file = tmp_path / "targets.jsonl"
+    targets_file.write_text(
+        "\n".join(json.dumps(target) for target in targets),
+        encoding="utf-8",
+    )
+    return targets_file
 
 
 def init_repo(path: Path) -> None:
@@ -341,6 +369,23 @@ def failing_tests(
     )
 
 
+def install_run_command_spy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> list[tuple[str, ...]]:
+    captured: list[tuple[str, ...]] = []
+    real_run_command = continuous_refactoring.run_command
+
+    def spy(command, cwd, *args, **kwargs):  # type: ignore[no-untyped-def]
+        captured.append(tuple(command))
+        return real_run_command(command, cwd, *args, **kwargs)
+
+    monkeypatch.setattr("continuous_refactoring.git.run_command", spy)
+    monkeypatch.setattr("continuous_refactoring.loop.run_command", spy)
+    monkeypatch.setattr("continuous_refactoring.refactor_attempts.run_command", spy)
+    monkeypatch.setattr("continuous_refactoring.targeting.run_command", spy)
+    return captured
+
+
 def _default_validation_command(repo_root: Path) -> str:
     test_script = repo_root.parent / "check_tests.py"
     if not test_script.exists():
@@ -405,26 +450,33 @@ def make_run_once_args(
     globs: str | None = None,
     targets: Path | None = None,
     paths: str | None = None,
+    show_agent_logs: bool = False,
+    show_command_logs: bool = False,
 ) -> argparse.Namespace:
-    return argparse.Namespace(
-        **_build_run_args(
-            repo_root=repo_root,
-            agent=agent,
-            model=model,
-            effort=effort,
-            default_effort=default_effort,
-            max_allowed_effort=max_allowed_effort,
-            validation_command=validation_command,
-            scope_instruction=scope_instruction,
-            timeout=timeout,
-            refactoring_prompt=refactoring_prompt,
-            extensions=extensions,
-            globs=globs,
-            targets=targets,
-            paths=paths,
-        ),
-        fix_prompt=None,
+    args = _build_run_args(
+        repo_root=repo_root,
+        agent=agent,
+        model=model,
+        effort=effort,
+        default_effort=default_effort,
+        max_allowed_effort=max_allowed_effort,
+        validation_command=validation_command,
+        scope_instruction=scope_instruction,
+        timeout=timeout,
+        refactoring_prompt=refactoring_prompt,
+        extensions=extensions,
+        globs=globs,
+        targets=targets,
+        paths=paths,
     )
+    args.update(
+        {
+            "fix_prompt": None,
+            "show_agent_logs": show_agent_logs,
+            "show_command_logs": show_command_logs,
+        }
+    )
+    return argparse.Namespace(**args)
 
 
 def make_run_loop_args(

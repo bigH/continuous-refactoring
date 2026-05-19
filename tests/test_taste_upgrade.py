@@ -4,7 +4,13 @@ import argparse
 from pathlib import Path
 
 import pytest
-from conftest import extract_settle_path, init_taste_project, make_taste_agent_writer
+from conftest import (
+    extract_settle_path,
+    fail_if_taste_agent_runs,
+    init_taste_project,
+    make_taste_agent_writer,
+    make_taste_args,
+)
 
 from continuous_refactoring.cli import _handle_taste, build_parser
 from continuous_refactoring.config import (
@@ -24,14 +30,14 @@ def _upgrade_args(
     effort: str | None = "high",
     force: bool = False,
 ) -> argparse.Namespace:
-    return argparse.Namespace(
-        global_=global_, interview=False, upgrade=True,
-        agent=agent, model=model, effort=effort, force=force,
+    return make_taste_args(
+        "upgrade",
+        global_=global_,
+        agent=agent,
+        model=model,
+        effort=effort,
+        force=force,
     )
-
-
-def _fail_if_taste_agent_runs(**_: object) -> int:
-    pytest.fail("taste agent should not be invoked")
 
 
 # ---------------------------------------------------------------------------
@@ -46,7 +52,7 @@ def test_upgrade_noop_on_current_taste(
     taste_path = init_taste_project(tmp_path, monkeypatch)
     taste_path.write_text(default_taste_text(), encoding="utf-8")
 
-    monkeypatch.setattr(_AGENT_RUNNER_PATH, _fail_if_taste_agent_runs)
+    monkeypatch.setattr(_AGENT_RUNNER_PATH, fail_if_taste_agent_runs)
     _handle_taste(_upgrade_args())
 
     out = capsys.readouterr().out.strip()
@@ -63,7 +69,7 @@ def test_upgrade_noop_on_current_global_taste(
     gdir.mkdir(parents=True, exist_ok=True)
     (gdir / "taste.md").write_text(default_taste_text(), encoding="utf-8")
 
-    monkeypatch.setattr(_AGENT_RUNNER_PATH, _fail_if_taste_agent_runs)
+    monkeypatch.setattr(_AGENT_RUNNER_PATH, fail_if_taste_agent_runs)
     _handle_taste(_upgrade_args(global_=True))
 
     out = capsys.readouterr().out.strip()

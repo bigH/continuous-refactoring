@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -7,6 +8,15 @@ import pytest
 from continuous_refactoring.config import TASTE_CURRENT_VERSION, default_taste_text
 from continuous_refactoring.effort import EffortBudget
 from continuous_refactoring.migrations import MigrationManifest, PhaseSpec
+from continuous_refactoring.planning import _build_durable_planning_context
+from continuous_refactoring.planning_state import (
+    PlanningState,
+    append_planning_feedback,
+    complete_planning_step,
+    new_planning_state,
+    planning_stage_stdout_path,
+    reopen_planning_for_revise,
+)
 from continuous_refactoring.prompts import (
     CLASSIFIER_PROMPT,
     CONTINUOUS_REFACTORING_STATUS_BEGIN,
@@ -19,12 +29,14 @@ from continuous_refactoring.prompts import (
     PLANNING_FINAL_REVIEW_PROMPT,
     PLANNING_PICK_BEST_PROMPT,
     PLANNING_REVIEW_PROMPT,
+    REVIEW_PERFORM_PROMPT,
     compose_full_prompt,
     compose_classifier_prompt,
     compose_interview_prompt,
     compose_phase_execution_prompt,
     compose_phase_ready_prompt,
     compose_planning_prompt,
+    compose_review_perform_prompt,
     compose_taste_refine_prompt,
     compose_taste_upgrade_prompt,
 )
@@ -63,6 +75,7 @@ _TASTE_INJECTED_PROMPTS = (
     PLANNING_FINAL_REVIEW_PROMPT,
     PHASE_READY_CHECK_PROMPT,
     PHASE_EXECUTION_PROMPT,
+    REVIEW_PERFORM_PROMPT,
 )
 
 
@@ -91,6 +104,29 @@ def _manifest() -> MigrationManifest:
             ),
         ),
     )
+
+
+def _terminal_ready_state(repo_root: Path, mig_root: Path) -> PlanningState:
+    state = new_planning_state("Clean up auth", now="2026-04-29T12:00:00.000+00:00")
+    for step, outcome, stdout in (
+        ("approaches", "completed", "Generated approaches.\n"),
+        ("pick-best", "completed", "Chose approach.\n"),
+        ("expand", "completed", "Expanded.\n"),
+        ("review", "clear", "No findings.\n"),
+        ("final-review", "approve-auto", "final-decision: approve-auto - ready\n"),
+    ):
+        stdout_path = planning_stage_stdout_path(mig_root, step)
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text(stdout, encoding="utf-8")
+        state = complete_planning_step(
+            state,
+            step,
+            outcome,
+            {"stdout": stdout_path.relative_to(repo_root).as_posix()},
+            completed_at="2026-04-29T12:00:00.000+00:00",
+            final_reason="ready" if step == "final-review" else None,
+        )
+    return state
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +219,155 @@ def test_phase_ready_prompt_does_not_make_fresh_test_evidence_human_review() -> 
     assert "human-review blocker" in PHASE_READY_CHECK_PROMPT
     assert "ignore that clause" in PHASE_READY_CHECK_PROMPT
     assert "Use `ready: unverifiable` only" in PHASE_READY_CHECK_PROMPT
+
+
+def test_planning_prompts_name_staged_work_dir_and_keep_taste(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    live_mig_root = repo_root / "migrations" / "auth-cleanup"
+    staged_parent = tmp_path / "xdg" / "planning" / "auth-cleanup" / "run" / "work"
+    state = new_planning_state("Clean up auth", now="2026-04-29T12:00:00.000+00:00")
+
+    context = _build_durable_planning_context(
+        repo_root=repo_root,
+        live_dir=staged_parent,
+        migration_name="auth-cleanup",
+        state=state,
+        published_migration_root=live_mig_root,
+    )
+
+    for stage in _PLANNING_STAGES:
+        result = compose_planning_prompt(stage, "auth-cleanup", _TASTE, context)
+
+        assert f"## Taste\n{_TASTE}" in result
+        assert f"Staged work dir: {staged_parent / 'auth-cleanup'}" in result
+        assert f"Work dir: {staged_parent / 'auth-cleanup'}" in result
+        assert f"Live migration dir: {live_mig_root}" in result
+        assert "Writable target: work dir only." in result
+        assert "Do not mutate the live migration directory." in result
+        assert ".planning/state.json" in result
+        assert ".planning/stages/" in result
+        assert "failed current-step output" in result
+        assert "not resume input" in result
+
+
+def test_review_prompt_names_work_dir_and_forbids_live_dir_mutation() -> None:
+    manifest = replace(
+        _manifest(),
+        awaiting_human_review=True,
+        human_review_reason="Need Hiren to choose rollout order.",
+    )
+    repo_root = Path("/repo")
+    work_dir = Path("/xdg/projects/p/planning/auth-cleanup/review-1/work/auth-cleanup")
+    live_dir = Path("/repo/migrations/auth-cleanup")
+
+    result = compose_review_perform_prompt(
+        "auth-cleanup",
+        repo_root,
+        work_dir,
+        live_dir,
+        manifest.phases[1],
+        manifest,
+        _TASTE,
+    )
+
+    assert f"Repo root: {repo_root}" in result
+    assert f"Work dir: {work_dir}" in result
+    assert f"Live migration dir: {live_dir}" in result
+    assert "Writable target: work dir only." in result
+    assert "Do not mutate the live migration directory." in result
+    assert "Need Hiren to choose rollout order." in result
+    assert f"## Taste\n{_TASTE}" in result
+
+
+def test_refine_prompt_names_work_dir_and_keeps_taste(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    live_dir = repo_root / "migrations"
+    mig_root = live_dir / "auth-cleanup"
+    mig_root.mkdir(parents=True)
+    (mig_root / "plan.md").write_text("# Plan\n", encoding="utf-8")
+    state = _terminal_ready_state(repo_root, mig_root)
+    state = append_planning_feedback(
+        state,
+        "Split the risky phase.",
+        "message",
+        now="2026-04-29T12:00:00.000+00:00",
+    )
+    state = reopen_planning_for_revise(
+        state,
+        now="2026-04-29T12:01:00.000+00:00",
+    )
+
+    context = _build_durable_planning_context(
+        repo_root=repo_root,
+        live_dir=live_dir,
+        migration_name="auth-cleanup",
+        state=state,
+        extra_context="User refinement feedback:\nSplit the risky phase.",
+        published_migration_root=mig_root,
+    )
+    result = compose_planning_prompt("expand", "auth-cleanup", _TASTE, context)
+
+    assert f"Work dir: {mig_root}" in result
+    assert f"Live migration dir: {mig_root}" in result
+    assert "Writable target: work dir only." in result
+    assert "Do not mutate the live migration directory." in result
+    assert "User refinement feedback" in result
+    assert "Split the risky phase." in result
+    assert f"## Taste\n{_TASTE}" in result
+
+
+def test_review_and_refine_prompts_forbid_live_dir_mutation(tmp_path: Path) -> None:
+    manifest = replace(
+        _manifest(),
+        awaiting_human_review=True,
+        human_review_reason="Need Hiren to choose rollout order.",
+    )
+    repo_root = tmp_path / "repo"
+    review_work_dir = tmp_path / "xdg" / "planning" / "auth-cleanup" / "review" / "work"
+    live_mig_root = repo_root / "migrations" / "auth-cleanup"
+    review_prompt = compose_review_perform_prompt(
+        "auth-cleanup",
+        repo_root,
+        review_work_dir,
+        live_mig_root,
+        manifest.phases[1],
+        manifest,
+        _TASTE,
+    )
+
+    refine_state = new_planning_state(
+        "Clean up auth",
+        now="2026-04-29T12:00:00.000+00:00",
+    )
+    refine_state = append_planning_feedback(
+        refine_state,
+        "Split the risky phase.",
+        "message",
+        now="2026-04-29T12:01:00.000+00:00",
+    )
+    refine_context = _build_durable_planning_context(
+        repo_root=repo_root,
+        live_dir=review_work_dir.parent,
+        migration_name="work",
+        state=refine_state,
+        extra_context="User refinement feedback:\nSplit the risky phase.",
+        published_migration_root=live_mig_root,
+    )
+    refine_prompt = compose_planning_prompt(
+        "expand",
+        "auth-cleanup",
+        _TASTE,
+        refine_context,
+    )
+
+    for prompt in (review_prompt, refine_prompt):
+        assert f"Live migration dir: {live_mig_root}" in prompt
+        assert "Writable target: work dir only." in prompt
+        assert "Do not mutate the live migration directory." in prompt
+        assert "not resume input" in prompt
+        assert f"## Taste\n{_TASTE}" in prompt
 
 
 @pytest.mark.parametrize("prompt", _PLANNING_PROMPTS_THAT_MENTION_PLAN_MD)
@@ -377,6 +562,43 @@ def test_planning_prompt_includes_effort_budget_guidance() -> None:
     assert "Current run max allowed effort: `high`." in result
     assert "lowest safe `required_effort`" in result
     assert "wait for a future run" in result
+
+
+def test_planning_resume_prompt_uses_durable_state_and_keeps_taste(
+    tmp_path: Path,
+) -> None:
+    live_dir = tmp_path / "migrations"
+    mig_root = live_dir / "auth-cleanup"
+    mig_root.mkdir(parents=True)
+    state = new_planning_state("Clean up auth", now="2026-04-29T12:00:00.000+00:00")
+    for name, text in (
+        ("approaches", "Generated approaches.\n"),
+        ("pick-best", "Chose incremental approach.\n"),
+    ):
+        stdout_path = planning_stage_stdout_path(mig_root, name)
+        stdout_path.parent.mkdir(parents=True, exist_ok=True)
+        stdout_path.write_text(text, encoding="utf-8")
+        state = complete_planning_step(
+            state,
+            name,
+            "completed",
+            {"stdout": stdout_path.relative_to(tmp_path).as_posix()},
+            completed_at="2026-04-29T12:01:00.000+00:00",
+        )
+
+    context = _build_durable_planning_context(
+        repo_root=tmp_path,
+        live_dir=live_dir,
+        migration_name="auth-cleanup",
+        state=state,
+    )
+    result = compose_planning_prompt("expand", "auth-cleanup", _TASTE, context)
+
+    assert f"## Taste\n{_TASTE}" in result
+    assert "migrations/auth-cleanup/.planning/stages/pick-best.stdout.md" in result
+    assert "Chose incremental approach." in result
+    assert "agent.stdout.log" not in result
+    assert str(tmp_path / "tmp") not in result
 
 
 def test_planning_prompts_describe_phase_effort_metadata() -> None:

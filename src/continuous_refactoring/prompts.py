@@ -843,6 +843,8 @@ REVIEW_PERFORM_PROMPT = """\
 You are conducting a human review of a refactoring migration that was flagged
 for human input during planning.
 
+Project-specific taste is injected by the caller in the `## Taste` section.
+
 The plan and phase files were written at an earlier point in time. The
 repository may have drifted since then: files referenced in the plan may have
 moved, been renamed, been deleted, or changed in shape. Line numbers, symbol
@@ -850,7 +852,8 @@ names, and surrounding code cited in the plan are not reliable until verified
 against the current tree.
 
 Your job:
-1. Read the migration plan (plan.md), the current phase file, and the manifest.
+1. Read the migration plan (plan.md), the current phase file, and the manifest
+   from the staged work dir.
 2. Check the plan against the current repo state. For each file, symbol, or
    line reference the plan relies on, confirm it still exists and still means
    what the plan assumes. Note any drift you find — stale assumptions change
@@ -863,12 +866,20 @@ Your job:
    shape the plan was written against.
 4. Ask the user whatever questions are needed to unblock the migration.
 5. Based on the user's answers, update plan.md and/or phase files as needed.
-   Fix drifted references while you are there.
+   Fix drifted references while you are there. Write only inside the staged
+   work dir.
 6. When the review is complete and the user approves, update manifest.json:
    set "awaiting_human_review" to false and set "human_review_reason" to null.
 
 If the user wants to abort or cannot resolve the review, leave
 awaiting_human_review as true and exit cleanly.
+
+Do not mutate the live migration directory. It is read-only reference material.
+The staged work dir is the only writable target. Successful review changes are
+published by the harness after validation.
+If review fails or exits before publish, failed review output and partial staged
+changes are run artifacts only; they are not resume input. Rerun review starts
+from the last published live migration snapshot.
 
 ## Output Contract
 When the review is successfully completed:
@@ -880,21 +891,47 @@ When the review is successfully completed:
 
 def compose_review_perform_prompt(
     migration_name: str,
-    manifest_path: Path,
-    plan_path: Path,
+    repo_root: Path,
+    work_dir: Path,
+    live_dir: Path,
     phase: PhaseSpec | None,
     manifest: MigrationManifest,
+    taste: str,
 ) -> str:
+    reason = manifest.human_review_reason or "(no reason recorded)"
     sections: list[str] = [
         REVIEW_PERFORM_PROMPT,
         f"## Migration\nName: {migration_name}",
-        f"## Manifest\nPath: {manifest_path}\n{_format_manifest_summary(manifest)}",
-        f"## Plan\nPath: {plan_path}",
+        (
+            "## Workspace\n"
+            f"Repo root: {repo_root}\n"
+            f"Staged work dir: {work_dir}\n"
+            f"Work dir: {work_dir}\n"
+            f"Live migration dir: {live_dir}\n"
+            "Writable target: staged work dir only.\n"
+            "Writable target: work dir only.\n"
+            "The live migration directory is read-only reference material.\n"
+            "Do not mutate the live migration directory."
+        ),
+        f"## Human Review\n{reason}",
+        (
+            "## Manifest\n"
+            f"Path: {work_dir / 'manifest.json'}\n"
+            f"{_format_manifest_summary(manifest)}"
+        ),
+        f"## Plan\nPath: {work_dir / 'plan.md'}",
     ]
     if phase is not None:
         sections.append(
             "## Current Phase\n"
             f"Name: {phase.name}\n"
-            f"File: {phase_file_reference(phase)}"
+            f"File: {work_dir / phase_file_reference(phase)}"
         )
+    else:
+        sections.append(
+            "## Current Phase\n"
+            "Current phase file: (none)\n"
+            "Current phase name: (none)"
+        )
+    sections.append(f"## Taste\n{taste}")
     return _join_sections(*sections)

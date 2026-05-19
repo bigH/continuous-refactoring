@@ -1,5 +1,0 @@
-1. `phase-2-boundary-focused-routing-cleanup.md`: Precondition “Contracts locked in Phase 1 still exist and are unchanged in intent” is not concretely start-gateable. “Intent” requires interpretation, so this is product/judgment-heavy for a precondition; make it objective (for example: specific Phase 1 test cases/files still present and unchanged).
-
-2. `phase-2-boundary-focused-routing-cleanup.md`: Definition of Done item “`routing.py` is measurably simpler” is not concretely assessable as written. Add explicit acceptance criteria (for example: named duplication removed in specific functions, or helper extraction with preserved observable outputs) so completion can be judged without subjective architecture calls.
-
-3. `phase-3-release-pipeline-consistency-check.md`: Scope line “Any directly related release-smoke assertions/config lines required for consistency” is too open-ended and can expand beyond clearly bounded files. Tighten to explicit file paths (or an explicit allowlist) to ensure the phase cannot drift outside migration scope.

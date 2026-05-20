@@ -32,7 +32,6 @@ def _interview_args(
     force: bool = False,
     agent: str | None = "codex",
     model: str | None = "m",
-    effort: str | None = "high",
 ) -> argparse.Namespace:
     return make_taste_args(
         "interview",
@@ -40,7 +39,6 @@ def _interview_args(
         force=force,
         agent=agent,
         model=model,
-        effort=effort,
     )
 
 # ---------------------------------------------------------------------------
@@ -53,7 +51,7 @@ def test_interview_requires_agent_flags(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    args = _interview_args(agent=None, model=None, effort=None)
+    args = _interview_args(agent=None, model=None)
     with pytest.raises(SystemExit) as exc_info:
         _handle_taste(args)
     assert exc_info.value.code == 2
@@ -67,10 +65,11 @@ def test_interview_rejects_agent_flags_without_interview(
 ) -> None:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
     with pytest.raises(SystemExit) as exc_info:
-        _handle_taste(make_taste_args(agent="codex", model="m", effort="high"))
+        _handle_taste(make_taste_args(agent="codex", model="m"))
     assert exc_info.value.code == 2
     err = capsys.readouterr().err
     assert "require --interview, --upgrade, or --refine" in err
+    assert "--effort" not in err
 
 
 def test_force_requires_interview(
@@ -285,6 +284,7 @@ def test_interview_prompt_includes_existing_content(
     _handle_taste(_interview_args(force=True))
 
     prompt = captured["prompt"]
+    assert captured["effort"] == "medium"
     assert "Existing taste content" in prompt
     assert "starting draft" in prompt
     assert existing.strip() in prompt
@@ -307,11 +307,24 @@ def test_taste_subparser_accepts_interview_flags() -> None:
     args = parser.parse_args(
         [
             "taste", "--interview", "--with", "codex",
-            "--model", "gpt-x", "--effort", "xhigh", "--force",
+            "--model", "gpt-x", "--force",
         ]
     )
     assert args.interview is True
     assert args.agent == "codex"
     assert args.model == "gpt-x"
-    assert args.effort == "xhigh"
     assert args.force is True
+
+
+@pytest.mark.parametrize("mode", [None, "--interview", "--upgrade", "--refine"])
+def test_taste_subparser_rejects_effort(mode: str | None) -> None:
+    parser = build_parser()
+    argv = ["taste"]
+    if mode is not None:
+        argv.append(mode)
+    argv.extend(["--with", "codex", "--model", "gpt-x", "--effort", "high"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(argv)
+
+    assert exc_info.value.code == 2

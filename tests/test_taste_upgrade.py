@@ -27,7 +27,6 @@ def _upgrade_args(
     global_: bool = False,
     agent: str | None = "codex",
     model: str | None = "m",
-    effort: str | None = "high",
     force: bool = False,
 ) -> argparse.Namespace:
     return make_taste_args(
@@ -35,7 +34,6 @@ def _upgrade_args(
         global_=global_,
         agent=agent,
         model=model,
-        effort=effort,
         force=force,
     )
 
@@ -112,6 +110,7 @@ def test_upgrade_prompt_mentions_legacy_and_new_dimensions(
     _handle_taste(_upgrade_args())
 
     prompt = captured["prompt"]
+    assert captured["effort"] == "medium"
     assert "no version header" in prompt
     assert "legacy" in prompt.lower()
     assert "large-scope decisions" in prompt
@@ -135,7 +134,7 @@ def test_upgrade_requires_agent_flags_when_stale(
     taste_path.write_text("- Legacy.\n", encoding="utf-8")
 
     with pytest.raises(SystemExit) as exc_info:
-        _handle_taste(_upgrade_args(agent=None, model=None, effort=None))
+        _handle_taste(_upgrade_args(agent=None, model=None))
 
     assert exc_info.value.code == 2
     err = capsys.readouterr().err
@@ -154,7 +153,7 @@ def test_upgrade_requires_agent_flags_when_global_taste_is_stale(
 
     with pytest.raises(SystemExit) as exc_info:
         _handle_taste(
-            _upgrade_args(global_=True, agent=None, model=None, effort=None),
+            _upgrade_args(global_=True, agent=None, model=None),
         )
 
     assert exc_info.value.code == 2
@@ -169,7 +168,7 @@ def test_upgrade_noop_skips_agent_flag_check(
     taste_path = init_taste_project(tmp_path, monkeypatch)
     taste_path.write_text(default_taste_text(), encoding="utf-8")
 
-    _handle_taste(_upgrade_args(agent=None, model=None, effort=None))
+    _handle_taste(_upgrade_args(agent=None, model=None))
 
     out = capsys.readouterr().out.strip()
     assert "taste already current" in out
@@ -199,11 +198,12 @@ def test_upgrade_rejects_force(
 def test_taste_subparser_accepts_upgrade_flags() -> None:
     parser = build_parser()
     args = parser.parse_args(
-        ["taste", "--upgrade", "--with", "codex", "--model", "m", "--effort", "high"],
+        ["taste", "--upgrade", "--with", "codex", "--model", "m"],
     )
     assert args.upgrade is True
     assert args.interview is False
     assert args.agent == "codex"
+    assert args.model == "m"
 
 
 def test_taste_interview_and_upgrade_mutually_exclusive() -> None:

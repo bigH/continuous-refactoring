@@ -122,6 +122,7 @@ def make_taste_agent_writer(
         assert content_path == extract_taste_path(prompt)
         assert settle_path == extract_settle_path(prompt)
         if captured is not None:
+            captured["effort"] = _effort
             captured["prompt"] = prompt
             captured["content_path"] = str(content_path)
             captured["settle_path"] = str(settle_path)
@@ -143,7 +144,6 @@ def make_taste_args(
     global_: bool = False,
     agent: str | None = None,
     model: str | None = None,
-    effort: str | None = None,
     force: bool = False,
 ) -> argparse.Namespace:
     return argparse.Namespace(
@@ -153,7 +153,6 @@ def make_taste_args(
         refine=mode == "refine",
         agent=agent,
         model=model,
-        effort=effort,
         force=force,
     )
 

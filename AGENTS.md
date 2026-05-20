@@ -24,8 +24,10 @@ Treat `AGENTS.md` as part of the codebase's invariants, not documentation. A dri
   [--live-migrations-dir DIR] [--in-repo-taste [PATH]] [--force]`
 - Taste: `continuous-refactoring taste [--global]
   [--interview|--upgrade|--refine]
-  [--with codex|claude --model <model> --effort EFFORT]
+  [--with codex|claude --model <model>]
   [--force]`
+  Active taste agent modes require `--with` and `--model`; the taste agent
+  always runs at fixed `medium` effort.
 - Run once: `continuous-refactoring run-once --with codex|claude
   --model <model> [common targeting/validation flags]`
 - Run loop: `continuous-refactoring run --with codex|claude --model <model>
@@ -139,7 +141,7 @@ active phase explicitly names `loop.py` in scope.
 - **Migration terminology split** (`migrations.py`, `planning.py`, `prompts.py`) — manifest `precondition` gates phase start; phase markdown `## Definition of Done` governs completion.
 - **Run-level baseline validation** (`loop.py`) — `run-once`, `run`, and `--focus-on-live-migrations` run the configured validation command after the clean-worktree check and before routing/refactoring. A red baseline stops as `baseline_failed`, not migration human review.
 - **Phase execution validation gate** (`phases.py`, `prompts.py`, `loop.py`) — a migration phase is complete only after host-side full validation passes. `execute_phase()` retries validation-red attempts from `head_before` up to the effective `--max-attempts` budget, and the phase prompt must include the literal configured validation command plus the phase file's Definition of Done as the completion contract.
-- **Effort budgeting** (`effort.py`, `loop.py`, `migration_tick.py`, `planning.py`) — `run` / `run-once` default to `--default-effort low` and `--max-allowed-effort xhigh`; there is no `--effort` alias on those commands. Target `effort-override` changes that target's default but is still capped. Migration `required_effort` above the cap defers the phase without failing the run.
+- **Effort budgeting** (`effort.py`, `loop.py`, `migration_tick.py`, `planning.py`) — `run` / `run-once` default to `--default-effort low` and `--max-allowed-effort xhigh`; there is no `--effort` alias on those commands. Target `effort-override` changes that target's default but is still capped. Migration `required_effort` above the cap defers the phase without failing the run. Taste agent actions do not accept `--effort`; they always use fixed `medium` effort.
 - **Taste injection** — every prompt includes a `## Taste` section. `tests/test_prompts.py` enforces this via `_TASTE_INJECTED_PROMPTS`. Do not drop it.
 - **Taste read boundary** (`config.py`, `cli.py`, `loop.py`) — `load_taste()` translates unreadable project/global taste reads into `ContinuousRefactorError`; CLI stale-taste checks and loop taste loading must treat that boundary failure as non-fatal and skip/fall back instead of leaking raw `OSError`/`PermissionError`.
 - **Repo-local taste routing** (`config.py`, `cli.py`) — `ProjectEntry.repo_taste_path` is stored repo-relative in the XDG manifest and resolved through `resolve_project_taste_path()`. Keep `init`, `taste`, stale warnings, and run prompt loading on that helper so the active taste path does not drift.

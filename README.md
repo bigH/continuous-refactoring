@@ -105,8 +105,8 @@ continuous-refactoring init --in-repo-taste
 
 # 2. (Optional) Write your refactoring taste — either edit the file, have an agent interview you,
 #    or refine an existing draft collaboratively
-continuous-refactoring taste --interview --with codex --model gpt-5 --effort high
-continuous-refactoring taste --refine --with codex --model gpt-5 --effort high
+continuous-refactoring taste --interview --with codex --model gpt-5
+continuous-refactoring taste --refine --with codex --model gpt-5
 
 # 3. Do one pass
 continuous-refactoring run-once \
@@ -122,12 +122,15 @@ continuous-refactoring run \
   --sleep 5
 ```
 
+Active taste agent modes require `--with` and `--model`; taste agent sessions
+always run at fixed `medium` effort.
+
 ## Subcommands
 
 | Command | What it does |
 |---|---|
 | `init` | Registers this directory as a project, creates a default `taste.md`, and can store `--live-migrations-dir` or `--in-repo-taste`. |
-| `taste` | Prints the active taste file path. Add `--interview` to have an agent author it, `--refine` to iteratively improve an existing taste doc, `--upgrade` to refresh stale taste dimensions, `--global` for the shared file, and `--force` to let `--interview` overwrite custom content after writing a `.bak`. |
+| `taste` | Prints the active taste file path. Add `--interview` to have an agent author it, `--refine` to iteratively improve an existing taste doc, `--upgrade` to refresh stale taste dimensions, `--global` for the shared file, and `--force` to let `--interview` overwrite custom content after writing a `.bak`. Active agent modes require `--with` and `--model`, then run at fixed `medium` effort. |
 | `run-once` | Single pass on one resolved target. No retry. If there is a diff and validation passes, it commits locally and prints the diffstat. |
 | `run` | The loop. Iterates refactor actions, retries on failure, and commits successful changes locally. Add `--focus-on-live-migrations` to bypass targeting and work only on eligible live migrations. |
 | `upgrade` | Checks that the global config manifest is current, rewrites it idempotently, and warns if the global taste file is stale. |
@@ -172,8 +175,9 @@ scope text as context for that target.
 - `migration doctor <slug-or-path>` / `migration doctor --all` — read-only consistency checks. Doctor reports problems; it does not repair them.
 - `migration review <slug-or-path> --with ... --model ... --effort ...` — resolves an `awaiting_human_review` migration through a staged workspace.
 - `migration refine <slug-or-path> (--message <text>|--file <path>) --with ... --model ... --effort ... [--show-agent-logs]` — adds user feedback to a planning or unexecuted ready migration and resumes planning through the `revise` step when reopening ready work.
-- `taste --refine` — opens a collaborative editing session for the taste file. The agent keeps refining until you tell it to write, then the session ends automatically after the settled write.
-- `taste --upgrade` — re-interviews for taste dimensions added since your last version. No-op when already current; use `taste --refine` if you want to rework the doc anyway.
+- `taste --refine --with ... --model ...` — opens a collaborative editing session for the taste file. The agent keeps refining until you tell it to write, then the session ends automatically after the settled write.
+- `taste --upgrade --with ... --model ...` — re-interviews for taste dimensions added since your last version. No-op when already current; use `taste --refine` if you want to rework the doc anyway.
+- Taste agent sessions always use fixed `medium` effort.
 - `taste --force` — only applies to `--interview`; it allows a customized taste file to be overwritten after backing it up to `taste.md.bak`.
 
 Canonical migration commands:
@@ -253,7 +257,7 @@ The taste file is a short bullet list of your refactoring preferences. It gets i
 - Project taste: `~/.local/share/continuous-refactoring/projects/<uuid>/taste.md`, or the repo-local path chosen with `init --in-repo-taste [PATH]`
 - Global taste: `~/.local/share/continuous-refactoring/global/taste.md`
 
-Project taste wins over global. Use `taste` to print the active path, `taste --interview` to bootstrap one, `taste --refine` to rework it with an agent, or edit the file directly any time.
+Project taste wins over global. Use `taste` to print the active path, `taste --interview --with ... --model ...` to bootstrap one, `taste --refine --with ... --model ...` to rework it with an agent, or edit the file directly any time.
 
 ## Larger refactorings
 

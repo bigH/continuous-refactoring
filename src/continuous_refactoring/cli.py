@@ -40,6 +40,7 @@ _GLOBAL_TASTE_WARNING = (
     "warning: global taste is out of date — "
     "run 'continuous-refactoring taste --upgrade' to update."
 )
+_TASTE_AGENT_EFFORT = "medium"
 
 
 def _version_banner() -> str:
@@ -190,11 +191,6 @@ def _add_taste_parser(subparsers: argparse._SubParsersAction) -> None:
         "--model",
         default=None,
         help="Model name for --interview, --upgrade, or --refine.",
-    )
-    taste_parser.add_argument(
-        "--effort",
-        default=None,
-        help="Effort level for --interview, --upgrade, or --refine.",
     )
     taste_parser.add_argument(
         "--force",
@@ -620,9 +616,7 @@ def _active_taste_mode(args: argparse.Namespace) -> str | None:
 
 
 def _taste_agent_flags_set(args: argparse.Namespace) -> bool:
-    return any(
-        getattr(args, name, None) is not None for name in ("agent", "model", "effort")
-    )
+    return any(getattr(args, name, None) is not None for name in ("agent", "model"))
 
 
 def _require_taste_action_flags(
@@ -630,14 +624,12 @@ def _require_taste_action_flags(
     action: str,
     agent: str | None,
     model: str | None,
-    effort: str | None,
 ) -> None:
     missing = [
         flag
         for flag, value in (
             ("--with", agent),
             ("--model", model),
-            ("--effort", effort),
         )
         if not value
     ]
@@ -661,7 +653,7 @@ def _run_taste_agent(
         returncode = run_agent_interactive_until_settled(
             args.agent,
             args.model,
-            args.effort,
+            _TASTE_AGENT_EFFORT,
             prompt,
             Path.cwd().resolve(),
             content_path=path,
@@ -729,7 +721,7 @@ def _handle_taste(args: argparse.Namespace) -> None:
     if mode is None:
         if _taste_agent_flags_set(args):
             print(
-                "Error: --with/--model/--effort require --interview, --upgrade, or --refine.",
+                "Error: --with/--model require --interview, --upgrade, or --refine.",
                 file=sys.stderr,
             )
             raise SystemExit(2)
@@ -741,7 +733,6 @@ def _handle_taste(args: argparse.Namespace) -> None:
         action=mode,
         agent=getattr(args, "agent", None),
         model=getattr(args, "model", None),
-        effort=getattr(args, "effort", None),
     )
     return _TASTE_MODE_HANDLERS[mode](args)
 

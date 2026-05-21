@@ -32,7 +32,6 @@ from continuous_refactoring.loop import (
 )
 from continuous_refactoring.migration_cli import handle_migration
 from continuous_refactoring.migrations import MIGRATION_STATUSES
-from continuous_refactoring.review_cli import handle_review
 
 _PACKAGE_DISTRIBUTION = "continuous-refactoring"
 _TASTE_WARNING = "warning: taste out of date — run `continuous-refactoring taste --upgrade`"
@@ -261,24 +260,6 @@ def _add_run_parser(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
-def _add_review_parser(subparsers: argparse._SubParsersAction) -> None:
-    review_parser = subparsers.add_parser(
-        "review",
-        help="Compatibility shortcut for migrations awaiting human review.",
-        description=(
-            "Compatibility listing shortcut for migrations awaiting human "
-            "review. Use `migration review` for canonical mutation."
-        ),
-    )
-    review_parser.set_defaults(handler=handle_review)
-    review_sub = review_parser.add_subparsers(dest="review_command")
-    review_sub.add_parser(
-        "list",
-        help="List migrations awaiting human review.",
-        description="List migrations awaiting human review.",
-    )
-
-
 def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
     migration_parser = subparsers.add_parser(
         "migration",
@@ -380,7 +361,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     upgrade_parser.set_defaults(handler=_handle_upgrade)
     _add_migration_parser(subparsers)
-    _add_review_parser(subparsers)
 
     return parser
 

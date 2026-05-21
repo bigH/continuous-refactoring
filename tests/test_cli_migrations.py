@@ -84,6 +84,15 @@ def test_migration_parser_accepts_list_and_doctor() -> None:
     assert not hasattr(review_args, "effort")
 
 
+def test_top_level_review_command_is_not_registered() -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit) as exit_info:
+        parser.parse_args(["review"])
+
+    assert exit_info.value.code == 2
+
+
 def test_run_help_describes_routed_actions(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -126,6 +135,7 @@ def test_migration_help_describes_review_and_refine(
     assert "Apply feedback to a planning or unexecuted ready" in refine_help
     assert "--effort" not in review_help
     assert "--effort" not in refine_help
+    assert "Compatibility shortcut" not in top_help
     assert "Perform staged " + "review" not in migration_help
     assert "flagged " + "migration" not in migration_help
 

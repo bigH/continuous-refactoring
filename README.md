@@ -140,8 +140,6 @@ always run at fixed `medium` effort.
 | `migration review <slug-or-path>` | Starts staged review for a migration awaiting human review. Requires `--with` and `--model`; review runs at fixed internal `high` effort. |
 | `migration refine <slug-or-path>` | Records feedback for a planning or unexecuted ready migration and runs one staged planning revision. Requires `--message <text>` or `--file <path>`, plus `--with` and `--model`; refine runs at fixed internal `high` effort. Add `--show-agent-logs` to mirror the planning agent. |
 
-Legacy `review list` remains a compatibility shortcut for `migration list --awaiting-review`.
-
 ## Targeting / Useful flags
 
 ### Target selection

@@ -52,7 +52,7 @@ _SUBCOMMANDS: list[tuple[list[str], str]] = [
     (["cr", "init"], "_handle_init"),
     (["cr", "taste", "--global"], "_handle_taste"),
     (["cr", "upgrade"], "_handle_upgrade"),
-    (["cr", "review", "list"], "handle_review"),
+    (["cr", "migration", "list"], "handle_migration"),
     (
         [
             "cr", "run-once",
@@ -104,7 +104,7 @@ def xdg_root(
 @pytest.mark.parametrize(
     "argv,handler_name",
     _SUBCOMMANDS,
-    ids=["init", "taste", "upgrade", "review", "run-once", "run"],
+    ids=["init", "taste", "upgrade", "migration", "run-once", "run"],
 )
 @pytest.mark.parametrize(
     "taste_writer,warns",

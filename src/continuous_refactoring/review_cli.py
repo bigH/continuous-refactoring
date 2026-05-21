@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import argparse
 import shutil
 import sys
 import uuid
@@ -9,20 +8,14 @@ from pathlib import Path
 
 from continuous_refactoring.agent import run_agent_interactive
 from continuous_refactoring.artifacts import ContinuousRefactorError
-from continuous_refactoring.config import (
-    resolve_live_migrations_dir,
-    resolve_project,
-)
 from continuous_refactoring.migration_cli import MigrationTarget
 from continuous_refactoring.migration_consistency import (
     check_migration_consistency,
     has_blocking_consistency_findings,
-    iter_visible_migration_dirs,
 )
 from continuous_refactoring.migrations import (
     MigrationManifest,
     load_manifest as load_migration_manifest,
-    phase_file_reference,
     resolve_current_phase,
 )
 from continuous_refactoring.planning_publish import (
@@ -37,19 +30,8 @@ from continuous_refactoring.prompts import compose_migration_review_prompt
 
 __all__ = [
     "StagedReviewRequest",
-    "handle_review",
-    "handle_review_list",
     "handle_staged_migration_review",
 ]
-
-_REVIEW_USAGE = "Usage: continuous-refactoring review {list}"
-
-
-@dataclass(frozen=True)
-class _ReviewCliContext:
-    repo_root: Path
-    live_dir: Path
-    project_state_dir: Path
 
 
 @dataclass(frozen=True)
@@ -68,58 +50,6 @@ class _ReviewCliError(ContinuousRefactorError):
     def __init__(self, message: str, exit_code: int) -> None:
         self.exit_code = exit_code
         super().__init__(message)
-
-
-def _resolve_review_context(*, error_code: int) -> _ReviewCliContext:
-    try:
-        project = resolve_project(Path.cwd().resolve())
-    except ContinuousRefactorError:
-        print(
-            "Error: project not initialized; no live-migrations-dir available.",
-            file=sys.stderr,
-        )
-        raise SystemExit(error_code)
-    try:
-        live_dir = resolve_live_migrations_dir(project)
-    except ContinuousRefactorError as error:
-        print(f"Error: {error}", file=sys.stderr)
-        raise SystemExit(error_code)
-    if live_dir is None:
-        print(
-            "Error: no live-migrations-dir configured for this project.",
-            file=sys.stderr,
-        )
-        raise SystemExit(error_code)
-
-    return _ReviewCliContext(
-        repo_root=Path(project.entry.path).resolve(),
-        live_dir=live_dir,
-        project_state_dir=project.project_dir,
-    )
-
-
-def handle_review_list() -> None:
-    context = _resolve_review_context(error_code=1)
-    live_dir = context.live_dir
-
-    if not live_dir.is_dir():
-        return
-
-    for child in iter_visible_migration_dirs(live_dir):
-        manifest_file = child / "manifest.json"
-        if not manifest_file.exists():
-            continue
-        manifest = load_migration_manifest(manifest_file)
-        if manifest.awaiting_human_review:
-            reason = manifest.human_review_reason or "(no reason recorded)"
-            phase = resolve_current_phase(manifest) if manifest.current_phase else None
-            phase_file = phase_file_reference(phase) if phase is not None else "(none)"
-            phase_name = phase.name if phase is not None else "(none)"
-            print(
-                f"{manifest.name}\t{manifest.status}\t"
-                f"{phase_file}\t{phase_name}\t{manifest.last_touch}\t"
-                f"{reason}"
-            )
 
 
 def handle_staged_migration_review(
@@ -280,10 +210,3 @@ def _review_publish_error_message(error: PlanningPublishError, slug: str) -> str
         f"Run `continuous-refactoring migration doctor {slug}` if unsure, then "
         f"rerun `continuous-refactoring migration review {slug} ...`."
     )
-
-
-def handle_review(args: argparse.Namespace) -> None:
-    if args.review_command == "list":
-        return handle_review_list()
-    print(_REVIEW_USAGE, file=sys.stderr)
-    raise SystemExit(2)

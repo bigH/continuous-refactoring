@@ -1,17 +1,17 @@
 # Migration Plan: behavior-first-random-file-stabilization
 
 ## Objective
-Stabilize externally visible behavior for this random-file migration before internal cleanup, then prune internal dead paths behind those proven contracts, and require explicit human review if shipped interfaces change.
+Stabilize externally visible behavior for the random-file target first, perform internal cleanup behind that locked behavior, and gate any interface shift behind explicit human review.
 
 ## Phase Sequence
-1. Phase 1 — Contract Regression Net
-2. Phase 2 — Internal Cleanup Behind Contracts
-3. Phase 3 — Interface-Shift Review Gate (conditional)
+1. Phase 1 - Contract Regression Net
+2. Phase 2 - Internal Cleanup Behind Contracts
+3. Phase 3 - Interface-Shift Review Gate (conditional)
 
 ## Dependencies
-- Phase 1 has no migration-phase dependency.
+- Phase 1 has no phase dependency.
 - Phase 2 depends on Phase 1 completion.
-- Phase 3 depends on Phase 2 and runs only if Phase 2 introduces interface behavior changes.
+- Phase 3 depends on Phase 2 completion and executes only when an interface behavior change exists.
 
 ## Dependency Graph
 ```mermaid
@@ -20,25 +20,25 @@ graph TD
   P2 --> P3[Phase 3: Interface-Shift Review Gate (Conditional)]
 ```
 
-## Phase Details Index
+## Phase Artifacts
 - [phase-1-contract-regression-net.md](phase-1-contract-regression-net.md)
 - [phase-2-internal-cleanup-behind-contracts.md](phase-2-internal-cleanup-behind-contracts.md)
 - [phase-3-interface-shift-review-gate.md](phase-3-interface-shift-review-gate.md)
 
 ## Validation Strategy
-- Baseline green is enforced by the harness before refactoring and after each completed phase.
-- Each phase adds phase-local verification:
-  - Phase 1 proves current behavior with focused outcome-based regression tests for selected random-file interfaces.
-  - Phase 2 validates cleanup safety by passing the new regression net and full configured validation command.
-  - Phase 3 validates that any interface change is explicitly documented and routed for human review before further automation.
-- Every phase ends in a shippable state: no partial interface contract changes without either preserving behavior (Phase 2) or gating through explicit review (Phase 3).
+- Harness baseline guarantees configured validation is green before refactoring and after each completed phase.
+- Each phase adds independent, phase-local checks:
+  - Phase 1: records a concrete contract inventory and adds outcome-focused regression coverage for those contracts.
+  - Phase 2: proves internal deletion/simplification keeps locked behavior stable and documents any discovered interface delta.
+  - Phase 3: verifies interface-delta documentation quality plus correct human-review gating state.
+- A phase is complete only when its Definition of Done is met and the configured validation command passes.
 
-## Risk Controls
-- Front-load contract evidence so later deletions are constrained.
-- Keep cleanup scoped to random-targeted internal files and remove only paths made redundant by validated contracts.
-- Escalate interface deltas to a clear human-review gate with explicit behavior-change text (no generic review messages).
+## Risk Reduction Order
+- Front-load behavior locking so later cleanup has a hard safety rail.
+- Restrict cleanup to scoped random-target internals and remove stale paths only when protected by behavior checks.
+- Isolate interface-risk work into a dedicated review-gated phase so repository state remains shippable.
 
 ## Out of Scope
-- Broad structural refactors outside random-targeted files.
-- Speculative interface redesigns not required by discovered defects.
+- Structural refactors outside the random-target file set.
+- Speculative interface redesign.
 - Release/version workflow changes.

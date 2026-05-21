@@ -1,34 +1,34 @@
 # Phase 3: Interface-Shift Review Gate
 
 ## Goal
-Apply explicit human review gating for any interface behavior change introduced or required by the migration.
+Gate any interface behavior change behind explicit, interface-specific human review before automation continues.
 
 ## Scope
-- Runs only when Phase 2 identifies an interface delta.
-- Documentation and manifest/review-state updates needed to gate automation until human approval.
-- Interface deltas include CLI behavior, repo-written files, XDG/project state behavior, migration manifest structure, and other user/install-visible contract changes.
+- Executes only when Phase 2 identifies an interface behavior delta.
+- Documentation and migration state updates required to communicate and enforce review gating.
+- Technical code changes are minimal and limited to what is necessary for correct gating-state behavior.
 
 ## Precondition
 - Phase 2 is complete.
-- A concrete interface behavior delta is identified and reproducible.
-- The migration includes clear artifacts describing the before/after behavior and rollout impact.
+- At least one concrete interface behavior delta is documented with reproducible before/after behavior.
+- The migration still has `awaiting_human_review` unset at phase start, so this phase can set and verify the gate.
 
 ## Implementation Instructions
-1. Document the exact interface change in migration artifacts with concrete before/after behavior.
-2. Record explicit human-review-needed messaging naming the specific interface contract shift and user impact.
-3. Ensure automation remains gated (`awaiting_human_review`) until canonical migration review clears it.
-4. Keep technical changes minimal in this phase: this is a review gate, not a broad additional refactor.
+1. Document each interface shift with concrete before/after behavior and user/install impact.
+2. Add explicit review messaging that names the exact interface contract change; avoid generic "needs review" wording.
+3. Set and verify `awaiting_human_review` gating so automation remains paused until canonical migration review approval.
+4. Keep non-gating technical churn out of this phase.
 
 ## Validation Steps
-1. Verify review-facing artifacts clearly describe the interface delta and impact.
-2. Verify migration state correctly reflects human-review gating.
-3. Run the configured full validation command after any code/artifact updates.
+1. Verify review artifacts clearly describe each interface delta and impact.
+2. Verify migration gating state correctly reflects pending human review.
+3. Run the configured full validation command after artifact/state updates.
 
 ## Definition of Done
-- Every interface behavior change introduced by this migration is explicitly documented with concrete impact.
-- Human-review gating is active and unambiguous until review approval.
-- No generic "needs review" text is used where interface-specific messaging is required.
+- All interface behavior changes discovered in this migration are documented with concrete impact statements.
+- Human-review gating is active, explicit, and tied to the named interface deltas.
+- Review text is interface-specific and non-generic.
 - The full configured validation command passes.
 
-required_effort: high
-effort_reason: Interface-change triage and review gating is high-stakes and must be exact.
+required_effort: medium
+effort_reason: Primarily documentation plus gating-state correctness with limited code-path change.

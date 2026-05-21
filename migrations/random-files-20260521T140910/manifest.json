@@ -4,7 +4,7 @@
   "created_at": "2026-05-21T14:09:10.762-07:00",
   "current_phase": "boundary-contract-guardrails",
   "human_review_reason": null,
-  "last_touch": "2026-05-21T14:12:14.637-07:00",
+  "last_touch": "2026-05-21T14:12:46.367-07:00",
   "name": "random-files-20260521T140910",
   "phases": [
     {
@@ -20,7 +20,7 @@
       "effort_reason": "Cross-module effort-resolution cleanup can silently drift CLI/migration behavior without careful contract-preserving verification.",
       "file": "phase-2-internal-effort-resolution-cleanup.md",
       "name": "internal-effort-resolution-cleanup",
-      "precondition": "- Phase 1 is complete. - Contract-guarding tests for boundary behavior are present and passing locally. - Current effort interfaces (default `low`, cap `xhigh`, target override cap behavior, migration defer-on-over-cap behavior) still exist and are encoded in tests.",
+      "precondition": "- Phase 1 is complete. - Contract-guarding tests for boundary behavior added in Phase 1 are still present. - Current effort interfaces (default `low`, cap `xhigh`, target override cap behavior, migration defer-on-over-cap behavior) still exist and are encoded in tests.",
       "required_effort": "medium"
     },
     {

@@ -15,7 +15,7 @@ effort_reason: Cross-module effort-resolution cleanup can silently drift CLI/mig
 
 ## Precondition
 - Phase 1 is complete.
-- Contract-guarding tests for boundary behavior are present and passing locally.
+- Contract-guarding tests for boundary behavior added in Phase 1 are still present.
 - Current effort interfaces (default `low`, cap `xhigh`, target override cap behavior, migration defer-on-over-cap behavior) still exist and are encoded in tests.
 
 ## Implementation Instructions

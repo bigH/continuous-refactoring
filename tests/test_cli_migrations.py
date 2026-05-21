@@ -75,15 +75,13 @@ def test_migration_parser_accepts_list_and_doctor() -> None:
             "codex",
             "--model",
             "test-model",
-            "--effort",
-            "low",
         ]
     )
     assert review_args.migration_command == "review"
     assert review_args.target == "my-mig"
     assert review_args.agent == "codex"
     assert review_args.model == "test-model"
-    assert review_args.effort == "low"
+    assert not hasattr(review_args, "effort")
 
 
 def test_migration_parser_accepts_doctor_all() -> None:
@@ -110,15 +108,15 @@ def test_documented_migration_commands_match_parser() -> None:
         "continuous-refactoring migration doctor --all",
         (
             "continuous-refactoring migration review <slug-or-path> --with codex "
-            "--model gpt-5 --effort high"
+            "--model gpt-5"
         ),
         (
             "continuous-refactoring migration refine <slug-or-path> --message "
-            "\"split the risky phase\" --with codex --model gpt-5 --effort high"
+            "\"split the risky phase\" --with codex --model gpt-5"
         ),
         (
             "continuous-refactoring migration refine <slug-or-path> --file "
-            "feedback.md --with codex --model gpt-5 --effort high"
+            "feedback.md --with codex --model gpt-5"
         ),
     )
 
@@ -165,8 +163,6 @@ def test_migration_refine_requires_message_or_file() -> None:
                 "codex",
                 "--model",
                 "test-model",
-                "--effort",
-                "low",
             ]
         )
     assert missing_exit.value.code == 2
@@ -185,8 +181,6 @@ def test_migration_refine_requires_message_or_file() -> None:
                 "codex",
                 "--model",
                 "test-model",
-                "--effort",
-                "low",
             ]
         )
     assert both_exit.value.code == 2
@@ -202,8 +196,6 @@ def test_migration_refine_requires_message_or_file() -> None:
             "codex",
             "--model",
             "test-model",
-            "--effort",
-            "low",
             "--show-agent-logs",
         ]
     )
@@ -214,7 +206,7 @@ def test_migration_refine_requires_message_or_file() -> None:
     assert args.file is None
     assert args.agent == "codex"
     assert args.model == "test-model"
-    assert args.effort == "low"
+    assert not hasattr(args, "effort")
     assert args.show_agent_logs is True
 
     with pytest.raises(SystemExit) as command_logs_exit:
@@ -229,12 +221,48 @@ def test_migration_refine_requires_message_or_file() -> None:
                 "codex",
                 "--model",
                 "test-model",
-                "--effort",
-                "low",
                 "--show-command-logs",
             ]
         )
     assert command_logs_exit.value.code == 2
+
+
+@pytest.mark.parametrize(
+    "argv",
+    [
+        [
+            "migration",
+            "review",
+            "my-mig",
+            "--with",
+            "codex",
+            "--model",
+            "test-model",
+            "--effort",
+            "high",
+        ],
+        [
+            "migration",
+            "refine",
+            "my-mig",
+            "--message",
+            "tighten it",
+            "--with",
+            "codex",
+            "--model",
+            "test-model",
+            "--effort",
+            "high",
+        ],
+    ],
+)
+def test_migration_review_and_refine_reject_effort_flag(argv: list[str]) -> None:
+    parser = build_parser()
+
+    with pytest.raises(SystemExit) as exc_info:
+        parser.parse_args(argv)
+
+    assert exc_info.value.code == 2
 
 
 def test_migration_list_includes_planning_ready_review_and_done_statuses(
@@ -440,10 +468,10 @@ def test_migration_review_accepts_slug_or_path_inside_live_root(
         "target",
         awaiting_human_review=True,
     )
-    seen: list[Path] = []
+    seen: list[tuple[Path, str]] = []
 
     def fake_review(request: object) -> None:
-        seen.append(request.target.path)
+        seen.append((request.target.path, request.effort))
 
     monkeypatch.setattr(
         "continuous_refactoring.review_cli.handle_staged_migration_review",
@@ -453,7 +481,7 @@ def test_migration_review_accepts_slug_or_path_inside_live_root(
     handle_migration_review(_review_args("target"))
     handle_migration_review(_review_args("migrations/target"))
 
-    assert seen == [migration_dir, migration_dir]
+    assert seen == [(migration_dir, "high"), (migration_dir, "high")]
 
 
 def test_migration_review_rejects_outside_path_and_symlink_escape(
@@ -484,7 +512,7 @@ def test_migration_review_rejects_outside_path_and_symlink_escape(
     assert "symlink" in capsys.readouterr().err
 
 
-def test_migration_review_rejects_missing_or_not_flagged_migration(
+def test_migration_review_rejects_missing_migration_without_refine_suggestion(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
@@ -496,13 +524,50 @@ def test_migration_review_rejects_missing_or_not_flagged_migration(
         handle_migration_review(_review_args("missing"))
 
     assert missing_exit.value.code == 2
-    assert "does not exist" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "does not exist" in err
+    assert "migration refine" not in err
+
+
+def test_migration_review_rejects_refine_eligible_not_awaiting_review_with_refine_hint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _repo, live_dir = _init_migration_project(tmp_path, monkeypatch)
+    _write_migration(live_dir, "not-flagged")
 
     with pytest.raises(SystemExit) as not_flagged_exit:
         handle_migration_review(_review_args("not-flagged"))
 
     assert not_flagged_exit.value.code == 2
-    assert "not flagged" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "not awaiting human review" in err
+    assert "continuous-refactoring migration list --awaiting-review" in err
+    assert "continuous-refactoring migration refine not-flagged" in err
+
+
+def test_migration_review_rejects_non_refine_eligible_not_awaiting_review_with_guarded_refine_hint(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _repo, live_dir = _init_migration_project(tmp_path, monkeypatch)
+    _write_migration(
+        live_dir,
+        "phase-done",
+        phases=(replace(_PHASE, done=True),),
+    )
+
+    with pytest.raises(SystemExit) as not_flagged_exit:
+        handle_migration_review(_review_args("phase-done"))
+
+    assert not_flagged_exit.value.code == 2
+    err = capsys.readouterr().err
+    assert "not awaiting human review" in err
+    assert "continuous-refactoring migration list --awaiting-review" in err
+    assert "continuous-refactoring migration refine phase-done" in err
+    assert "only available for planning or unexecuted ready migrations" in err
 
 
 def test_migration_review_runs_agent_against_work_dir(
@@ -523,6 +588,7 @@ def test_migration_review_runs_agent_against_work_dir(
         agent: str, model: str, effort: str, prompt: str, repo_root: Path,
     ) -> int:
         seen["agent"] = agent
+        seen["effort"] = effort
         seen["cwd"] = repo_root
         seen["prompt"] = prompt
         manifest = load_manifest(repo_root / "manifest.json")
@@ -544,6 +610,7 @@ def test_migration_review_runs_agent_against_work_dir(
     handle_migration_review(_review_args("target"))
 
     assert seen["agent"] == "codex"
+    assert seen["effort"] == "high"
     assert seen["cwd"] != migration_dir
     assert isinstance(seen["cwd"], Path)
     assert seen["cwd"].name == "target"
@@ -553,6 +620,50 @@ def test_migration_review_runs_agent_against_work_dir(
     reloaded = load_manifest(migration_dir / "manifest.json")
     assert reloaded.awaiting_human_review is False
     assert reloaded.human_review_reason is None
+
+
+def test_migration_review_prompt_handles_missing_current_phase(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo, live_dir = _init_migration_project(tmp_path, monkeypatch)
+    migration_dir = _write_migration(
+        live_dir,
+        "target",
+        awaiting_human_review=True,
+        current_phase="",
+        human_review_reason="phase cursor cleared",
+    )
+    _commit_all(repo)
+    seen: dict[str, str] = {}
+
+    def fake_interactive(
+        agent: str, model: str, effort: str, prompt: str, repo_root: Path,
+    ) -> int:
+        seen["prompt"] = prompt
+        manifest = load_manifest(repo_root / "manifest.json")
+        save_manifest(
+            replace(
+                manifest,
+                awaiting_human_review=False,
+                current_phase="setup",
+                human_review_reason=None,
+            ),
+            repo_root / "manifest.json",
+        )
+        return 0
+
+    monkeypatch.setattr(
+        "continuous_refactoring.review_cli.run_agent_interactive",
+        fake_interactive,
+    )
+
+    handle_migration_review(_review_args("target"))
+
+    assert "phase cursor cleared" in seen["prompt"]
+    assert "Current phase file: (none)" in seen["prompt"]
+    assert "Current phase name: (none)" in seen["prompt"]
+    assert load_manifest(migration_dir / "manifest.json").current_phase == "setup"
 
 
 def test_migration_review_failure_leaves_live_snapshot_unchanged(
@@ -747,6 +858,9 @@ def test_migration_refine_resumes_from_current_planning_state(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    artifact_tmp = tmp_path / "artifact-tmp"
+    artifact_tmp.mkdir()
+    monkeypatch.setenv("TMPDIR", str(artifact_tmp))
     repo, live_dir = _init_migration_project(tmp_path, monkeypatch)
     migration_dir = _write_migration(
         live_dir, "target", status="planning", current_phase="", phases=(),
@@ -783,10 +897,18 @@ def test_migration_refine_resumes_from_current_planning_state(
 
     state = load_planning_state(repo, planning_state_path(migration_dir))
     assert fake.stage_labels == ["expand"]
+    assert fake.efforts == ["high"]
     assert fake.mirror_to_terminal == [True]
     assert state.next_step == "review"
+    assert state.completed_steps[-1].effort == "high"
     assert state.feedback[-1].source == "message"
     assert state.feedback[-1].text == "split phase one"
+    summaries = list((artifact_tmp / "continuous-refactoring").glob("*/summary.json"))
+    assert len(summaries) == 1
+    summary = json.loads(summaries[0].read_text(encoding="utf-8"))
+    assert summary["effort"] == "high"
+    assert summary["default_effort"] == "high"
+    assert summary["max_allowed_effort"] == "high"
     assert (migration_dir / "plan.md").read_text(encoding="utf-8") == "# Refined Plan\n"
 
 
@@ -1392,7 +1514,6 @@ def _review_args(target: str) -> argparse.Namespace:
         target=target,
         agent="codex",
         model="test-model",
-        effort="low",
     )
 
 
@@ -1409,7 +1530,6 @@ def _refine_args(
         file=file,
         agent="codex",
         model="test-model",
-        effort="low",
         show_agent_logs=show_agent_logs,
     )
 
@@ -1442,6 +1562,7 @@ class _RefineAgent:
         self._index = 0
         self._on_call = on_call
         self.stage_labels: list[str] = []
+        self.efforts: list[str] = []
         self.prompts: list[str] = []
         self.mirror_to_terminal: list[bool] = []
 
@@ -1456,6 +1577,7 @@ class _RefineAgent:
 
         self.prompts.append(prompt)
         self.stage_labels.append(stdout_path.parent.name)
+        self.efforts.append(str(kwargs["effort"]))
         self.mirror_to_terminal.append(bool(kwargs["mirror_to_terminal"]))
         for rel_path, content in writes.items():
             path = migration_dir / rel_path

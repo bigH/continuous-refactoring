@@ -137,10 +137,10 @@ always run at fixed `medium` effort.
 | `migration list` | Lists visible migrations. Add `--status <status>` or `--awaiting-review` to filter. |
 | `migration doctor <slug-or-path>` | Validates one visible migration's consistency. |
 | `migration doctor --all` | Validates every visible migration plus internal transaction state. |
-| `migration review <slug-or-path>` | Starts staged review for a migration awaiting human review. Requires `--with`, `--model`, and `--effort`. |
-| `migration refine <slug-or-path>` | Records feedback for a planning or unexecuted ready migration and runs one staged planning revision. Requires `--message <text>` or `--file <path>`, plus `--with`, `--model`, and `--effort`; add `--show-agent-logs` to mirror the planning agent. |
+| `migration review <slug-or-path>` | Starts staged review for a migration awaiting human review. Requires `--with` and `--model`; review runs at fixed internal `high` effort. |
+| `migration refine <slug-or-path>` | Records feedback for a planning or unexecuted ready migration and runs one staged planning revision. Requires `--message <text>` or `--file <path>`, plus `--with` and `--model`; refine runs at fixed internal `high` effort. Add `--show-agent-logs` to mirror the planning agent. |
 
-Legacy `review list` and `review perform <migration>` remain compatibility aliases; prefer `migration list --awaiting-review` and `migration review`.
+Legacy `review list` remains a compatibility shortcut for `migration list --awaiting-review`.
 
 ## Targeting / Useful flags
 
@@ -173,8 +173,8 @@ scope text as context for that target.
 - `init --in-repo-taste [PATH]` — stores this project's taste file in the repo and remembers the repo-relative path. Defaults to `.continuous-refactoring/taste.md`; re-run `init --in-repo-taste ...` to choose a different path.
 - `migration list` — shows visible migrations; `--awaiting-review` narrows to human-review handoffs.
 - `migration doctor <slug-or-path>` / `migration doctor --all` — read-only consistency checks. Doctor reports problems; it does not repair them.
-- `migration review <slug-or-path> --with ... --model ... --effort ...` — resolves an `awaiting_human_review` migration through a staged workspace.
-- `migration refine <slug-or-path> (--message <text>|--file <path>) --with ... --model ... --effort ... [--show-agent-logs]` — adds user feedback to a planning or unexecuted ready migration and resumes planning through the `revise` step when reopening ready work.
+- `migration review <slug-or-path> --with ... --model ...` — resolves an `awaiting_human_review` migration through a staged workspace at fixed internal `high` effort.
+- `migration refine <slug-or-path> (--message <text>|--file <path>) --with ... --model ... [--show-agent-logs]` — adds user feedback to a planning or unexecuted ready migration and resumes planning through the `revise` step when reopening ready work at fixed internal `high` effort.
 - `taste --refine --with ... --model ...` — opens a collaborative editing session for the taste file. The agent keeps refining until you tell it to write, then the session ends automatically after the settled write.
 - `taste --upgrade --with ... --model ...` — re-interviews for taste dimensions added since your last version. No-op when already current; use `taste --refine` if you want to rework the doc anyway.
 - Taste agent sessions always use fixed `medium` effort.
@@ -188,9 +188,9 @@ continuous-refactoring migration list --status planning
 continuous-refactoring migration list --awaiting-review
 continuous-refactoring migration doctor <slug-or-path>
 continuous-refactoring migration doctor --all
-continuous-refactoring migration review <slug-or-path> --with codex --model gpt-5 --effort high
-continuous-refactoring migration refine <slug-or-path> --message "split the risky phase" --with codex --model gpt-5 --effort high
-continuous-refactoring migration refine <slug-or-path> --file feedback.md --with codex --model gpt-5 --effort high
+continuous-refactoring migration review <slug-or-path> --with codex --model gpt-5
+continuous-refactoring migration refine <slug-or-path> --message "split the risky phase" --with codex --model gpt-5
+continuous-refactoring migration refine <slug-or-path> --file feedback.md --with codex --model gpt-5
 ```
 
 ### Shared `run` / `run-once` flags
@@ -332,7 +332,7 @@ Before executing a phase, a ready-check agent verifies that the current phase pr
 
 - **ready: yes** — phase executes; on green tests, the phase is marked done, any prior deferral markers are cleared, and the migration advances immediately to the next phase.
 - **ready: no** — manifest activity is bumped, a retry cooldown is started, and a future `wake_up_on` is recorded when needed; the tick moves on.
-- **ready: unverifiable** — the migration is flagged `awaiting_human_review` and put on cooldown. Automated migration ticks skip flagged migrations until review clears the flag. Use `migration list --awaiting-review` to find it and `migration review <slug-or-path> --with ... --model ... --effort ...` to resolve it interactively.
+- **ready: unverifiable** — the migration is flagged `awaiting_human_review` and put on cooldown. Automated migration ticks skip flagged migrations until review clears the flag. Use `migration list --awaiting-review` to find it and `migration review <slug-or-path> --with ... --model ...` to resolve it interactively.
 
 Human-facing migration references use the relative phase spec path, for example `phase-2-failure-report.md`. The manifest cursor stores the phase `name`, not a numeric index.
 

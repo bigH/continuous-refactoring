@@ -262,17 +262,6 @@ def _add_review_parser(subparsers: argparse._SubParsersAction) -> None:
     review_parser.set_defaults(handler=handle_review)
     review_sub = review_parser.add_subparsers(dest="review_command")
     review_sub.add_parser("list", help="List migrations flagged for review.")
-    perform_parser = review_sub.add_parser(
-        "perform",
-        help="Perform review on a flagged migration.",
-    )
-    perform_parser.add_argument("migration", help="Migration name to review.")
-    perform_parser.add_argument(
-        "--with", dest="agent", choices=("codex", "claude"), required=True,
-        help="Agent backend.",
-    )
-    perform_parser.add_argument("--model", required=True, help="Model name.")
-    perform_parser.add_argument("--effort", required=True, help="Effort level.")
 
 
 def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
@@ -324,9 +313,6 @@ def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Agent backend.",
     )
     review_parser.add_argument("--model", required=True, help="Model name.")
-    review_parser.add_argument(
-        "--effort", choices=EFFORT_TIERS, required=True, help="Effort level."
-    )
 
     refine_parser = migration_sub.add_parser(
         "refine",
@@ -345,9 +331,6 @@ def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Agent backend.",
     )
     refine_parser.add_argument("--model", required=True, help="Model name.")
-    refine_parser.add_argument(
-        "--effort", choices=EFFORT_TIERS, required=True, help="Effort level."
-    )
     refine_parser.add_argument(
         "--show-agent-logs",
         action="store_true",

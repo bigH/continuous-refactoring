@@ -10,17 +10,17 @@ from pathlib import Path
 from continuous_refactoring.agent import run_agent_interactive
 from continuous_refactoring.artifacts import ContinuousRefactorError
 from continuous_refactoring.config import (
-    load_taste,
     resolve_live_migrations_dir,
     resolve_project,
 )
-from continuous_refactoring.migration_cli import MigrationTarget, resolve_migration_target
+from continuous_refactoring.migration_cli import MigrationTarget
 from continuous_refactoring.migration_consistency import (
     check_migration_consistency,
     has_blocking_consistency_findings,
     iter_visible_migration_dirs,
 )
 from continuous_refactoring.migrations import (
+    MigrationManifest,
     load_manifest as load_migration_manifest,
     phase_file_reference,
     resolve_current_phase,
@@ -39,12 +39,11 @@ __all__ = [
     "StagedReviewRequest",
     "handle_review",
     "handle_review_list",
-    "handle_review_perform",
     "handle_staged_migration_review",
     "perform_staged_migration_review",
 ]
 
-_REVIEW_USAGE = "Usage: continuous-refactoring review {list,perform}"
+_REVIEW_USAGE = "Usage: continuous-refactoring review {list}"
 
 
 @dataclass(frozen=True)
@@ -124,38 +123,6 @@ def handle_review_list() -> None:
             )
 
 
-def handle_review_perform(args: argparse.Namespace) -> None:
-    context = _resolve_review_context(error_code=2)
-    try:
-        target = resolve_migration_target(
-            live_dir=context.live_dir,
-            repo_root=context.repo_root,
-            value=args.migration,
-        )
-    except ContinuousRefactorError as error:
-        print(f"Error: {error}", file=sys.stderr)
-        raise SystemExit(2) from error
-
-    try:
-        taste = load_taste(resolve_project(context.repo_root))
-    except ContinuousRefactorError as error:
-        print(f"Error: {error}", file=sys.stderr)
-        raise SystemExit(1) from error
-
-    handle_staged_migration_review(
-        StagedReviewRequest(
-            repo_root=context.repo_root,
-            live_dir=context.live_dir,
-            target=target,
-            project_state_dir=context.project_state_dir,
-            agent=args.agent,
-            model=args.model,
-            effort=args.effort,
-            taste=taste,
-        )
-    )
-
-
 def handle_staged_migration_review(
     request: StagedReviewRequest,
 ) -> PlanningPublishResult:
@@ -188,7 +155,7 @@ def perform_staged_migration_review(
     manifest = load_migration_manifest(manifest_path)
     if not manifest.awaiting_human_review:
         raise _ReviewCliError(
-            f"migration '{request.target.slug}' is not flagged for review.",
+            _not_awaiting_review_message(request.target.slug, manifest),
             2,
         )
 
@@ -275,6 +242,35 @@ def _require_consistent_review_workspace(workspace_root: Path) -> None:
     )
 
 
+def _not_awaiting_review_message(slug: str, manifest: MigrationManifest) -> str:
+    message = (
+        f"migration '{slug}' is not awaiting human review. "
+        "Reviewable migrations are listed by "
+        "`continuous-refactoring migration list --awaiting-review`."
+    )
+    if _is_refine_eligible(manifest):
+        return (
+            f"{message} To revise this migration instead, run "
+            f"`continuous-refactoring migration refine {slug} ...`."
+        )
+    return (
+        f"{message} `continuous-refactoring migration refine {slug} ...` "
+        "is only available for planning or unexecuted ready migrations."
+    )
+
+
+def _is_refine_eligible(manifest: MigrationManifest) -> bool:
+    if any(phase.done for phase in manifest.phases):
+        return False
+    if manifest.status == "planning":
+        return True
+    if manifest.status != "ready":
+        return False
+    if not manifest.phases:
+        return False
+    return manifest.current_phase == manifest.phases[0].name
+
+
 def _review_publish_error_message(error: PlanningPublishError, slug: str) -> str:
     message = str(error)
     if "stale base snapshot" not in error.result.reason:
@@ -290,7 +286,5 @@ def _review_publish_error_message(error: PlanningPublishError, slug: str) -> str
 def handle_review(args: argparse.Namespace) -> None:
     if args.review_command == "list":
         return handle_review_list()
-    if args.review_command == "perform":
-        return handle_review_perform(args)
     print(_REVIEW_USAGE, file=sys.stderr)
     raise SystemExit(2)

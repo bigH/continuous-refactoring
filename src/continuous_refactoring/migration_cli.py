@@ -12,6 +12,7 @@ from continuous_refactoring.artifacts import (
     create_run_artifacts,
 )
 from continuous_refactoring.config import resolve_live_migrations_dir, resolve_project
+from continuous_refactoring.effort import EffortTier
 from continuous_refactoring.migration_consistency import (
     MigrationConsistencyFinding,
     check_migration_consistency,
@@ -43,6 +44,7 @@ __all__ = [
 ]
 
 _MIGRATION_USAGE = "Usage: continuous-refactoring migration {list,doctor,review,refine}"
+_MIGRATION_MANUAL_AGENT_EFFORT: EffortTier = "high"
 _MISSING_TEXT = "(none)"
 
 
@@ -151,7 +153,7 @@ def handle_migration_review(args: argparse.Namespace) -> None:
             project_state_dir=context.project_state_dir,
             agent=args.agent,
             model=args.model,
-            effort=args.effort,
+            effort=_MIGRATION_MANUAL_AGENT_EFFORT,
             taste=taste,
         )
     )
@@ -187,7 +189,7 @@ def handle_migration_refine(args: argparse.Namespace) -> None:
         context.repo_root,
         agent=args.agent,
         model=args.model,
-        effort=args.effort,
+        effort=_MIGRATION_MANUAL_AGENT_EFFORT,
         test_command="migration refine",
     )
     try:
@@ -202,7 +204,7 @@ def handle_migration_refine(args: argparse.Namespace) -> None:
                 artifacts=artifacts,
                 agent=args.agent,
                 model=args.model,
-                effort=args.effort,
+                effort=_MIGRATION_MANUAL_AGENT_EFFORT,
                 log_mirroring=LogMirroring(
                     agent=bool(getattr(args, "show_agent_logs", False)),
                 ),

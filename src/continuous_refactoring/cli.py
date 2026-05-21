@@ -156,6 +156,10 @@ def _add_taste_parser(subparsers: argparse._SubParsersAction) -> None:
     taste_parser = subparsers.add_parser(
         "taste",
         help="Manage refactoring taste files.",
+        description=(
+            "Manage project or global taste files. Agent-backed modes require "
+            "--with and --model."
+        ),
     )
     taste_parser.set_defaults(handler=_handle_taste)
     taste_parser.add_argument(
@@ -202,7 +206,8 @@ def _add_taste_parser(subparsers: argparse._SubParsersAction) -> None:
 def _add_run_once_parser(subparsers: argparse._SubParsersAction) -> None:
     run_once_parser = subparsers.add_parser(
         "run-once",
-        help="Single refactoring attempt (one agent call, no fix retry).",
+        help="Run one routed refactoring action without fix retry.",
+        description="Run one routed refactoring action without fix retry.",
     )
     run_once_parser.set_defaults(handler=_handle_run_once)
     _add_common_args(run_once_parser)
@@ -211,7 +216,8 @@ def _add_run_once_parser(subparsers: argparse._SubParsersAction) -> None:
 def _add_run_parser(subparsers: argparse._SubParsersAction) -> None:
     run_parser = subparsers.add_parser(
         "run",
-        help="Continuous refactoring loop with fix-prompt retry.",
+        help="Run routed refactoring actions with fix-prompt retry.",
+        description="Run routed refactoring actions with fix-prompt retry.",
     )
     run_parser.set_defaults(handler=_handle_run)
     _add_common_args(run_parser)
@@ -225,13 +231,14 @@ def _add_run_parser(subparsers: argparse._SubParsersAction) -> None:
         "--max-refactors",
         type=int,
         default=None,
-        help="Refactor actions to run.",
+        help="Actions to run.",
     )
     run_parser.add_argument(
         "--focus-on-live-migrations",
         action="store_true",
         help=(
-            "Iterate only on live migrations until every one is done or blocked. "
+            "Iterate only on eligible live migrations until done, deferred, "
+            "blocked, or failure budget trips. "
             "Bypasses targeting and --max-refactors requirements."
         ),
     )
@@ -257,17 +264,26 @@ def _add_run_parser(subparsers: argparse._SubParsersAction) -> None:
 def _add_review_parser(subparsers: argparse._SubParsersAction) -> None:
     review_parser = subparsers.add_parser(
         "review",
-        help="Review migrations awaiting human review.",
+        help="Compatibility shortcut for migrations awaiting human review.",
+        description=(
+            "Compatibility listing shortcut for migrations awaiting human "
+            "review. Use `migration review` for canonical mutation."
+        ),
     )
     review_parser.set_defaults(handler=handle_review)
     review_sub = review_parser.add_subparsers(dest="review_command")
-    review_sub.add_parser("list", help="List migrations flagged for review.")
+    review_sub.add_parser(
+        "list",
+        help="List migrations awaiting human review.",
+        description="List migrations awaiting human review.",
+    )
 
 
 def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
     migration_parser = subparsers.add_parser(
         "migration",
-        help="Inspect live migrations.",
+        help="Inspect and manage live migrations.",
+        description="Inspect and manage live migrations.",
     )
     migration_parser.set_defaults(handler=handle_migration)
     migration_sub = migration_parser.add_subparsers(dest="migration_command")
@@ -305,7 +321,11 @@ def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
 
     review_parser = migration_sub.add_parser(
         "review",
-        help="Perform staged review on a flagged migration.",
+        help="Resolve a migration awaiting human review in a staged workspace.",
+        description=(
+            "Resolve a migration awaiting human review in a staged workspace. "
+            "Requires --with and --model."
+        ),
     )
     review_parser.add_argument("target", help="Migration slug or contained path.")
     review_parser.add_argument(
@@ -316,7 +336,8 @@ def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
 
     refine_parser = migration_sub.add_parser(
         "refine",
-        help="Refine a planning migration with user feedback.",
+        help="Apply feedback to a planning or unexecuted ready migration.",
+        description="Apply feedback to a planning or unexecuted ready migration.",
     )
     refine_parser.add_argument("target", help="Migration slug or contained path.")
     feedback_group = refine_parser.add_mutually_exclusive_group(required=True)

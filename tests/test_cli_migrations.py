@@ -84,6 +84,64 @@ def test_migration_parser_accepts_list_and_doctor() -> None:
     assert not hasattr(review_args, "effort")
 
 
+def test_run_help_describes_routed_actions(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = build_parser()
+
+    top_help = _help_text(parser, ["--help"], capsys)
+    run_once_help = _help_text(parser, ["run-once", "--help"], capsys)
+    run_help = _help_text(parser, ["run", "--help"], capsys)
+
+    assert "Run one routed refactoring action without fix retry." in top_help
+    assert "Run one routed refactoring action without fix retry." in run_once_help
+    assert "Run routed refactoring actions with fix-prompt retry." in top_help
+    assert "Run routed refactoring actions with fix-prompt retry." in run_help
+    assert "Actions to run." in run_help
+    assert "eligible live migrations until done" in run_help
+    assert "deferred" in run_help
+    assert "blocked" in run_help
+    assert "one agent call" not in top_help
+    assert "Refactor actions to run." not in run_help
+
+
+def test_migration_help_describes_review_and_refine(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = build_parser()
+
+    top_help = _help_text(parser, ["--help"], capsys)
+    migration_help = _help_text(parser, ["migration", "--help"], capsys)
+    review_help = _help_text(parser, ["migration", "review", "--help"], capsys)
+    refine_help = _help_text(parser, ["migration", "refine", "--help"], capsys)
+
+    assert "Inspect and manage live migrations." in top_help
+    assert "Inspect and manage live migrations." in migration_help
+    assert "Resolve a migration awaiting human review" in migration_help
+    assert "staged workspace" in migration_help
+    assert "Resolve a migration awaiting human review" in review_help
+    assert "staged workspace" in review_help
+    assert "Requires --with and --model." in review_help
+    assert "Apply feedback to a planning or unexecuted ready" in migration_help
+    assert "Apply feedback to a planning or unexecuted ready" in refine_help
+    assert "--effort" not in review_help
+    assert "--effort" not in refine_help
+    assert "Perform staged " + "review" not in migration_help
+    assert "flagged " + "migration" not in migration_help
+
+
+def test_taste_help_describes_scope_and_agent_backed_modes(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = build_parser()
+
+    taste_help = _help_text(parser, ["taste", "--help"], capsys)
+
+    assert "Manage project or global taste files." in taste_help
+    assert "Agent-backed modes require --with and --model." in taste_help
+    assert "--effort" not in taste_help
+
+
 def test_migration_parser_accepts_doctor_all() -> None:
     parser = build_parser()
 
@@ -138,6 +196,17 @@ def _canonical_migration_commands(readme: str) -> tuple[str, ...]:
         for line in lines[block_start + 1:block_end]
         if line.startswith("continuous-refactoring migration ")
     )
+
+
+def _help_text(
+    parser: argparse.ArgumentParser,
+    argv: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> str:
+    with pytest.raises(SystemExit) as exit_info:
+        parser.parse_args(argv)
+    assert exit_info.value.code == 0
+    return " ".join(capsys.readouterr().out.split())
 
 
 def _argv_from_documented_command(command: str) -> list[str]:
@@ -518,7 +587,7 @@ def test_migration_review_rejects_missing_migration_without_refine_suggestion(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _repo, live_dir = _init_migration_project(tmp_path, monkeypatch)
-    _write_migration(live_dir, "not-flagged")
+    _write_migration(live_dir, "not-awaiting-review")
 
     with pytest.raises(SystemExit) as missing_exit:
         handle_migration_review(_review_args("missing"))
@@ -535,16 +604,16 @@ def test_migration_review_rejects_refine_eligible_not_awaiting_review_with_refin
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     _repo, live_dir = _init_migration_project(tmp_path, monkeypatch)
-    _write_migration(live_dir, "not-flagged")
+    _write_migration(live_dir, "not-awaiting-review")
 
-    with pytest.raises(SystemExit) as not_flagged_exit:
-        handle_migration_review(_review_args("not-flagged"))
+    with pytest.raises(SystemExit) as not_awaiting_review_exit:
+        handle_migration_review(_review_args("not-awaiting-review"))
 
-    assert not_flagged_exit.value.code == 2
+    assert not_awaiting_review_exit.value.code == 2
     err = capsys.readouterr().err
     assert "not awaiting human review" in err
     assert "continuous-refactoring migration list --awaiting-review" in err
-    assert "continuous-refactoring migration refine not-flagged" in err
+    assert "continuous-refactoring migration refine not-awaiting-review" in err
 
 
 def test_migration_review_rejects_non_refine_eligible_not_awaiting_review_with_guarded_refine_hint(
@@ -559,10 +628,10 @@ def test_migration_review_rejects_non_refine_eligible_not_awaiting_review_with_g
         phases=(replace(_PHASE, done=True),),
     )
 
-    with pytest.raises(SystemExit) as not_flagged_exit:
+    with pytest.raises(SystemExit) as not_awaiting_review_exit:
         handle_migration_review(_review_args("phase-done"))
 
-    assert not_flagged_exit.value.code == 2
+    assert not_awaiting_review_exit.value.code == 2
     err = capsys.readouterr().err
     assert "not awaiting human review" in err
     assert "continuous-refactoring migration list --awaiting-review" in err

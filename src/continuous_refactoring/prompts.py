@@ -30,7 +30,7 @@ __all__ = [
     "compose_phase_execution_prompt",
     "compose_phase_ready_prompt",
     "compose_planning_prompt",
-    "compose_review_perform_prompt",
+    "compose_migration_review_prompt",
     "compose_scope_selection_prompt",
     "compose_taste_refine_prompt",
     "compose_taste_upgrade_prompt",
@@ -839,9 +839,9 @@ def compose_phase_execution_prompt(
     return _join_sections(*sections)
 
 
-REVIEW_PERFORM_PROMPT = """\
-You are conducting a human review of a refactoring migration that was flagged
-for human input during planning.
+MIGRATION_REVIEW_PROMPT = """\
+You are conducting a human review of a refactoring migration that was marked
+as awaiting human review by the driver.
 
 Project-specific taste is injected by the caller in the `## Taste` section.
 
@@ -859,8 +859,8 @@ Your job:
    what the plan assumes. Note any drift you find — stale assumptions change
    what is worth asking the user.
 3. Present the situation to the user: what the migration does, what phase it is
-   on, and why it was flagged for review. The manifest's "Human review reason"
-   field (shown below) is the exact reason the driver flagged this migration —
+   on, and why it is awaiting human review. The manifest's "Human review reason"
+   field (shown below) is the exact reason the driver marked this migration —
    surface it verbatim so the user can see what triggered the hand-off.
    Include any drift you found so the user sees the current shape, not the
    shape the plan was written against.
@@ -889,7 +889,7 @@ When the review is successfully completed:
 """
 
 
-def compose_review_perform_prompt(
+def compose_migration_review_prompt(
     migration_name: str,
     repo_root: Path,
     work_dir: Path,
@@ -900,7 +900,7 @@ def compose_review_perform_prompt(
 ) -> str:
     reason = manifest.human_review_reason or "(no reason recorded)"
     sections: list[str] = [
-        REVIEW_PERFORM_PROMPT,
+        MIGRATION_REVIEW_PROMPT,
         f"## Migration\nName: {migration_name}",
         (
             "## Workspace\n"

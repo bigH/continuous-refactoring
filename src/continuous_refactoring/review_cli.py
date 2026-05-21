@@ -33,14 +33,13 @@ from continuous_refactoring.planning_publish import (
     prepare_planning_workspace,
     publish_planning_workspace,
 )
-from continuous_refactoring.prompts import compose_review_perform_prompt
+from continuous_refactoring.prompts import compose_migration_review_prompt
 
 __all__ = [
     "StagedReviewRequest",
     "handle_review",
     "handle_review_list",
     "handle_staged_migration_review",
-    "perform_staged_migration_review",
 ]
 
 _REVIEW_USAGE = "Usage: continuous-refactoring review {list}"
@@ -127,7 +126,7 @@ def handle_staged_migration_review(
     request: StagedReviewRequest,
 ) -> PlanningPublishResult:
     try:
-        return perform_staged_migration_review(request)
+        return _run_staged_migration_review(request)
     except _ReviewCliError as error:
         print(f"Error: {error}", file=sys.stderr)
         raise SystemExit(error.exit_code) from error
@@ -142,7 +141,7 @@ def handle_staged_migration_review(
         raise SystemExit(1) from error
 
 
-def perform_staged_migration_review(
+def _run_staged_migration_review(
     request: StagedReviewRequest,
 ) -> PlanningPublishResult:
     manifest_path = request.target.path / "manifest.json"
@@ -177,7 +176,7 @@ def perform_staged_migration_review(
         ) from error
 
     phase = resolve_current_phase(manifest) if manifest.current_phase else None
-    prompt = compose_review_perform_prompt(
+    prompt = compose_migration_review_prompt(
         request.target.slug,
         request.repo_root,
         workspace.root,

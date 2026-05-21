@@ -29,7 +29,7 @@ _PHASES = (
 )
 
 
-def test_review_parser_accepts_list_and_rejects_perform_subcommand() -> None:
+def test_review_parser_accepts_list_and_rejects_unknown_subcommands() -> None:
     parser = build_parser()
 
     review_args = parser.parse_args(["review"])
@@ -43,6 +43,26 @@ def test_review_parser_accepts_list_and_rejects_perform_subcommand() -> None:
     with pytest.raises(SystemExit) as perform_exit:
         parser.parse_args(["review", "perform", "my-mig"])
     assert perform_exit.value.code == 2
+
+
+def test_review_help_describes_compatibility_listing(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    parser = build_parser()
+
+    top_help = _help_text(parser, ["--help"], capsys)
+    review_help = _help_text(parser, ["review", "--help"], capsys)
+    review_list_help = _help_text(parser, ["review", "list", "--help"], capsys)
+
+    assert "Compatibility shortcut" in top_help
+    assert "migrations awaiting human review" in top_help
+    assert "Compatibility listing shortcut" in review_help
+    assert "Use `migration review` for canonical mutation." in review_help
+    assert "List migrations awaiting human review." in review_help
+    assert "List migrations awaiting human review." in review_list_help
+    stale_review_phrase = "flagged " + "for review"
+    assert stale_review_phrase not in top_help
+    assert stale_review_phrase not in review_help
 
 
 def test_parser_binds_handlers_for_top_level_commands() -> None:
@@ -88,6 +108,17 @@ def _init_repo(path: Path) -> None:
     subprocess.run(
         ["git", "commit", "-m", "init"], cwd=path, check=True, capture_output=True,
     )
+
+
+def _help_text(
+    parser: argparse.ArgumentParser,
+    argv: list[str],
+    capsys: pytest.CaptureFixture[str],
+) -> str:
+    with pytest.raises(SystemExit) as exit_info:
+        parser.parse_args(argv)
+    assert exit_info.value.code == 0
+    return " ".join(capsys.readouterr().out.split())
 
 
 def _init_review_project(
@@ -137,7 +168,7 @@ def _make_manifest(
     )
 
 
-def test_review_list_filters_flagged_migrations(
+def test_review_list_filters_migrations_awaiting_human_review(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],

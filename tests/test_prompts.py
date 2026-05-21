@@ -24,19 +24,19 @@ from continuous_refactoring.prompts import (
     DEFAULT_REFACTORING_PROMPT,
     PHASE_EXECUTION_PROMPT,
     PHASE_READY_CHECK_PROMPT,
+    MIGRATION_REVIEW_PROMPT,
     PLANNING_APPROACHES_PROMPT,
     PLANNING_EXPAND_PROMPT,
     PLANNING_FINAL_REVIEW_PROMPT,
     PLANNING_PICK_BEST_PROMPT,
     PLANNING_REVIEW_PROMPT,
-    REVIEW_PERFORM_PROMPT,
     compose_full_prompt,
     compose_classifier_prompt,
     compose_interview_prompt,
+    compose_migration_review_prompt,
     compose_phase_execution_prompt,
     compose_phase_ready_prompt,
     compose_planning_prompt,
-    compose_review_perform_prompt,
     compose_taste_refine_prompt,
     compose_taste_upgrade_prompt,
 )
@@ -75,7 +75,7 @@ _TASTE_INJECTED_PROMPTS = (
     PLANNING_FINAL_REVIEW_PROMPT,
     PHASE_READY_CHECK_PROMPT,
     PHASE_EXECUTION_PROMPT,
-    REVIEW_PERFORM_PROMPT,
+    MIGRATION_REVIEW_PROMPT,
 )
 
 
@@ -262,7 +262,7 @@ def test_review_prompt_names_work_dir_and_forbids_live_dir_mutation() -> None:
     work_dir = Path("/xdg/projects/p/planning/auth-cleanup/review-1/work/auth-cleanup")
     live_dir = Path("/repo/migrations/auth-cleanup")
 
-    result = compose_review_perform_prompt(
+    result = compose_migration_review_prompt(
         "auth-cleanup",
         repo_root,
         work_dir,
@@ -327,7 +327,7 @@ def test_review_and_refine_prompts_forbid_live_dir_mutation(tmp_path: Path) -> N
     repo_root = tmp_path / "repo"
     review_work_dir = tmp_path / "xdg" / "planning" / "auth-cleanup" / "review" / "work"
     live_mig_root = repo_root / "migrations" / "auth-cleanup"
-    review_prompt = compose_review_perform_prompt(
+    review_prompt = compose_migration_review_prompt(
         "auth-cleanup",
         repo_root,
         review_work_dir,

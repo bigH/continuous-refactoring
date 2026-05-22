@@ -76,6 +76,17 @@
       "outputs": {
         "stdout": "migrations/random-files-20260521T141425/.planning/stages/review-2.stdout.md"
       }
+    },
+    {
+      "agent": "codex",
+      "completed_at": "2026-05-22T16:16:46.988-07:00",
+      "effort": "low",
+      "model": "gpt-5.3-codex",
+      "name": "final-review",
+      "outcome": "approve-needs-human",
+      "outputs": {
+        "stdout": "migrations/random-files-20260521T141425/.planning/stages/final-review.stdout.md"
+      }
     }
   ],
   "feedback": [
@@ -85,9 +96,9 @@
       "text": "Fix review-2 findings: move phase-1-contract-inventory.md out of Phase 1 precondition\n  and into Definition of Done; tighten Phase 1 scope wording; make Phase 3 required_effort match the\n  actual gating risk with a concrete effort_reason."
     }
   ],
-  "final_decision": null,
-  "final_reason": null,
-  "next_step": "final-review",
+  "final_decision": "approve-needs-human",
+  "final_reason": "safe automated execution until any interface delta, which is correctly gated for explicit human review",
+  "next_step": "terminal-ready-awaiting-human",
   "review_findings": null,
   "revision_base_step_counts": [
     5
@@ -95,5 +106,5 @@
   "schema_version": 1,
   "started_at": "2026-05-21T14:14:26.016-07:00",
   "target": "random files",
-  "updated_at": "2026-05-22T16:16:15.516-07:00"
+  "updated_at": "2026-05-22T16:16:46.988-07:00"
 }

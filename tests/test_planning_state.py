@@ -415,7 +415,7 @@ def test_planning_state_allows_null_legacy_anchor_with_current_revision_anchors(
     assert loaded.revision_base_step_counts == (5,)
 
 
-def test_planning_state_rejects_revision_anchor_at_non_terminal_cursor(
+def test_planning_state_allows_revision_anchor_at_review_cursor(
     tmp_path: Path,
 ) -> None:
     repo_root, mig_root = _migration_root(tmp_path)
@@ -433,11 +433,9 @@ def test_planning_state_rejects_revision_anchor_at_non_terminal_cursor(
     payload["revision_base_step_counts"] = [3]
     _write_state_payload(path, payload)
 
-    with pytest.raises(
-        ContinuousRefactorError,
-        match="must point at a terminal ready cursor, got 'review'",
-    ):
-        load_planning_state(repo_root, path)
+    loaded = load_planning_state(repo_root, path)
+    assert loaded.next_step == "revise"
+    assert loaded.revision_base_step_counts == (3,)
 
 
 def test_planning_state_rejects_revision_anchor_at_skipped_terminal_cursor(
@@ -462,7 +460,7 @@ def test_planning_state_rejects_revision_anchor_at_skipped_terminal_cursor(
 
     with pytest.raises(
         ContinuousRefactorError,
-        match="must point at a terminal ready cursor, got 'terminal-skipped'",
+        match="must point at a reopenable review cursor, got 'terminal-skipped'",
     ):
         load_planning_state(repo_root, path)
 

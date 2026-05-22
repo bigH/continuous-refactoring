@@ -72,6 +72,13 @@ _FINAL_DECISIONS: tuple[str, ...] = cast(
 _STEP_OUTCOMES: tuple[str, ...] = cast(tuple[str, ...], get_args(PlanningStepOutcome))
 
 _COMPLETED_OUTCOME = "completed"
+_REOPENABLE_REVISE_CURSORS = (
+    "review",
+    "review-2",
+    "final-review",
+    "terminal-ready",
+    "terminal-ready-awaiting-human",
+)
 _TERMINAL_BY_DECISION: dict[str, TerminalPlanningCursor] = {
     "approve-auto": "terminal-ready",
     "approve-needs-human": "terminal-ready-awaiting-human",
@@ -265,7 +272,7 @@ def reopen_planning_for_revise(
     now: str | None = None,
 ) -> PlanningState:
     replay = _replay_details(state)
-    if replay.next_step not in ("terminal-ready", "terminal-ready-awaiting-human"):
+    if replay.next_step not in _REOPENABLE_REVISE_CURSORS:
         raise ContinuousRefactorError(
             f"Cannot reopen planning state at {replay.next_step!r} for revise"
         )
@@ -544,10 +551,10 @@ def _validate_revision_base_step_counts(state: PlanningState) -> None:
 def _reopen_cursor(
     cursor: PlanningCursor,
 ) -> tuple[PlanningCursor, str | None, FinalPlanningDecision | None]:
-    if cursor not in ("terminal-ready", "terminal-ready-awaiting-human"):
+    if cursor not in _REOPENABLE_REVISE_CURSORS:
         raise ContinuousRefactorError(
             "Planning state revision_base_step_counts must point at a "
-            f"terminal ready cursor, got {cursor!r}"
+            f"reopenable review cursor, got {cursor!r}"
         )
     return "revise", None, None
 

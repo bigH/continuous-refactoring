@@ -1,34 +1,34 @@
 # Phase 1: Contract Regression Net
 
 ## Goal
-Capture and lock currently expected externally visible behavior for random-targeted surfaces before cleanup begins.
+Lock currently expected externally visible behavior for random-targeted surfaces before internal cleanup starts.
 
 ## Scope
-- Test files under `tests/` that exercise random-targeted user-visible behavior.
-- Planning artifact update that records exactly which contracts are locked in this phase.
-- No production behavior changes.
+- Only tests under `tests/` that assert behavior of random-targeted user-facing surfaces (CLI behavior, repo-written artifacts, workflow outputs).
+- Create/update one inventory artifact: `phase-1-contract-inventory.md`.
+- No production source edits beyond minimal changes strictly required to make missing behavior observable in tests.
 
 ## Precondition
 - Migration status is `in-progress` and this phase is the manifest `current_phase`.
 - No earlier migration phase is incomplete.
-- A contract inventory artifact exists at `phase-1-contract-inventory.md` and lists the concrete behaviors this phase will lock.
+- Random-targeted files and their relevant behavior surfaces are still present and identifiable.
 
 ## Implementation Instructions
-1. Build/update `phase-1-contract-inventory.md` with explicit contract bullets (surface, expected behavior, and where it is asserted).
-2. Add or tighten outcome-based regression tests for each listed contract.
-3. Prefer existing fixtures and real collaborators; avoid mock-heavy interaction assertions.
-4. Keep assertions strict enough to detect interface drift in CLI behavior, planning/migration artifact behavior, and other scoped observable outcomes.
+1. Create or update `phase-1-contract-inventory.md` with explicit contract bullets: surface, expected behavior, and asserting test location.
+2. Add or tighten outcome-based regression tests for every listed contract.
+3. Prefer real collaborators and existing fixtures; avoid interaction-level mocks unless boundary isolation is necessary.
+4. Keep assertions strict enough to detect interface drift in scoped observable outcomes.
 
 ## Validation Steps
-1. Run focused tests updated for the listed contracts.
-2. Demonstrate each new/updated contract test fails when its protected behavior is intentionally broken.
+1. Run focused tests that cover the listed contracts.
+2. For each listed contract, intentionally break the behavior and verify the corresponding test fails.
 3. Run the configured full validation command.
 
 ## Definition of Done
-- `phase-1-contract-inventory.md` exists and maps each scoped contract to specific regression coverage.
-- Regression tests for listed contracts pass in the intended implementation.
-- Evidence was collected during execution that intentionally breaking each protected behavior causes the corresponding test to fail.
+- `phase-1-contract-inventory.md` exists and maps each scoped contract to concrete regression coverage.
+- Every contract listed in that inventory has passing outcome-based regression coverage.
+- Execution evidence shows each listed contract test fails when its protected behavior is intentionally broken.
 - The full configured validation command passes.
 
 required_effort: low
-effort_reason: Focused test and artifact work with bounded code movement.
+effort_reason: Bounded, test-first contract capture with minimal production churn.

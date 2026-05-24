@@ -137,15 +137,7 @@ def handle_migration_doctor(args: argparse.Namespace) -> None:
 
 def handle_migration_review(args: argparse.Namespace) -> None:
     context = _resolve_context(error_code=2)
-    try:
-        target = resolve_migration_target(
-            live_dir=context.live_dir,
-            repo_root=context.repo_root,
-            value=args.target,
-        )
-    except ContinuousRefactorError as error:
-        print(f"Error: {error}", file=sys.stderr)
-        raise SystemExit(2) from error
+    target = _resolve_target_or_exit(context=context, value=args.target, error_code=2)
 
     from continuous_refactoring.config import load_taste
     from continuous_refactoring.review_cli import (
@@ -175,15 +167,7 @@ def handle_migration_review(args: argparse.Namespace) -> None:
 def handle_migration_refine(args: argparse.Namespace) -> None:
     context = _resolve_context(error_code=2)
     feedback_text, feedback_source = _read_refine_feedback(args)
-    try:
-        target = resolve_migration_target(
-            live_dir=context.live_dir,
-            repo_root=context.repo_root,
-            value=args.target,
-        )
-    except ContinuousRefactorError as error:
-        print(f"Error: {error}", file=sys.stderr)
-        raise SystemExit(2) from error
+    target = _resolve_target_or_exit(context=context, value=args.target, error_code=2)
 
     from continuous_refactoring.config import load_taste
     from continuous_refactoring.log_mirroring import LogMirroring
@@ -288,6 +272,23 @@ def _read_refine_feedback(args: argparse.Namespace) -> tuple[str, FeedbackSource
         print("Error: refinement feedback must not be empty.", file=sys.stderr)
         raise SystemExit(2)
     return text, source
+
+
+def _resolve_target_or_exit(
+    *,
+    context: MigrationCliContext,
+    value: str,
+    error_code: int,
+) -> MigrationTarget:
+    try:
+        return resolve_migration_target(
+            live_dir=context.live_dir,
+            repo_root=context.repo_root,
+            value=value,
+        )
+    except ContinuousRefactorError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(error_code) from error
 
 
 def _refine_publish_error_message(reason: str, slug: str) -> str:

@@ -284,6 +284,11 @@ def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Only show migrations awaiting human review.",
     )
+    list_parser.add_argument(
+        "--no-headers",
+        action="store_true",
+        help="Omit the TSV header row.",
+    )
 
     doctor_parser = migration_sub.add_parser(
         "doctor",

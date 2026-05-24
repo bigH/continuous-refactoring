@@ -46,6 +46,17 @@ __all__ = [
 _MIGRATION_USAGE = "Usage: continuous-refactoring migration {list,doctor,review,refine}"
 _MIGRATION_MANUAL_AGENT_EFFORT: EffortTier = "high"
 _MISSING_TEXT = "(none)"
+_LIST_HEADER = "\t".join(
+    (
+        "slug",
+        "status",
+        "cursor",
+        "awaiting_review",
+        "last_touch",
+        "cooldown",
+        "reason",
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -76,6 +87,8 @@ def handle_migration(args: argparse.Namespace) -> None:
 
 def handle_migration_list(args: argparse.Namespace) -> None:
     context = _resolve_context(error_code=1)
+    if not bool(getattr(args, "no_headers", False)):
+        print(_LIST_HEADER)
     if not context.live_dir.is_dir():
         return
 

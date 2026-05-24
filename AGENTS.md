@@ -39,7 +39,7 @@ Treat `AGENTS.md` as part of the codebase's invariants, not documentation. A dri
 - Upgrade config: `continuous-refactoring upgrade`
 - Inspect migrations: `continuous-refactoring migration list
   [--status planning|ready|in-progress|skipped|done]
-  [--awaiting-review]` /
+  [--awaiting-review] [--no-headers]` /
   `continuous-refactoring migration doctor <slug-or-path>` /
   `continuous-refactoring migration doctor --all`
 - Review migrations: `continuous-refactoring migration review <slug-or-path>

@@ -134,7 +134,7 @@ always run at fixed `medium` effort.
 | `run-once` | Single pass on one resolved target. No retry. If there is a diff and validation passes, it commits locally and prints the diffstat. |
 | `run` | The loop. Iterates refactor actions, retries on failure, and commits successful changes locally. Add `--focus-on-live-migrations` to bypass targeting and work only on eligible live migrations. |
 | `upgrade` | Checks that the global config manifest is current, rewrites it idempotently, and warns if the global taste file is stale. |
-| `migration list` | Lists visible migrations. Add `--status <status>` or `--awaiting-review` to filter. |
+| `migration list` | Lists visible migrations as TSV with headers. Add `--status <status>` or `--awaiting-review` to filter, or `--no-headers` for parsing. |
 | `migration doctor <slug-or-path>` | Validates one visible migration's consistency. |
 | `migration doctor --all` | Validates every visible migration plus internal transaction state. |
 | `migration review <slug-or-path>` | Starts staged review for a migration awaiting human review. Requires `--with` and `--model`; review runs at fixed internal `high` effort. |
@@ -169,7 +169,7 @@ scope text as context for that target.
 
 - `init --live-migrations-dir PATH` — enables the larger-refactoring workflow for this project. The path is stored repo-relative in the project registry and created if missing.
 - `init --in-repo-taste [PATH]` — stores this project's taste file in the repo and remembers the repo-relative path. Defaults to `.continuous-refactoring/taste.md`; re-run `init --in-repo-taste ...` to choose a different path.
-- `migration list` — shows visible migrations; `--awaiting-review` narrows to human-review handoffs.
+- `migration list` — shows visible migrations as TSV with headers; `--awaiting-review` narrows to human-review handoffs and `--no-headers` keeps parser-friendly rows only.
 - `migration doctor <slug-or-path>` / `migration doctor --all` — read-only consistency checks. Doctor reports problems; it does not repair them.
 - `migration review <slug-or-path> --with ... --model ...` — resolves an `awaiting_human_review` migration through a staged workspace at fixed internal `high` effort.
 - `migration refine <slug-or-path> (--message <text>|--file <path>) --with ... --model ... [--show-agent-logs]` — adds user feedback to a planning or unexecuted ready migration and resumes planning through the `revise` step when reopening ready work at fixed internal `high` effort.
@@ -184,6 +184,7 @@ Canonical migration commands:
 continuous-refactoring migration list
 continuous-refactoring migration list --status planning
 continuous-refactoring migration list --awaiting-review
+continuous-refactoring migration list --no-headers
 continuous-refactoring migration doctor <slug-or-path>
 continuous-refactoring migration doctor --all
 continuous-refactoring migration review <slug-or-path> --with codex --model gpt-5

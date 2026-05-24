@@ -39,6 +39,7 @@ from continuous_refactoring.planning_state import (
 )
 
 _CREATED = "2025-01-01T00:00:00+00:00"
+_LIST_HEADER = "slug\tstatus\tcursor\tawaiting_review\tlast_touch\tcooldown\treason"
 _PHASE = PhaseSpec(
     name="setup",
     file="phase-1-setup.md",
@@ -54,12 +55,21 @@ def test_migration_parser_accepts_list_and_doctor() -> None:
     assert list_args.command == "migration"
     assert list_args.migration_command == "list"
     assert list_args.handler.__name__ == "handle_migration"
+    assert list_args.no_headers is False
 
     filtered = parser.parse_args(
-        ["migration", "list", "--status", "planning", "--awaiting-review"]
+        [
+            "migration",
+            "list",
+            "--status",
+            "planning",
+            "--awaiting-review",
+            "--no-headers",
+        ]
     )
     assert filtered.status == "planning"
     assert filtered.awaiting_review is True
+    assert filtered.no_headers is True
 
     doctor_args = parser.parse_args(["migration", "doctor", "my-mig"])
     assert doctor_args.migration_command == "doctor"
@@ -172,6 +182,7 @@ def test_documented_migration_commands_match_parser() -> None:
         "continuous-refactoring migration list",
         "continuous-refactoring migration list --status planning",
         "continuous-refactoring migration list --awaiting-review",
+        "continuous-refactoring migration list --no-headers",
         "continuous-refactoring migration doctor <slug-or-path>",
         "continuous-refactoring migration doctor --all",
         (
@@ -367,6 +378,15 @@ def test_migration_list_includes_planning_ready_review_and_done_statuses(
     lines = [line.split("\t") for line in capsys.readouterr().out.splitlines()]
     assert lines == [
         [
+            "slug",
+            "status",
+            "cursor",
+            "awaiting_review",
+            "last_touch",
+            "cooldown",
+            "reason",
+        ],
+        [
             "done-mig",
             "done",
             "(none)",
@@ -411,9 +431,42 @@ def test_migration_list_filters_by_status_and_awaiting_review(
     handle_migration_list(_list_args(status="ready", awaiting_review=True))
 
     assert capsys.readouterr().out.splitlines() == [
+        _LIST_HEADER,
         "ready-review\tready\tphase-1-setup.md\tyes\t"
         f"{_CREATED}\t(none)\t(none)"
     ]
+
+
+def test_migration_list_no_headers_preserves_parseable_rows(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _repo, live_dir = _init_migration_project(tmp_path, monkeypatch)
+    _write_migration(live_dir, "ready-normal")
+
+    handle_migration_list(_list_args(no_headers=True))
+
+    assert capsys.readouterr().out.splitlines() == [
+        "ready-normal\tready\tphase-1-setup.md\tno\t"
+        f"{_CREATED}\t(none)\t(none)"
+    ]
+
+
+def test_migration_list_headers_for_empty_results(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _repo, _live_dir = _init_migration_project(tmp_path, monkeypatch)
+
+    handle_migration_list(_list_args())
+
+    assert capsys.readouterr().out == f"{_LIST_HEADER}\n"
+
+    handle_migration_list(_list_args(no_headers=True))
+
+    assert capsys.readouterr().out == ""
 
 
 def test_migration_list_marks_invalid_planning_state_as_blocked(
@@ -429,7 +482,7 @@ def test_migration_list_marks_invalid_planning_state_as_blocked(
     state_path.parent.mkdir(parents=True)
     state_path.write_text("{not json\n", encoding="utf-8")
 
-    handle_migration_list(_list_args())
+    handle_migration_list(_list_args(no_headers=True))
 
     fields = capsys.readouterr().out.strip().split("\t")
     assert fields[0:3] == ["planning-mig", "planning", "planning:blocked"]
@@ -452,7 +505,7 @@ def test_migration_list_marks_invalid_ready_cursor_as_blocked(
         fail_resolve,
     )
 
-    handle_migration_list(_list_args())
+    handle_migration_list(_list_args(no_headers=True))
 
     fields = capsys.readouterr().out.strip().split("\t")
     assert fields[0:3] == ["ready-mig", "ready", "blocked"]
@@ -1576,8 +1629,13 @@ def _list_args(
     *,
     status: str | None = None,
     awaiting_review: bool = False,
+    no_headers: bool = False,
 ) -> argparse.Namespace:
-    return argparse.Namespace(status=status, awaiting_review=awaiting_review)
+    return argparse.Namespace(
+        status=status,
+        awaiting_review=awaiting_review,
+        no_headers=no_headers,
+    )
 
 
 def _doctor_args(

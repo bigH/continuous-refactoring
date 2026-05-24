@@ -484,7 +484,9 @@ def _configure_repo_taste(
     if not current.exists():
         ensure_taste_file(destination)
         return
-    if current.resolve() == destination.resolve():
+    current_resolved = current.resolve()
+    destination_resolved = destination.resolve()
+    if current_resolved == destination_resolved:
         return
     if not current.is_file():
         raise ContinuousRefactorError(
@@ -514,15 +516,17 @@ def _configure_live_migrations_dir(
     if current is None or not current.exists():
         destination.mkdir(parents=True, exist_ok=True)
         return
+    current_resolved = current.resolve()
+    destination_resolved = destination.resolve()
     if not current.is_dir():
         raise ContinuousRefactorError(
             f"Configured live migrations path is not a directory: {current}"
         )
-    if current.resolve() == destination.resolve():
+    if current_resolved == destination_resolved:
         return
     if (
-        destination.resolve().is_relative_to(current.resolve())
-        or current.resolve().is_relative_to(destination.resolve())
+        destination_resolved.is_relative_to(current_resolved)
+        or current_resolved.is_relative_to(destination_resolved)
     ):
         raise ContinuousRefactorError(
             "Live migrations directory cannot be moved into itself or one of "

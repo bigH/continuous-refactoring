@@ -6,12 +6,16 @@ Lock currently expected externally visible behavior for random-targeted surfaces
 ## Scope
 - Only tests under `tests/` that assert behavior of random-targeted user-facing surfaces (CLI behavior, repo-written artifacts, workflow outputs).
 - Create/update one inventory artifact: `phase-1-contract-inventory.md`.
+- Random-targeted surfaces in this migration are anchored to:
+  - `src/continuous_refactoring/__main__.py`
+  - `tests/test_main_entrypoint.py`
+  - `LICENSE`
 - No production source edits beyond minimal changes strictly required to make missing behavior observable in tests.
 
 ## Precondition
-- Migration status is `in-progress` and this phase is the manifest `current_phase`.
+- Migration status is `ready` or `in-progress`, and this phase is the manifest `current_phase`.
 - No earlier migration phase is incomplete.
-- Random-targeted files and their relevant behavior surfaces are still present and identifiable.
+- The random-targeted files for this migration still exist at the anchored paths listed in Scope.
 
 ## Implementation Instructions
 1. Create or update `phase-1-contract-inventory.md` with explicit contract bullets: surface, expected behavior, and asserting test location.

@@ -8,6 +8,11 @@ Lock externally visible behavior for the random-file target first, then refactor
 2. Phase 2 - Internal Cleanup Behind Contracts
 3. Phase 3 - Interface-Shift Review Gate (conditional)
 
+## Random-Target File Set (Verified)
+- `src/continuous_refactoring/__main__.py`
+- `tests/test_main_entrypoint.py`
+- `LICENSE`
+
 ## Dependencies
 - Phase 1 has no phase dependency.
 - Phase 2 depends on Phase 1 completion.

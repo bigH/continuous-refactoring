@@ -1,9 +1,9 @@
 {
-  "awaiting_human_review": true,
+  "awaiting_human_review": false,
   "cooldown_until": null,
   "created_at": "2026-05-21T14:14:26.016-07:00",
   "current_phase": "contract-regression-net",
-  "human_review_reason": "safe automated execution until any interface delta, which is correctly gated for explicit human review",
+  "human_review_reason": null,
   "last_touch": "2026-05-22T16:16:46.990-07:00",
   "name": "random-files-20260521T141425",
   "phases": [
@@ -12,7 +12,7 @@
       "effort_reason": "Bounded, test-first contract capture with minimal production churn.",
       "file": "phase-1-contract-regression-net.md",
       "name": "contract-regression-net",
-      "precondition": "- Migration status is `in-progress` and this phase is the manifest `current_phase`. - No earlier migration phase is incomplete. - Random-targeted files and their relevant behavior surfaces are still present and identifiable.",
+      "precondition": "- Migration status is `ready` or `in-progress`, and this phase is the manifest `current_phase`. - No earlier migration phase is incomplete. - The random-targeted files for this migration still exist at the anchored paths listed in Scope.",
       "required_effort": "low"
     },
     {

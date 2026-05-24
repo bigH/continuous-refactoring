@@ -5,13 +5,15 @@ Simplify random-targeted internals and remove dead/redundant paths while preserv
 
 ## Scope
 - Only random-targeted source files selected for this migration.
+- Source cleanup scope is anchored to `src/continuous_refactoring/__main__.py`.
+- `tests/test_main_entrypoint.py` and `LICENSE` are contract-validation surfaces, not internal cleanup targets.
 - Internal readability improvements, dead-path deletion, and control-flow simplification.
 - No intentional change to released interfaces (CLI behavior, repo-written files, XDG/project state, migration manifest structure, or other install-visible contracts).
 
 ## Precondition
 - Phase 1 is complete.
 - `phase-1-contract-inventory.md` and its Phase 1 regression coverage are present.
-- Candidate edits remain inside random-targeted migration scope.
+- Candidate edits remain inside the anchored migration scope defined in Phase 1.
 
 ## Implementation Instructions
 1. Remove dead branches/helpers/fallback paths that are unnecessary under current contracts.

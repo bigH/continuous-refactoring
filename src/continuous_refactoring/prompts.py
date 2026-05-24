@@ -57,6 +57,18 @@ def _join_sections(*sections: str | None) -> str:
     return "\n\n".join(section for section in sections if section)
 
 
+def _taste_section(taste: str) -> str:
+    return f"## Taste\n{taste}"
+
+
+def _validation_section(validation_command: str) -> str:
+    return f"## Validation\nRun: `{validation_command}`"
+
+
+def _with_retry_context(sections: list[str], retry_context: str | None) -> list[str]:
+    return [*sections, *_retry_context_sections(retry_context)]
+
+
 def _format_target_files(files: tuple[str, ...]) -> str | None:
     file_lines: list[str] = []
     for file_path in files:
@@ -446,16 +458,15 @@ def compose_full_prompt(
     retry_context: str | None = None,
     fix_amendment: str | None = None,
 ) -> str:
-    sections: list[str] = [
+    sections: list[str] = _with_retry_context([
         f"Attempt {attempt}",
         base_prompt,
         REQUIRED_PREAMBLE,
-        f"## Refactoring Taste\n{taste}",
+        "## Refactoring Taste\n" + taste,
         _format_target_files(target.files),
         _first_scope(target.scoping, scope_instruction),
-        f"## Validation\nRun: `{validation_command}`",
-        *_retry_context_sections(retry_context),
-    ]
+        _validation_section(validation_command),
+    ], retry_context)
     if fix_amendment:
         sections.append(fix_amendment)
     return _join_sections(*sections)
@@ -774,7 +785,7 @@ def compose_classifier_prompt(target: Target, taste: str) -> str:
         f"## Target\n{target.description}",
         _format_target_files(target.files),
         _first_scope(target.scoping),
-        f"## Taste\n{taste}",
+        _taste_section(taste),
     )
 
 
@@ -789,7 +800,7 @@ def compose_scope_selection_prompt(
         _format_target_files(target.files),
         _heading_section("Candidates", _format_scope_candidates(candidates)),
         _first_scope(target.scoping),
-        f"## Taste\n{taste}",
+        _taste_section(taste),
     )
 
 
@@ -806,7 +817,7 @@ def compose_planning_prompt(
         _format_effort_budget(effort_budget),
         f"## Migration\n{migration_name}",
         f"## Context\n{context}" if context else None,
-        f"## Taste\n{taste}",
+        _taste_section(taste),
     )
 
 
@@ -817,7 +828,7 @@ def compose_phase_ready_prompt(
         PHASE_READY_CHECK_PROMPT,
         f"## Phase\n{_format_phase_summary(phase)}",
         f"## Manifest\n{_format_manifest_summary(manifest)}",
-        f"## Taste\n{taste}",
+        _taste_section(taste),
     )
 
 
@@ -828,14 +839,13 @@ def compose_phase_execution_prompt(
     validation_command: str,
     retry_context: str | None = None,
 ) -> str:
-    sections: list[str] = [
+    sections: list[str] = _with_retry_context([
         PHASE_EXECUTION_PROMPT,
         f"## Phase\n{_format_phase_summary(phase)}",
         f"## Manifest\n{_format_manifest_summary(manifest)}",
-        f"## Taste\n{taste}",
-        f"## Validation\nRun: `{validation_command}`",
-        *_retry_context_sections(retry_context),
-    ]
+        _taste_section(taste),
+        _validation_section(validation_command),
+    ], retry_context)
     return _join_sections(*sections)
 
 
@@ -888,6 +898,13 @@ When the review is successfully completed:
 - Any plan or phase file updates MUST be written before exiting\
 """
 
+_WORKSPACE_MUTATION_CONTRACT_LINES = (
+    "Writable target: staged work dir only.\n"
+    "Writable target: work dir only.\n"
+    "The live migration directory is read-only reference material.\n"
+    "Do not mutate the live migration directory."
+)
+
 
 def compose_migration_review_prompt(
     migration_name: str,
@@ -908,10 +925,7 @@ def compose_migration_review_prompt(
             f"Staged work dir: {work_dir}\n"
             f"Work dir: {work_dir}\n"
             f"Live migration dir: {live_dir}\n"
-            "Writable target: staged work dir only.\n"
-            "Writable target: work dir only.\n"
-            "The live migration directory is read-only reference material.\n"
-            "Do not mutate the live migration directory."
+            + _WORKSPACE_MUTATION_CONTRACT_LINES
         ),
         f"## Human Review\n{reason}",
         (
@@ -933,5 +947,5 @@ def compose_migration_review_prompt(
             "Current phase file: (none)\n"
             "Current phase name: (none)"
         )
-    sections.append(f"## Taste\n{taste}")
+    sections.append(_taste_section(taste))
     return _join_sections(*sections)

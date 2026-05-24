@@ -1,5 +1,0 @@
-1. `phase-3-interface-shift-review-gate.md`: `required_effort: high` looks over-tiered for the scoped work described (documentation + gating-state correctness + validation). This phase explicitly says “keep technical changes minimal,” so `medium` is likely the lowest safe tier; keep `high` only if you expect nontrivial code-path changes during gating.
-
-2. `phase-1-contract-regression-net.md` precondition is partially soft: “target contracts to lock are identifiable in current code/tests.” That’s directionally right, but it’s not a concrete gate. Tighten it to an observable artifact check (for example, an explicit list of target contracts captured in phase notes/plan artifact) so start/no-start is binary.
-
-3. `phase-2-internal-cleanup-behind-contracts.md` precondition “helper/symbol slated for deletion has at least one surviving behavior-level test path…” mixes start-gating with implementation-time proof work. That evidence is usually established during execution, not before start. Move this to Definition of Done or validation criteria, and keep precondition to dependency/scope readiness only.

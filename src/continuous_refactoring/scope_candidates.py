@@ -259,6 +259,15 @@ def _candidate_from_files(
     )
 
 
+def _append_candidate_if_unique(
+    candidates: list[ScopeCandidate],
+    candidate: ScopeCandidate,
+) -> None:
+    if any(existing.files == candidate.files for existing in candidates):
+        return
+    candidates.append(candidate)
+
+
 def _record_support(
     support_lines: dict[str, list[str]],
     support_kinds: dict[str, list[_SupportKind]],
@@ -406,10 +415,11 @@ def build_scope_candidates(
     local_extras = tuple(local_ranked[: max_files - 1])
     if local_extras:
         local_files = (seed_file, *local_extras)
-        candidates.append(
+        _append_candidate_if_unique(
+            candidates,
             _candidate_from_files(
                 "local-cluster", seed_file, local_files, support.evidence,
-            )
+            ),
         )
 
     cross_ranked = _rank_paths(
@@ -421,10 +431,11 @@ def build_scope_candidates(
     cross_extras = tuple(cross_ranked[: max_files - 1])
     if cross_extras:
         cross_files = (seed_file, *cross_extras)
-        cross_candidate = _candidate_from_files(
-            "cross-cluster", seed_file, cross_files, support.evidence,
+        _append_candidate_if_unique(
+            candidates,
+            _candidate_from_files(
+                "cross-cluster", seed_file, cross_files, support.evidence,
+            ),
         )
-        if cross_candidate.files != candidates[-1].files:
-            candidates.append(cross_candidate)
 
     return tuple(candidates[:max_candidates])

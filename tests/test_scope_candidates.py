@@ -210,3 +210,17 @@ def test_max_candidates_prunes_without_dropping_seed_candidate(tmp_path: Path) -
         "seed",
         "local-cluster",
     ]
+
+
+def test_duplicate_candidate_file_sets_are_not_emitted(tmp_path: Path) -> None:
+    init_repo(tmp_path)
+    _write(tmp_path, "src/foo.py", "from .helpers import normalize\n")
+    _write(tmp_path, "src/helpers.py", "def normalize(value: str) -> str:\n    return value\n")
+    _commit_all(tmp_path, "seed files")
+
+    candidates = build_scope_candidates(_seed_target("src/foo.py"), tmp_path)
+
+    assert [candidate.kind for candidate in candidates] == [
+        "seed",
+        "local-cluster",
+    ]

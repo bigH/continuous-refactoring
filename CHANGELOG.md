@@ -1,5 +1,16 @@
 # Changelog
 
+## [1.0.0](https://github.com/bigH/continuous-refactoring/compare/v0.3.0...v1.0.0) (2026-05-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* Prepare 1.0 Release ([#5](https://github.com/bigH/continuous-refactoring/issues/5))
+
+### Features
+
+* Prepare 1.0 Release ([#5](https://github.com/bigH/continuous-refactoring/issues/5)) ([77cf474](https://github.com/bigH/continuous-refactoring/commit/77cf474dbe57296d4cf5539229b7c4d6badf31ed))
+
 ## [0.3.0](https://github.com/bigH/continuous-refactoring/compare/v0.2.0...v0.3.0) (2026-05-19)
 
 

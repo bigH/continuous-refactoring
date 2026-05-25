@@ -24,8 +24,10 @@ Treat `AGENTS.md` as part of the codebase's invariants, not documentation. A dri
   [--live-migrations-dir DIR] [--in-repo-taste [PATH]] [--force]`
 - Taste: `continuous-refactoring taste [--global]
   [--interview|--upgrade|--refine]
-  [--with codex|claude --model <model> --effort <low|medium|high|xhigh>]
+  [--with codex|claude --model <model>]
   [--force]`
+  Active taste agent modes require `--with` and `--model`; the taste agent
+  always runs at fixed `medium` effort.
 - Run once: `continuous-refactoring run-once --with codex|claude
   --model <model> [common targeting/validation flags]`
 - Run loop: `continuous-refactoring run --with codex|claude --model <model>
@@ -37,16 +39,14 @@ Treat `AGENTS.md` as part of the codebase's invariants, not documentation. A dri
 - Upgrade config: `continuous-refactoring upgrade`
 - Inspect migrations: `continuous-refactoring migration list
   [--status planning|ready|in-progress|skipped|done]
-  [--awaiting-review]` /
+  [--awaiting-review] [--no-headers]` /
   `continuous-refactoring migration doctor <slug-or-path>` /
   `continuous-refactoring migration doctor --all`
 - Review migrations: `continuous-refactoring migration review <slug-or-path>
-  --with codex|claude --model <model> --effort <low|medium|high|xhigh>`
-  (top-level `review list` / `review perform <slug> --with ... --model ...
-  --effort ...` remain compatibility wrappers)
+  --with codex|claude --model <model>`
 - Refine migration planning: `continuous-refactoring migration refine <slug-or-path>
   (--message <text>|--file <path>) --with codex|claude --model <model>
-  --effort <low|medium|high|xhigh> [--show-agent-logs]`
+  [--show-agent-logs]`
 
 No lint, no typecheck, no formatter, no pre-commit. GitHub Actions `Test`
 runs `uv run pytest`. **Pytest is the only code gate.** GitHub Actions
@@ -126,20 +126,20 @@ active phase explicitly names `loop.py` in scope.
 - **Driver owns commits** (`refactor_attempts.py:_finalize_commit()`, called from `loop.py`) — if an agent commits mid-attempt, driver does `git reset --soft head_before` and re-commits with its own message.
 - **Migration scheduling split** (`migrations.py`, `loop.py`, `phases.py`) — `last_touch` is activity bookkeeping, not the 6-hour retry gate. Deferred/blocked migrations set `cooldown_until`; successful phase completion clears deferral markers so the next ready phase can run immediately.
 - **Migration tick deferral writes** (`migration_tick.py`) — ready-check deferrals are queued while scanning candidates and saved only when the tick finds no executable phase or blocks for human review. Do not save a deferred manifest before checking later candidates; that dirties the worktree and can make ready-checks reject runnable phases.
-- **Migration visibility + consistency gate** (`migration_consistency.py`, `migration_tick.py`, `loop.py`, `review_cli.py`) — candidate scans use `iter_visible_migration_dirs()` so hidden/dotted/internal/symlink dirs are invisible to tick/review list. Before ready-check, `execution-gate` consistency errors block phase execution; `info`/`warning` never block.
+- **Migration visibility + consistency gate** (`migration_consistency.py`, `migration_tick.py`, `loop.py`, `review_cli.py`) — candidate scans use `iter_visible_migration_dirs()` so hidden/dotted/internal/symlink dirs are invisible to tick/list/review commands. Before ready-check, `execution-gate` consistency errors block phase execution; `info`/`warning` never block.
 - **Manifest codec boundary** (`migration_manifest_codec.py`, `migrations.py`) — codec owns legacy `ready_when`, legacy integer `current_phase`, duplicate phase-name rejection, and saved JSON formatting. `load_manifest()` / `save_manifest()` own filesystem and JSON boundary errors.
-- **Planning state codec boundary** (`planning_state.py`, `planning.py`) — `.planning/state.json` is valid only when completed steps replay through the branching planning graph to `next_step`; recorded outputs must be repo-relative files inside the migration directory. User refinement feedback is durable state, and append-only `revision_base_step_counts` anchors let unexecuted ready migrations reuse `revise` after terminal ready decisions; legacy `revision_base_step_count` decodes as one anchor. Persist accepted step stdout after the step is validated; do not add durable fields for failed current-step output.
+- **Planning state codec boundary** (`planning_state.py`, `planning.py`) — `.planning/state.json` is valid only when completed steps replay through the branching planning graph to `next_step`; recorded outputs must be repo-relative files inside the migration directory. User refinement feedback is durable state, and append-only `revision_base_step_counts` anchors let refinement reuse `revise` from review cursors or unexecuted ready terminal decisions; legacy `revision_base_step_count` decodes as one anchor. Persist accepted step stdout after the step is validated; do not add durable fields for failed current-step output.
 - **Planning publish transaction** (`planning_publish.py`) — publish copies the complete workspace snapshot to `__transactions__/<token>/staged`, validates it, checks same-device and `base_snapshot_id`, moves live to `rollback`, moves staged live, validates live, then deletes rollback. On post-rollback failure, move bad live to `failed` before restoring rollback. Transaction directories are invisible to scheduling/list candidates but visible to `migration doctor --all`. Do not bypass the lock or dirty-live check.
 - **One-step planning engine** (`planning.py`) — product planning entry points call `run_next_planning_step()` so one action runs exactly `PlanningState.next_step`, records accepted stdout/state in an off-live workspace, and publishes through `planning_publish.py`. Failed current-step output is never durable resume input. `run_planning` is intentionally not package-exported.
 - **Planning resume scheduling** (`migration_tick.py`, `loop.py`, `routing_pipeline.py`) — normal automation runs one eligible `status: planning` step before ready/in-progress phase ticks and before source-target routing. Missing or invalid `.planning/state.json` blocks automation with planning failure evidence; `status: planning` must never enter phase ready-check or phase execution.
 - **Focused planning reselection** (`loop.py`, `migration_tick.py`) — focused mode tracks planning migrations abandoned with `new-target` only in memory for the current run, skips them while another planning or phase candidate is eligible, and retries them only when no alternative remains. Do not persist this as `cooldown_until`; planning step failure is not a durable readiness deferral.
-- **Review CLI boundary** (`cli.py`, `review_cli.py`) — `cli.py` owns parser wiring; staged migration review internals live in `review_cli.py`, publish only through `planning_publish.py`, and stay internal/out of package-root `_SUBMODULES`. Top-level `review perform` is only a compatibility wrapper around this path.
+- **Review CLI boundary** (`cli.py`, `review_cli.py`) — `cli.py` owns parser wiring; staged migration review internals live in `review_cli.py`, publish only through `planning_publish.py`, and stay internal/out of package-root `_SUBMODULES`. Review mutation is only exposed through `migration review`.
 - **Migration CLI boundary** (`cli.py`, `migration_cli.py`) — `cli.py` owns parser wiring only; `migration_cli.py` owns namespace dispatch, read-only list/doctor behavior, and the contained slug/path resolver used by mutation commands. Mutating subcommands delegate their internals to focused modules such as `review_cli.py` or the planning refine entry point. Resolver targets must stay direct visible children of the configured live migrations root and reject symlink, outside, parent-traversal, and ambiguous paths.
-- **Human-review gating** (`planning.py`, `migration_tick.py`, `review_cli.py`) — migrations with `awaiting_human_review=true` must be invisible to automated migration ticks/ready-checks until canonical `migration review` clears the flag through staged publish; top-level `review perform` routes to the same compatibility path. `migration refine` may reopen an unexecuted ready migration to planning, but it is user feedback, not review approval.
+- **Human-review gating** (`planning.py`, `migration_tick.py`, `review_cli.py`) — migrations with `awaiting_human_review=true` must be invisible to automated migration ticks/ready-checks until canonical `migration review` clears the flag through staged publish. `migration refine` may reopen an unexecuted ready migration to planning, but it is user feedback, not review approval.
 - **Migration terminology split** (`migrations.py`, `planning.py`, `prompts.py`) — manifest `precondition` gates phase start; phase markdown `## Definition of Done` governs completion.
 - **Run-level baseline validation** (`loop.py`) — `run-once`, `run`, and `--focus-on-live-migrations` run the configured validation command after the clean-worktree check and before routing/refactoring. A red baseline stops as `baseline_failed`, not migration human review.
 - **Phase execution validation gate** (`phases.py`, `prompts.py`, `loop.py`) — a migration phase is complete only after host-side full validation passes. `execute_phase()` retries validation-red attempts from `head_before` up to the effective `--max-attempts` budget, and the phase prompt must include the literal configured validation command plus the phase file's Definition of Done as the completion contract.
-- **Effort budgeting** (`effort.py`, `loop.py`, `migration_tick.py`, `planning.py`) — `run` / `run-once` default to `--default-effort low` and `--max-allowed-effort xhigh`; there is no `--effort` alias on those commands. Target `effort-override` changes that target's default but is still capped. Migration `required_effort` above the cap defers the phase without failing the run.
+- **Effort budgeting** (`effort.py`, `loop.py`, `migration_tick.py`, `planning.py`) — `run` / `run-once` default to `--default-effort low` and `--max-allowed-effort xhigh`; there is no `--effort` alias on those commands. Target `effort-override` changes that target's default but is still capped. Migration `required_effort` above the cap defers the phase without failing the run. Manual `migration review` and `migration refine` operations use fixed internal `high` effort. Taste agent actions do not accept `--effort`; they always use fixed `medium` effort.
 - **Taste injection** — every prompt includes a `## Taste` section. `tests/test_prompts.py` enforces this via `_TASTE_INJECTED_PROMPTS`. Do not drop it.
 - **Taste read boundary** (`config.py`, `cli.py`, `loop.py`) — `load_taste()` translates unreadable project/global taste reads into `ContinuousRefactorError`; CLI stale-taste checks and loop taste loading must treat that boundary failure as non-fatal and skip/fall back instead of leaking raw `OSError`/`PermissionError`.
 - **Repo-local taste routing** (`config.py`, `cli.py`) — `ProjectEntry.repo_taste_path` is stored repo-relative in the XDG manifest and resolved through `resolve_project_taste_path()`. Keep `init`, `taste`, stale warnings, and run prompt loading on that helper so the active taste path does not drift.

@@ -39,6 +39,30 @@ def _planning_record(decision: str) -> DecisionRecord:
     )
 
 
+def _baseline_passes_then_refactor_fails(
+    test_command: str,
+    repo_root: Path,
+    stdout_path: Path,
+    stderr_path: Path,
+    **kwargs: object,
+) -> CommandCapture:
+    if _is_baseline_validation(stdout_path):
+        return noop_tests(
+            test_command,
+            repo_root,
+            stdout_path,
+            stderr_path,
+            **kwargs,
+        )
+    return failing_tests(
+        test_command,
+        repo_root,
+        stdout_path,
+        stderr_path,
+        **kwargs,
+    )
+
+
 @pytest.mark.parametrize(
     ("kwargs", "needles"),
     [
@@ -193,7 +217,7 @@ def test_run_once_validation_gate(
 
     validation_calls = 0
 
-    def baseline_passes_then_fails(
+    def count_and_fail_after_baseline(
         test_command: str,
         repo_root: Path,
         stdout_path: Path,
@@ -202,15 +226,7 @@ def test_run_once_validation_gate(
     ) -> CommandCapture:
         nonlocal validation_calls
         validation_calls += 1
-        if _is_baseline_validation(stdout_path):
-            return noop_tests(
-                test_command,
-                repo_root,
-                stdout_path,
-                stderr_path,
-                **kwargs,
-            )
-        return failing_tests(
+        return _baseline_passes_then_refactor_fails(
             test_command,
             repo_root,
             stdout_path,
@@ -220,7 +236,7 @@ def test_run_once_validation_gate(
 
     monkeypatch.setattr(
         "continuous_refactoring.loop.run_tests",
-        baseline_passes_then_fails,
+        count_and_fail_after_baseline,
     )
 
     args = make_run_once_args(run_once_env)
@@ -295,32 +311,9 @@ def test_run_once_no_fix_retry(
 
     monkeypatch.setattr("continuous_refactoring.loop.maybe_run_agent", counting_agent)
 
-    def baseline_passes_then_fails(
-        test_command: str,
-        repo_root: Path,
-        stdout_path: Path,
-        stderr_path: Path,
-        **kwargs: object,
-    ) -> CommandCapture:
-        if _is_baseline_validation(stdout_path):
-            return noop_tests(
-                test_command,
-                repo_root,
-                stdout_path,
-                stderr_path,
-                **kwargs,
-            )
-        return failing_tests(
-            test_command,
-            repo_root,
-            stdout_path,
-            stderr_path,
-            **kwargs,
-        )
-
     monkeypatch.setattr(
         "continuous_refactoring.loop.run_tests",
-        baseline_passes_then_fails,
+        _baseline_passes_then_refactor_fails,
     )
 
     args = make_run_once_args(run_once_env)

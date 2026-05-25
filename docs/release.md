@@ -54,8 +54,9 @@ bumps:
 
 YAML cannot enforce these repository settings:
 
-1. In GitHub branch protection or rulesets, require the `validate` status check
-   from the `PR Title` workflow before merging to `main`.
+1. In GitHub branch protection or rulesets, require the `pytest` status check
+   from the `Test` workflow and the `validate` status check from the `PR Title`
+   workflow before merging to `main`.
 2. Add a repository secret named `RELEASE_PLEASE_TOKEN` for Release Please. A
    fine-grained token needs Contents read/write and Pull requests read/write for
    `bigH/continuous-refactoring`. Without this secret, the workflow falls back

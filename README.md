@@ -46,6 +46,10 @@ uv pip install -e .
 
 That gives you the `continuous-refactoring` command.
 
+The CLI itself can be installed without `uv`, but the default validation command
+is `uv run pytest`. Pass `--validation-command pytest` or a project-specific
+script when the target repo does not use `uv`.
+
 Maintainers: see the [release checklist](https://github.com/bigH/continuous-refactoring/blob/main/docs/release.md).
 
 ## Fastest way to get one refactor
@@ -101,8 +105,8 @@ continuous-refactoring init --in-repo-taste
 
 # 2. (Optional) Write your refactoring taste — either edit the file, have an agent interview you,
 #    or refine an existing draft collaboratively
-continuous-refactoring taste --interview --with codex --model gpt-5 --effort high
-continuous-refactoring taste --refine --with codex --model gpt-5 --effort high
+continuous-refactoring taste --interview --with codex --model gpt-5
+continuous-refactoring taste --refine --with codex --model gpt-5
 
 # 3. Do one pass
 continuous-refactoring run-once \
@@ -118,22 +122,23 @@ continuous-refactoring run \
   --sleep 5
 ```
 
+Active taste agent modes require `--with` and `--model`; taste agent sessions
+always run at fixed `medium` effort.
+
 ## Subcommands
 
 | Command | What it does |
 |---|---|
 | `init` | Registers this directory as a project, creates a default `taste.md`, and can store `--live-migrations-dir` or `--in-repo-taste`. |
-| `taste` | Prints the active taste file path. Add `--interview` to have an agent author it, `--refine` to iteratively improve an existing taste doc, `--upgrade` to refresh stale taste dimensions, `--global` for the shared file, and `--force` to let `--interview` overwrite custom content after writing a `.bak`. |
+| `taste` | Prints the active taste file path. Add `--interview` to have an agent author it, `--refine` to iteratively improve an existing taste doc, `--upgrade` to refresh stale taste dimensions, `--global` for the shared file, and `--force` to let `--interview` overwrite custom content after writing a `.bak`. Active agent modes require `--with` and `--model`, then run at fixed `medium` effort. |
 | `run-once` | Single pass on one resolved target. No retry. If there is a diff and validation passes, it commits locally and prints the diffstat. |
 | `run` | The loop. Iterates refactor actions, retries on failure, and commits successful changes locally. Add `--focus-on-live-migrations` to bypass targeting and work only on eligible live migrations. |
 | `upgrade` | Checks that the global config manifest is current, rewrites it idempotently, and warns if the global taste file is stale. |
-| `migration list` | Lists visible migrations. Add `--status <status>` or `--awaiting-review` to filter. |
+| `migration list` | Lists visible migrations as TSV with headers. Add `--status <status>` or `--awaiting-review` to filter, or `--no-headers` for parsing. |
 | `migration doctor <slug-or-path>` | Validates one visible migration's consistency. |
 | `migration doctor --all` | Validates every visible migration plus internal transaction state. |
-| `migration review <slug-or-path>` | Starts staged review for a migration awaiting human review. Requires `--with`, `--model`, and `--effort`. |
-| `migration refine <slug-or-path>` | Records feedback for a planning or unexecuted ready migration and runs one staged planning revision. Requires `--message <text>` or `--file <path>`, plus `--with`, `--model`, and `--effort`; add `--show-agent-logs` to mirror the planning agent. |
-
-Legacy `review list` and `review perform <migration>` remain compatibility aliases; prefer `migration list --awaiting-review` and `migration review`.
+| `migration review <slug-or-path>` | Starts staged review for a migration awaiting human review. Requires `--with` and `--model`; review runs at fixed internal `high` effort. |
+| `migration refine <slug-or-path>` | Records feedback for a planning or unexecuted ready migration and runs one staged planning revision. Requires `--message <text>` or `--file <path>`, plus `--with` and `--model`; refine runs at fixed internal `high` effort. Add `--show-agent-logs` to mirror the planning agent. |
 
 ## Targeting / Useful flags
 
@@ -151,8 +156,9 @@ These flags are not mutually exclusive, but only the highest-priority populated 
 - `--scope-instruction "clean up the auth module"` — extra free-text scoping. If selected file patterns resolve nothing, this becomes the useful fallback context.
 
 If `--globs` or `--extensions` match no tracked files and there is no
-`--scope-instruction`, `run` completes successfully with zero refactor actions.
-`--paths` is literal input and is not filtered through `git ls-files`.
+`--scope-instruction`, `run` completes successfully with zero refactor actions;
+`run-once` falls back to a no-file `general refactoring` target. `--paths` is
+literal input and is not filtered through `git ls-files`.
 
 If you provide none of `--targets`, `--globs`, `--extensions`, or `--paths`,
 then `run` and `run-once` require `--scope-instruction`; the driver still
@@ -163,12 +169,13 @@ scope text as context for that target.
 
 - `init --live-migrations-dir PATH` — enables the larger-refactoring workflow for this project. The path is stored repo-relative in the project registry and created if missing.
 - `init --in-repo-taste [PATH]` — stores this project's taste file in the repo and remembers the repo-relative path. Defaults to `.continuous-refactoring/taste.md`; re-run `init --in-repo-taste ...` to choose a different path.
-- `migration list` — shows visible migrations; `--awaiting-review` narrows to human-review handoffs.
+- `migration list` — shows visible migrations as TSV with headers; `--awaiting-review` narrows to human-review handoffs and `--no-headers` keeps parser-friendly rows only.
 - `migration doctor <slug-or-path>` / `migration doctor --all` — read-only consistency checks. Doctor reports problems; it does not repair them.
-- `migration review <slug-or-path> --with ... --model ... --effort ...` — resolves an `awaiting_human_review` migration through a staged workspace.
-- `migration refine <slug-or-path> (--message <text>|--file <path>) --with ... --model ... --effort ... [--show-agent-logs]` — adds user feedback to a planning or unexecuted ready migration and resumes planning through the `revise` step when reopening ready work.
-- `taste --refine` — opens a collaborative editing session for the taste file. The agent keeps refining until you tell it to write, then the session ends automatically after the settled write.
-- `taste --upgrade` — re-interviews for taste dimensions added since your last version. No-op when already current; use `taste --refine` if you want to rework the doc anyway.
+- `migration review <slug-or-path> --with ... --model ...` — resolves an `awaiting_human_review` migration through a staged workspace at fixed internal `high` effort.
+- `migration refine <slug-or-path> (--message <text>|--file <path>) --with ... --model ... [--show-agent-logs]` — adds user feedback to a planning or unexecuted ready migration and resumes planning through the `revise` step when reopening ready work at fixed internal `high` effort.
+- `taste --refine --with ... --model ...` — opens a collaborative editing session for the taste file. The agent keeps refining until you tell it to write, then the session ends automatically after the settled write.
+- `taste --upgrade --with ... --model ...` — re-interviews for taste dimensions added since your last version. No-op when already current; use `taste --refine` if you want to rework the doc anyway.
+- Taste agent sessions always use fixed `medium` effort.
 - `taste --force` — only applies to `--interview`; it allows a customized taste file to be overwritten after backing it up to `taste.md.bak`.
 
 Canonical migration commands:
@@ -177,11 +184,12 @@ Canonical migration commands:
 continuous-refactoring migration list
 continuous-refactoring migration list --status planning
 continuous-refactoring migration list --awaiting-review
+continuous-refactoring migration list --no-headers
 continuous-refactoring migration doctor <slug-or-path>
 continuous-refactoring migration doctor --all
-continuous-refactoring migration review <slug-or-path> --with codex --model gpt-5 --effort high
-continuous-refactoring migration refine <slug-or-path> --message "split the risky phase" --with codex --model gpt-5 --effort high
-continuous-refactoring migration refine <slug-or-path> --file feedback.md --with codex --model gpt-5 --effort high
+continuous-refactoring migration review <slug-or-path> --with codex --model gpt-5
+continuous-refactoring migration refine <slug-or-path> --message "split the risky phase" --with codex --model gpt-5
+continuous-refactoring migration refine <slug-or-path> --file feedback.md --with codex --model gpt-5
 ```
 
 ### Shared `run` / `run-once` flags
@@ -190,7 +198,7 @@ continuous-refactoring migration refine <slug-or-path> --file feedback.md --with
 - `--default-effort` — default effort for run calls. Defaults to `low`. Valid labels are `low`, `medium`, `high`, `xhigh`.
 - `--max-allowed-effort` — cap for target overrides and migration escalation. Defaults to `xhigh`.
 - `--repo-root PATH` — repository root; defaults to the current directory.
-- `--validation-command` — defaults to `uv run pytest`. Swap it for whatever keeps your repo honest.
+- `--validation-command` — defaults to `uv run pytest`. This is parsed with `shlex.split` and run without a shell, so simple commands like `pytest -q` work, but shell syntax such as `cmd && cmd`, pipes, redirects, or leading `VAR=value` assignments is not interpreted. Put compound validation in a script.
 - `--timeout` — per-agent-call timeout in seconds.
 - `--show-agent-logs` / `--show-command-logs` — mirror output to your terminal instead of just logging.
 - `--refactoring-prompt` — override the default refactoring prompt.
@@ -219,9 +227,9 @@ continuous-refactoring migration refine <slug-or-path> --file feedback.md --with
 Each run writes to `$TMPDIR/continuous-refactoring/<run-id>/`:
 
 - `summary.json` — rolling status, counts, per-attempt stats
-- `events.jsonl` — structured event log with call roles such as `classify`,
-  `planning.<step>`, `phase.ready-check`, `phase.execute`, and
-  `phase.validation`
+- `events.jsonl` — structured event log with call roles such as
+  `scope-expansion`, `classify`, `planning.<step>`, `planning.publish`,
+  `phase.ready-check`, `phase.execute`, and `phase.validation`
 - `run.log` — human-readable log
 - `attempt-NNN/[retry-NN/]refactor/` — per-attempt agent + test stdout/stderr
 - `baseline/initial/` — baseline validation stdout/stderr before work starts
@@ -248,7 +256,7 @@ The taste file is a short bullet list of your refactoring preferences. It gets i
 - Project taste: `~/.local/share/continuous-refactoring/projects/<uuid>/taste.md`, or the repo-local path chosen with `init --in-repo-taste [PATH]`
 - Global taste: `~/.local/share/continuous-refactoring/global/taste.md`
 
-Project taste wins over global. Use `taste` to print the active path, `taste --interview` to bootstrap one, `taste --refine` to rework it with an agent, or edit the file directly any time.
+Project taste wins over global. Use `taste` to print the active path, `taste --interview --with ... --model ...` to bootstrap one, `taste --refine --with ... --model ...` to rework it with an agent, or edit the file directly any time.
 
 ## Larger refactorings
 
@@ -323,7 +331,7 @@ Before executing a phase, a ready-check agent verifies that the current phase pr
 
 - **ready: yes** — phase executes; on green tests, the phase is marked done, any prior deferral markers are cleared, and the migration advances immediately to the next phase.
 - **ready: no** — manifest activity is bumped, a retry cooldown is started, and a future `wake_up_on` is recorded when needed; the tick moves on.
-- **ready: unverifiable** — the migration is flagged `awaiting_human_review` and put on cooldown. Automated migration ticks skip flagged migrations until review clears the flag. Use `migration list --awaiting-review` to find it and `migration review <slug-or-path> --with ... --model ... --effort ...` to resolve it interactively.
+- **ready: unverifiable** — the migration is marked `awaiting_human_review` and put on cooldown. Automated migration ticks skip migrations awaiting human review until review clears the flag. Use `migration list --awaiting-review` to find it and `migration review <slug-or-path> --with ... --model ...` to resolve it interactively.
 
 Human-facing migration references use the relative phase spec path, for example `phase-2-failure-report.md`. The manifest cursor stores the phase `name`, not a numeric index.
 

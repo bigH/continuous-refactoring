@@ -123,7 +123,7 @@ PACKAGE_SURFACE_EXPORTS = (
     "compose_phase_execution_prompt",
     "compose_phase_ready_prompt",
     "compose_planning_prompt",
-    "compose_review_perform_prompt",
+    "compose_migration_review_prompt",
     "compose_scope_selection_prompt",
     "compose_taste_refine_prompt",
     "compose_taste_upgrade_prompt",

@@ -32,7 +32,6 @@ from continuous_refactoring.loop import (
 )
 from continuous_refactoring.migration_cli import handle_migration
 from continuous_refactoring.migrations import MIGRATION_STATUSES
-from continuous_refactoring.review_cli import handle_review
 
 _PACKAGE_DISTRIBUTION = "continuous-refactoring"
 _TASTE_WARNING = "warning: taste out of date — run `continuous-refactoring taste --upgrade`"
@@ -40,6 +39,7 @@ _GLOBAL_TASTE_WARNING = (
     "warning: global taste is out of date — "
     "run 'continuous-refactoring taste --upgrade' to update."
 )
+_TASTE_AGENT_EFFORT = "medium"
 
 
 def _version_banner() -> str:
@@ -155,6 +155,10 @@ def _add_taste_parser(subparsers: argparse._SubParsersAction) -> None:
     taste_parser = subparsers.add_parser(
         "taste",
         help="Manage refactoring taste files.",
+        description=(
+            "Manage project or global taste files. Agent-backed modes require "
+            "--with and --model."
+        ),
     )
     taste_parser.set_defaults(handler=_handle_taste)
     taste_parser.add_argument(
@@ -192,11 +196,6 @@ def _add_taste_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Model name for --interview, --upgrade, or --refine.",
     )
     taste_parser.add_argument(
-        "--effort",
-        default=None,
-        help="Effort level for --interview, --upgrade, or --refine.",
-    )
-    taste_parser.add_argument(
         "--force",
         action="store_true",
         help="Allow --interview to overwrite a taste file with custom content (backup at .bak).",
@@ -206,7 +205,8 @@ def _add_taste_parser(subparsers: argparse._SubParsersAction) -> None:
 def _add_run_once_parser(subparsers: argparse._SubParsersAction) -> None:
     run_once_parser = subparsers.add_parser(
         "run-once",
-        help="Single refactoring attempt (one agent call, no fix retry).",
+        help="Run one routed refactoring action without fix retry.",
+        description="Run one routed refactoring action without fix retry.",
     )
     run_once_parser.set_defaults(handler=_handle_run_once)
     _add_common_args(run_once_parser)
@@ -215,7 +215,8 @@ def _add_run_once_parser(subparsers: argparse._SubParsersAction) -> None:
 def _add_run_parser(subparsers: argparse._SubParsersAction) -> None:
     run_parser = subparsers.add_parser(
         "run",
-        help="Continuous refactoring loop with fix-prompt retry.",
+        help="Run routed refactoring actions with fix-prompt retry.",
+        description="Run routed refactoring actions with fix-prompt retry.",
     )
     run_parser.set_defaults(handler=_handle_run)
     _add_common_args(run_parser)
@@ -229,13 +230,14 @@ def _add_run_parser(subparsers: argparse._SubParsersAction) -> None:
         "--max-refactors",
         type=int,
         default=None,
-        help="Refactor actions to run.",
+        help="Actions to run.",
     )
     run_parser.add_argument(
         "--focus-on-live-migrations",
         action="store_true",
         help=(
-            "Iterate only on live migrations until every one is done or blocked. "
+            "Iterate only on eligible live migrations until done, deferred, "
+            "blocked, or failure budget trips. "
             "Bypasses targeting and --max-refactors requirements."
         ),
     )
@@ -258,31 +260,11 @@ def _add_run_parser(subparsers: argparse._SubParsersAction) -> None:
     )
 
 
-def _add_review_parser(subparsers: argparse._SubParsersAction) -> None:
-    review_parser = subparsers.add_parser(
-        "review",
-        help="Review migrations awaiting human review.",
-    )
-    review_parser.set_defaults(handler=handle_review)
-    review_sub = review_parser.add_subparsers(dest="review_command")
-    review_sub.add_parser("list", help="List migrations flagged for review.")
-    perform_parser = review_sub.add_parser(
-        "perform",
-        help="Perform review on a flagged migration.",
-    )
-    perform_parser.add_argument("migration", help="Migration name to review.")
-    perform_parser.add_argument(
-        "--with", dest="agent", choices=("codex", "claude"), required=True,
-        help="Agent backend.",
-    )
-    perform_parser.add_argument("--model", required=True, help="Model name.")
-    perform_parser.add_argument("--effort", required=True, help="Effort level.")
-
-
 def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
     migration_parser = subparsers.add_parser(
         "migration",
-        help="Inspect live migrations.",
+        help="Inspect and manage live migrations.",
+        description="Inspect and manage live migrations.",
     )
     migration_parser.set_defaults(handler=handle_migration)
     migration_sub = migration_parser.add_subparsers(dest="migration_command")
@@ -302,6 +284,11 @@ def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
         action="store_true",
         help="Only show migrations awaiting human review.",
     )
+    list_parser.add_argument(
+        "--no-headers",
+        action="store_true",
+        help="Omit the TSV header row.",
+    )
 
     doctor_parser = migration_sub.add_parser(
         "doctor",
@@ -320,7 +307,11 @@ def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
 
     review_parser = migration_sub.add_parser(
         "review",
-        help="Perform staged review on a flagged migration.",
+        help="Resolve a migration awaiting human review in a staged workspace.",
+        description=(
+            "Resolve a migration awaiting human review in a staged workspace. "
+            "Requires --with and --model."
+        ),
     )
     review_parser.add_argument("target", help="Migration slug or contained path.")
     review_parser.add_argument(
@@ -328,13 +319,11 @@ def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Agent backend.",
     )
     review_parser.add_argument("--model", required=True, help="Model name.")
-    review_parser.add_argument(
-        "--effort", choices=EFFORT_TIERS, required=True, help="Effort level."
-    )
 
     refine_parser = migration_sub.add_parser(
         "refine",
-        help="Refine a planning migration with user feedback.",
+        help="Apply feedback to a planning or unexecuted ready migration.",
+        description="Apply feedback to a planning or unexecuted ready migration.",
     )
     refine_parser.add_argument("target", help="Migration slug or contained path.")
     feedback_group = refine_parser.add_mutually_exclusive_group(required=True)
@@ -349,9 +338,6 @@ def _add_migration_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Agent backend.",
     )
     refine_parser.add_argument("--model", required=True, help="Model name.")
-    refine_parser.add_argument(
-        "--effort", choices=EFFORT_TIERS, required=True, help="Effort level."
-    )
     refine_parser.add_argument(
         "--show-agent-logs",
         action="store_true",
@@ -380,7 +366,6 @@ def build_parser() -> argparse.ArgumentParser:
     )
     upgrade_parser.set_defaults(handler=_handle_upgrade)
     _add_migration_parser(subparsers)
-    _add_review_parser(subparsers)
 
     return parser
 
@@ -499,7 +484,9 @@ def _configure_repo_taste(
     if not current.exists():
         ensure_taste_file(destination)
         return
-    if current.resolve() == destination.resolve():
+    current_resolved = current.resolve()
+    destination_resolved = destination.resolve()
+    if current_resolved == destination_resolved:
         return
     if not current.is_file():
         raise ContinuousRefactorError(
@@ -529,15 +516,17 @@ def _configure_live_migrations_dir(
     if current is None or not current.exists():
         destination.mkdir(parents=True, exist_ok=True)
         return
+    current_resolved = current.resolve()
+    destination_resolved = destination.resolve()
     if not current.is_dir():
         raise ContinuousRefactorError(
             f"Configured live migrations path is not a directory: {current}"
         )
-    if current.resolve() == destination.resolve():
+    if current_resolved == destination_resolved:
         return
     if (
-        destination.resolve().is_relative_to(current.resolve())
-        or current.resolve().is_relative_to(destination.resolve())
+        destination_resolved.is_relative_to(current_resolved)
+        or current_resolved.is_relative_to(destination_resolved)
     ):
         raise ContinuousRefactorError(
             "Live migrations directory cannot be moved into itself or one of "
@@ -620,9 +609,7 @@ def _active_taste_mode(args: argparse.Namespace) -> str | None:
 
 
 def _taste_agent_flags_set(args: argparse.Namespace) -> bool:
-    return any(
-        getattr(args, name, None) is not None for name in ("agent", "model", "effort")
-    )
+    return any(getattr(args, name, None) is not None for name in ("agent", "model"))
 
 
 def _require_taste_action_flags(
@@ -630,14 +617,12 @@ def _require_taste_action_flags(
     action: str,
     agent: str | None,
     model: str | None,
-    effort: str | None,
 ) -> None:
     missing = [
         flag
         for flag, value in (
             ("--with", agent),
             ("--model", model),
-            ("--effort", effort),
         )
         if not value
     ]
@@ -661,7 +646,7 @@ def _run_taste_agent(
         returncode = run_agent_interactive_until_settled(
             args.agent,
             args.model,
-            args.effort,
+            _TASTE_AGENT_EFFORT,
             prompt,
             Path.cwd().resolve(),
             content_path=path,
@@ -729,7 +714,7 @@ def _handle_taste(args: argparse.Namespace) -> None:
     if mode is None:
         if _taste_agent_flags_set(args):
             print(
-                "Error: --with/--model/--effort require --interview, --upgrade, or --refine.",
+                "Error: --with/--model require --interview, --upgrade, or --refine.",
                 file=sys.stderr,
             )
             raise SystemExit(2)
@@ -741,7 +726,6 @@ def _handle_taste(args: argparse.Namespace) -> None:
         action=mode,
         agent=getattr(args, "agent", None),
         model=getattr(args, "model", None),
-        effort=getattr(args, "effort", None),
     )
     return _TASTE_MODE_HANDLERS[mode](args)
 

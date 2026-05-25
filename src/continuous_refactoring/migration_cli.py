@@ -12,6 +12,7 @@ from continuous_refactoring.artifacts import (
     create_run_artifacts,
 )
 from continuous_refactoring.config import resolve_live_migrations_dir, resolve_project
+from continuous_refactoring.effort import EffortTier
 from continuous_refactoring.migration_consistency import (
     MigrationConsistencyFinding,
     check_migration_consistency,
@@ -43,7 +44,19 @@ __all__ = [
 ]
 
 _MIGRATION_USAGE = "Usage: continuous-refactoring migration {list,doctor,review,refine}"
+_MIGRATION_MANUAL_AGENT_EFFORT: EffortTier = "high"
 _MISSING_TEXT = "(none)"
+_LIST_HEADER = "\t".join(
+    (
+        "slug",
+        "status",
+        "cursor",
+        "awaiting_review",
+        "last_touch",
+        "cooldown",
+        "reason",
+    )
+)
 
 
 @dataclass(frozen=True)
@@ -74,6 +87,8 @@ def handle_migration(args: argparse.Namespace) -> None:
 
 def handle_migration_list(args: argparse.Namespace) -> None:
     context = _resolve_context(error_code=1)
+    if not bool(getattr(args, "no_headers", False)):
+        print(_LIST_HEADER)
     if not context.live_dir.is_dir():
         return
 
@@ -122,15 +137,7 @@ def handle_migration_doctor(args: argparse.Namespace) -> None:
 
 def handle_migration_review(args: argparse.Namespace) -> None:
     context = _resolve_context(error_code=2)
-    try:
-        target = resolve_migration_target(
-            live_dir=context.live_dir,
-            repo_root=context.repo_root,
-            value=args.target,
-        )
-    except ContinuousRefactorError as error:
-        print(f"Error: {error}", file=sys.stderr)
-        raise SystemExit(2) from error
+    target = _resolve_target_or_exit(context=context, value=args.target, error_code=2)
 
     from continuous_refactoring.config import load_taste
     from continuous_refactoring.review_cli import (
@@ -151,7 +158,7 @@ def handle_migration_review(args: argparse.Namespace) -> None:
             project_state_dir=context.project_state_dir,
             agent=args.agent,
             model=args.model,
-            effort=args.effort,
+            effort=_MIGRATION_MANUAL_AGENT_EFFORT,
             taste=taste,
         )
     )
@@ -160,15 +167,7 @@ def handle_migration_review(args: argparse.Namespace) -> None:
 def handle_migration_refine(args: argparse.Namespace) -> None:
     context = _resolve_context(error_code=2)
     feedback_text, feedback_source = _read_refine_feedback(args)
-    try:
-        target = resolve_migration_target(
-            live_dir=context.live_dir,
-            repo_root=context.repo_root,
-            value=args.target,
-        )
-    except ContinuousRefactorError as error:
-        print(f"Error: {error}", file=sys.stderr)
-        raise SystemExit(2) from error
+    target = _resolve_target_or_exit(context=context, value=args.target, error_code=2)
 
     from continuous_refactoring.config import load_taste
     from continuous_refactoring.log_mirroring import LogMirroring
@@ -187,7 +186,7 @@ def handle_migration_refine(args: argparse.Namespace) -> None:
         context.repo_root,
         agent=args.agent,
         model=args.model,
-        effort=args.effort,
+        effort=_MIGRATION_MANUAL_AGENT_EFFORT,
         test_command="migration refine",
     )
     try:
@@ -202,7 +201,7 @@ def handle_migration_refine(args: argparse.Namespace) -> None:
                 artifacts=artifacts,
                 agent=args.agent,
                 model=args.model,
-                effort=args.effort,
+                effort=_MIGRATION_MANUAL_AGENT_EFFORT,
                 log_mirroring=LogMirroring(
                     agent=bool(getattr(args, "show_agent_logs", False)),
                 ),
@@ -273,6 +272,23 @@ def _read_refine_feedback(args: argparse.Namespace) -> tuple[str, FeedbackSource
         print("Error: refinement feedback must not be empty.", file=sys.stderr)
         raise SystemExit(2)
     return text, source
+
+
+def _resolve_target_or_exit(
+    *,
+    context: MigrationCliContext,
+    value: str,
+    error_code: int,
+) -> MigrationTarget:
+    try:
+        return resolve_migration_target(
+            live_dir=context.live_dir,
+            repo_root=context.repo_root,
+            value=value,
+        )
+    except ContinuousRefactorError as error:
+        print(f"Error: {error}", file=sys.stderr)
+        raise SystemExit(error_code) from error
 
 
 def _refine_publish_error_message(reason: str, slug: str) -> str:

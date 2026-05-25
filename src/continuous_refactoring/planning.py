@@ -74,6 +74,7 @@ _REQUIRED_EFFORT_LINE_RE = re.compile(
 _EFFORT_REASON_LINE_RE = re.compile(
     r"^effort_reason:\s*(.+)$", re.IGNORECASE | re.MULTILINE,
 )
+_REFINE_REOPEN_STEPS = frozenset(("review", "review-2", "final-review"))
 
 
 @dataclass(frozen=True)
@@ -1010,8 +1011,9 @@ def _prepare_refine_state(
 ) -> tuple[MigrationManifest, PlanningState]:
     _require_refine_eligible(manifest)
     state = append_planning_feedback(state, feedback_text, feedback_source)
-    if manifest.status == "ready":
+    if manifest.status == "ready" or state.next_step in _REFINE_REOPEN_STEPS:
         state = reopen_planning_for_revise(state)
+    if manifest.status == "ready":
         manifest = _refresh_manifest(
             manifest,
             workspace_root / "manifest.json",

@@ -795,6 +795,59 @@ def test_refine_ready_reopen_runs_one_revise_step(
     assert state.revision_base_step_counts == (5,)
 
 
+def test_refine_review_two_reopens_to_revise(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    repo_root, live_dir, mig_root = _planning_repo_context(tmp_path, monkeypatch)
+    _seed_planning_snapshot(
+        repo_root,
+        live_dir,
+        [
+            ("approaches", "completed", "Generated approaches.\n"),
+            ("pick-best", "completed", "Chose incremental.\n"),
+            ("expand", "completed", "Expanded.\n"),
+            ("review", "findings", "Phase 1 over-gates.\n"),
+            ("revise", "completed", "Revised once.\n"),
+        ],
+        plan_text="# Plan v1\n",
+        phase_text=_phase_doc("inventory already exists", "Inventory is current."),
+    )
+
+    result, mock = _run_refine_step(
+        repo_root,
+        live_dir,
+        [
+            _workspace_response(
+                "Revised with feedback.\n",
+                {
+                    "plan.md": "# Plan v2\n",
+                    "phase-0-setup.md": _phase_doc(
+                        "source files are present",
+                        "Inventory is created or updated.",
+                    ),
+                },
+            )
+        ],
+        monkeypatch,
+        feedback="Move inventory existence from precondition to DoD.",
+    )
+
+    state = load_planning_state(repo_root, planning_state_path(mig_root))
+    assert result.status == "published"
+    assert result.step == "revise"
+    assert mock.stage_labels == ["revise"]
+    assert "User refinement feedback" in mock.prompts[0]
+    assert state.next_step == "review-2"
+    assert state.revision_base_step_counts == (5,)
+    assert state.feedback[-1].text == (
+        "Move inventory existence from precondition to DoD."
+    )
+    assert (
+        mig_root / ".planning" / "stages" / "revise-2.stdout.md"
+    ).read_text(encoding="utf-8") == "Revised with feedback.\n"
+
+
 def test_refine_repeated_steps_keep_original_stdout_history(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,

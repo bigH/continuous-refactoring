@@ -24,19 +24,19 @@ from continuous_refactoring.prompts import (
     DEFAULT_REFACTORING_PROMPT,
     PHASE_EXECUTION_PROMPT,
     PHASE_READY_CHECK_PROMPT,
+    MIGRATION_REVIEW_PROMPT,
     PLANNING_APPROACHES_PROMPT,
     PLANNING_EXPAND_PROMPT,
     PLANNING_FINAL_REVIEW_PROMPT,
     PLANNING_PICK_BEST_PROMPT,
     PLANNING_REVIEW_PROMPT,
-    REVIEW_PERFORM_PROMPT,
     compose_full_prompt,
     compose_classifier_prompt,
     compose_interview_prompt,
+    compose_migration_review_prompt,
     compose_phase_execution_prompt,
     compose_phase_ready_prompt,
     compose_planning_prompt,
-    compose_review_perform_prompt,
     compose_taste_refine_prompt,
     compose_taste_upgrade_prompt,
 )
@@ -75,8 +75,25 @@ _TASTE_INJECTED_PROMPTS = (
     PLANNING_FINAL_REVIEW_PROMPT,
     PHASE_READY_CHECK_PROMPT,
     PHASE_EXECUTION_PROMPT,
-    REVIEW_PERFORM_PROMPT,
+    MIGRATION_REVIEW_PROMPT,
 )
+
+
+def _assert_contains_in_order(text: str, fragments: tuple[str, ...]) -> None:
+    cursor = 0
+    for fragment in fragments:
+        index = text.find(fragment, cursor)
+        assert index != -1, f"Missing fragment: {fragment!r}"
+        cursor = index + len(fragment)
+
+
+def _assert_output_contract_variants(
+    prompt: str,
+    label: str,
+    variants: tuple[str, ...],
+) -> None:
+    for variant in variants:
+        assert f"{label}: {variant}" in prompt
 
 
 def _target() -> Target:
@@ -134,8 +151,11 @@ def _terminal_ready_state(repo_root: Path, mig_root: Path) -> PlanningState:
 # ---------------------------------------------------------------------------
 
 def test_classifier_output_contract() -> None:
-    assert "decision: cohesive-cleanup" in CLASSIFIER_PROMPT
-    assert "decision: needs-plan" in CLASSIFIER_PROMPT
+    _assert_output_contract_variants(
+        CLASSIFIER_PROMPT,
+        "decision",
+        ("cohesive-cleanup", "needs-plan"),
+    )
 
 
 def test_refactoring_prompt_defers_commit_to_driver() -> None:
@@ -156,15 +176,19 @@ def test_phase_execution_prompt_has_status_block_contract() -> None:
 
 
 def test_final_review_output_contract() -> None:
-    assert "final-decision: approve-auto" in PLANNING_FINAL_REVIEW_PROMPT
-    assert "final-decision: approve-needs-human" in PLANNING_FINAL_REVIEW_PROMPT
-    assert "final-decision: reject" in PLANNING_FINAL_REVIEW_PROMPT
+    _assert_output_contract_variants(
+        PLANNING_FINAL_REVIEW_PROMPT,
+        "final-decision",
+        ("approve-auto", "approve-needs-human", "reject"),
+    )
 
 
 def test_ready_check_output_contract() -> None:
-    assert "ready: yes" in PHASE_READY_CHECK_PROMPT
-    assert "ready: no" in PHASE_READY_CHECK_PROMPT
-    assert "ready: unverifiable" in PHASE_READY_CHECK_PROMPT
+    _assert_output_contract_variants(
+        PHASE_READY_CHECK_PROMPT,
+        "ready",
+        ("yes", "no", "unverifiable"),
+    )
 
 
 def test_phase_ready_prompt_uses_precondition_terminology() -> None:
@@ -262,7 +286,7 @@ def test_review_prompt_names_work_dir_and_forbids_live_dir_mutation() -> None:
     work_dir = Path("/xdg/projects/p/planning/auth-cleanup/review-1/work/auth-cleanup")
     live_dir = Path("/repo/migrations/auth-cleanup")
 
-    result = compose_review_perform_prompt(
+    result = compose_migration_review_prompt(
         "auth-cleanup",
         repo_root,
         work_dir,
@@ -327,7 +351,7 @@ def test_review_and_refine_prompts_forbid_live_dir_mutation(tmp_path: Path) -> N
     repo_root = tmp_path / "repo"
     review_work_dir = tmp_path / "xdg" / "planning" / "auth-cleanup" / "review" / "work"
     live_mig_root = repo_root / "migrations" / "auth-cleanup"
-    review_prompt = compose_review_perform_prompt(
+    review_prompt = compose_migration_review_prompt(
         "auth-cleanup",
         repo_root,
         review_work_dir,
@@ -527,6 +551,35 @@ def test_compose_full_prompt_includes_retry_context_heading() -> None:
 
     assert "## Retry Context" in result
     assert "validation failed after refactor" in result
+
+
+def test_compose_full_prompt_keeps_section_order_contract() -> None:
+    result = compose_full_prompt(
+        base_prompt="BASE",
+        taste=_TASTE,
+        target=_target(),
+        scope_instruction="fallback scope",
+        validation_command="uv run pytest",
+        attempt=3,
+        retry_context="retry context",
+        fix_amendment="## Optional Amendment\nDetails",
+    )
+
+    _assert_contains_in_order(
+        result,
+        (
+            "Attempt 3",
+            "BASE",
+            "All changes must keep the project in a state where all tests pass.",
+            "## Refactoring Taste",
+            "## Target Files",
+            "## Scope",
+            "## Validation",
+            "## Retry Context",
+            "Use this as focused context only. Do not copy raw failure text into code.",
+            "## Optional Amendment",
+        ),
+    )
 
 
 def test_compose_full_prompt_omits_blank_retry_context() -> None:

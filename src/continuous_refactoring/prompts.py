@@ -30,7 +30,7 @@ __all__ = [
     "compose_phase_execution_prompt",
     "compose_phase_ready_prompt",
     "compose_planning_prompt",
-    "compose_review_perform_prompt",
+    "compose_migration_review_prompt",
     "compose_scope_selection_prompt",
     "compose_taste_refine_prompt",
     "compose_taste_upgrade_prompt",
@@ -55,6 +55,18 @@ def _heading_section(header: str, body: str) -> str:
 
 def _join_sections(*sections: str | None) -> str:
     return "\n\n".join(section for section in sections if section)
+
+
+def _taste_section(taste: str) -> str:
+    return f"## Taste\n{taste}"
+
+
+def _validation_section(validation_command: str) -> str:
+    return f"## Validation\nRun: `{validation_command}`"
+
+
+def _with_retry_context(sections: list[str], retry_context: str | None) -> list[str]:
+    return [*sections, *_retry_context_sections(retry_context)]
 
 
 def _format_target_files(files: tuple[str, ...]) -> str | None:
@@ -446,16 +458,15 @@ def compose_full_prompt(
     retry_context: str | None = None,
     fix_amendment: str | None = None,
 ) -> str:
-    sections: list[str] = [
+    sections: list[str] = _with_retry_context([
         f"Attempt {attempt}",
         base_prompt,
         REQUIRED_PREAMBLE,
-        f"## Refactoring Taste\n{taste}",
+        "## Refactoring Taste\n" + taste,
         _format_target_files(target.files),
         _first_scope(target.scoping, scope_instruction),
-        f"## Validation\nRun: `{validation_command}`",
-        *_retry_context_sections(retry_context),
-    ]
+        _validation_section(validation_command),
+    ], retry_context)
     if fix_amendment:
         sections.append(fix_amendment)
     return _join_sections(*sections)
@@ -774,7 +785,7 @@ def compose_classifier_prompt(target: Target, taste: str) -> str:
         f"## Target\n{target.description}",
         _format_target_files(target.files),
         _first_scope(target.scoping),
-        f"## Taste\n{taste}",
+        _taste_section(taste),
     )
 
 
@@ -789,7 +800,7 @@ def compose_scope_selection_prompt(
         _format_target_files(target.files),
         _heading_section("Candidates", _format_scope_candidates(candidates)),
         _first_scope(target.scoping),
-        f"## Taste\n{taste}",
+        _taste_section(taste),
     )
 
 
@@ -806,7 +817,7 @@ def compose_planning_prompt(
         _format_effort_budget(effort_budget),
         f"## Migration\n{migration_name}",
         f"## Context\n{context}" if context else None,
-        f"## Taste\n{taste}",
+        _taste_section(taste),
     )
 
 
@@ -817,7 +828,7 @@ def compose_phase_ready_prompt(
         PHASE_READY_CHECK_PROMPT,
         f"## Phase\n{_format_phase_summary(phase)}",
         f"## Manifest\n{_format_manifest_summary(manifest)}",
-        f"## Taste\n{taste}",
+        _taste_section(taste),
     )
 
 
@@ -828,20 +839,19 @@ def compose_phase_execution_prompt(
     validation_command: str,
     retry_context: str | None = None,
 ) -> str:
-    sections: list[str] = [
+    sections: list[str] = _with_retry_context([
         PHASE_EXECUTION_PROMPT,
         f"## Phase\n{_format_phase_summary(phase)}",
         f"## Manifest\n{_format_manifest_summary(manifest)}",
-        f"## Taste\n{taste}",
-        f"## Validation\nRun: `{validation_command}`",
-        *_retry_context_sections(retry_context),
-    ]
+        _taste_section(taste),
+        _validation_section(validation_command),
+    ], retry_context)
     return _join_sections(*sections)
 
 
-REVIEW_PERFORM_PROMPT = """\
-You are conducting a human review of a refactoring migration that was flagged
-for human input during planning.
+MIGRATION_REVIEW_PROMPT = """\
+You are conducting a human review of a refactoring migration that was marked
+as awaiting human review by the driver.
 
 Project-specific taste is injected by the caller in the `## Taste` section.
 
@@ -859,8 +869,8 @@ Your job:
    what the plan assumes. Note any drift you find — stale assumptions change
    what is worth asking the user.
 3. Present the situation to the user: what the migration does, what phase it is
-   on, and why it was flagged for review. The manifest's "Human review reason"
-   field (shown below) is the exact reason the driver flagged this migration —
+   on, and why it is awaiting human review. The manifest's "Human review reason"
+   field (shown below) is the exact reason the driver marked this migration —
    surface it verbatim so the user can see what triggered the hand-off.
    Include any drift you found so the user sees the current shape, not the
    shape the plan was written against.
@@ -888,8 +898,15 @@ When the review is successfully completed:
 - Any plan or phase file updates MUST be written before exiting\
 """
 
+_WORKSPACE_MUTATION_CONTRACT_LINES = (
+    "Writable target: staged work dir only.\n"
+    "Writable target: work dir only.\n"
+    "The live migration directory is read-only reference material.\n"
+    "Do not mutate the live migration directory."
+)
 
-def compose_review_perform_prompt(
+
+def compose_migration_review_prompt(
     migration_name: str,
     repo_root: Path,
     work_dir: Path,
@@ -900,7 +917,7 @@ def compose_review_perform_prompt(
 ) -> str:
     reason = manifest.human_review_reason or "(no reason recorded)"
     sections: list[str] = [
-        REVIEW_PERFORM_PROMPT,
+        MIGRATION_REVIEW_PROMPT,
         f"## Migration\nName: {migration_name}",
         (
             "## Workspace\n"
@@ -908,10 +925,7 @@ def compose_review_perform_prompt(
             f"Staged work dir: {work_dir}\n"
             f"Work dir: {work_dir}\n"
             f"Live migration dir: {live_dir}\n"
-            "Writable target: staged work dir only.\n"
-            "Writable target: work dir only.\n"
-            "The live migration directory is read-only reference material.\n"
-            "Do not mutate the live migration directory."
+            + _WORKSPACE_MUTATION_CONTRACT_LINES
         ),
         f"## Human Review\n{reason}",
         (
@@ -933,5 +947,5 @@ def compose_review_perform_prompt(
             "Current phase file: (none)\n"
             "Current phase name: (none)"
         )
-    sections.append(f"## Taste\n{taste}")
+    sections.append(_taste_section(taste))
     return _join_sections(*sections)

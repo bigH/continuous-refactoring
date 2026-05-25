@@ -103,39 +103,6 @@ def _retry_context(record: DecisionRecord) -> str:
     return "\n".join(lines)
 
 
-def _decision_record(
-    *,
-    decision: str,
-    retry_recommendation: str,
-    target: str,
-    call_role: str,
-    phase_reached: str,
-    failure_kind: str,
-    summary: str,
-    next_retry_focus: str | None = None,
-    agent_last_message_path: Path | None = None,
-    agent_stdout_path: Path | None = None,
-    agent_stderr_path: Path | None = None,
-    tests_stdout_path: Path | None = None,
-    tests_stderr_path: Path | None = None,
-) -> DecisionRecord:
-    return DecisionRecord(
-        decision=decision,
-        retry_recommendation=retry_recommendation,
-        target=target,
-        call_role=call_role,
-        phase_reached=phase_reached,
-        failure_kind=failure_kind,
-        summary=summary,
-        next_retry_focus=next_retry_focus,
-        agent_last_message_path=agent_last_message_path,
-        agent_stdout_path=agent_stdout_path,
-        agent_stderr_path=agent_stderr_path,
-        tests_stdout_path=tests_stdout_path,
-        tests_stderr_path=tests_stderr_path,
-    )
-
-
 def _restore_and_retry(
     *,
     repo_root: Path,
@@ -154,7 +121,7 @@ def _restore_and_retry(
     tests_stderr_path: Path | None = None,
 ) -> DecisionRecord:
     _reset_to_source_baseline(repo_root, head_before, preserved_workspace)
-    return _decision_record(
+    return DecisionRecord(
         decision="retry",
         retry_recommendation="same-target",
         target=target,
@@ -439,7 +406,7 @@ def _run_refactor_attempt(
             agent_status.retry_recommendation
             or default_retry_recommendation(decision)
         )
-        return _decision_record(
+        return DecisionRecord(
             decision=decision,
             retry_recommendation=retry_recommendation,
             target=target.description,
@@ -476,7 +443,7 @@ def _run_refactor_attempt(
         phase="refactor",
     )
 
-    return _decision_record(
+    return DecisionRecord(
         decision="commit",
         retry_recommendation="none",
         target=target.description,

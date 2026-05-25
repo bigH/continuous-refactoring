@@ -15,7 +15,6 @@ def _refine_args(
     global_: bool = False,
     agent: str | None = "codex",
     model: str | None = "m",
-    effort: str | None = "high",
     force: bool = False,
 ) -> argparse.Namespace:
     return make_taste_args(
@@ -23,7 +22,6 @@ def _refine_args(
         global_=global_,
         agent=agent,
         model=model,
-        effort=effort,
         force=force,
     )
 
@@ -34,7 +32,7 @@ def test_refine_requires_agent_flags(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "xdg"))
-    args = _refine_args(agent=None, model=None, effort=None)
+    args = _refine_args(agent=None, model=None)
 
     with pytest.raises(SystemExit) as exc_info:
         _handle_taste(args)
@@ -139,6 +137,7 @@ def test_refine_prompt_allows_open_ended_improvement_and_explicit_write_handoff(
     assert "do not modify either file again" in prompt
     assert "Do not add one unless the user explicitly asks for it" in prompt
     assert "- Keep helpers honest." in prompt
+    assert captured["effort"] == "medium"
     assert captured["content_path"] == str(taste_path)
     assert captured["settle_path"] == str(taste_path.with_name("taste.md.done"))
 
@@ -146,7 +145,7 @@ def test_refine_prompt_allows_open_ended_improvement_and_explicit_write_handoff(
 def test_taste_subparser_accepts_refine_flags() -> None:
     parser = build_parser()
     args = parser.parse_args(
-        ["taste", "--refine", "--with", "codex", "--model", "gpt-x", "--effort", "xhigh"],
+        ["taste", "--refine", "--with", "codex", "--model", "gpt-x"],
     )
 
     assert args.refine is True
@@ -154,7 +153,6 @@ def test_taste_subparser_accepts_refine_flags() -> None:
     assert args.upgrade is False
     assert args.agent == "codex"
     assert args.model == "gpt-x"
-    assert args.effort == "xhigh"
 
 
 @pytest.mark.parametrize("other_mode", ["--interview", "--upgrade"])

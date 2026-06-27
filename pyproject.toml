@@ -1,6 +1,6 @@
 [project]
 name = "continuous-refactoring"
-version = "1.0.0"
+version = "1.0.1"
 description = "Continuous refactoring loop for AI coding agents"
 readme = "README.md"
 requires-python = ">=3.10"

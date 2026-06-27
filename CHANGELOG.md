@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.0.1](https://github.com/bigH/continuous-refactoring/compare/v1.0.0...v1.0.1) (2026-06-27)
+
+
+### Bug Fixes
+
+* **deps:** Update Locked Dependencies ([#8](https://github.com/bigH/continuous-refactoring/issues/8)) ([4fd67b7](https://github.com/bigH/continuous-refactoring/commit/4fd67b7d093e9d9d4c96b16f573104ef6e7eb824))
+
 ## [1.0.0](https://github.com/bigH/continuous-refactoring/compare/v0.3.0...v1.0.0) (2026-05-25)
 
 
